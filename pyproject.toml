@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "callm"
+version = "0.1.0"
+description = ""
+authors = ["Erik Ernst <erik_ernst@hotmail.com.ar>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pre-commit = "^4.3.0"
+lightning = {extras = ["pytorch-extra"], version = "^2.5.5"}
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
