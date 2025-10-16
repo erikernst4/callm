@@ -1,17 +1,16 @@
-[tool.poetry]
+[project]
 name = "callm"
 version = "0.1.0"
 description = ""
-authors = ["Erik Ernst <erik_ernst@hotmail.com.ar>"]
+authors = [{ name = "Erik Ernst", email = "erik_ernst@hotmail.com.ar" }]
+requires-python = "~=3.12"
 readme = "README.md"
-
-[tool.poetry.dependencies]
-python = "^3.12"
-pre-commit = "^4.3.0"
-lightning = {extras = ["pytorch-extra"], version = "^2.5.5"}
-jinja2 = "^3.1.0"
-
+dependencies = [
+    "pre-commit>=4.3.0,<5",
+    "lightning[pytorch-extra]>=2.5.5,<3",
+    "jinja2>=3.1.0,<4",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
