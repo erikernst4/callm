@@ -33,7 +33,7 @@ repos:
   - repo: local
     hooks:
       - id: pytest
-        name: pytest (quick)
-        entry: poetry run pytest --maxfail=1 --disable-warnings -q
+        name: pytest
+        entry: uv run pytest --maxfail=1 --disable-warnings -q
         language: system
         types: [python]

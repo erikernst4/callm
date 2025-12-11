@@ -1,6 +1,6 @@
 from jinja2 import Template
 
-LABEL_PROB_PROMPT = Template("""Provide your best guess for the following question. Give ONLY the guess, no other words or explanation.    
+LABEL_PROB_PROMPT = Template("""Provide your best guess for the following question. Give ONLY the guess, no other words or explanation.
 
 For example:
 
