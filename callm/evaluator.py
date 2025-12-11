@@ -9,11 +9,12 @@ import torch
 from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM, AutoTokenizer
 from jinja2 import Template
 from callm.config import CACHE_PATH
+from callm.utils import initialize_model
 import re
 
 
 # Semantic equivalence prompt from the paper
-SEMANTIC_EQUIVALENCE_PROMPT = Template("""Are the following two answers to my question Q semantically equivalent?
+SEMANTIC_EQUIVALENCE_PROMPT_121 = Template("""Are the following two answers to my question Q semantically equivalent?
 
 Q: {{ question }}
 A1: {{ gold_answer }}
@@ -21,6 +22,13 @@ A2: {{ pred_answer }}
 
 Please answer with a single word, either "Yes." or "No.", and explain your reasoning.""")
 
+SEMANTIC_EQUIVALENCE_PROMPT_12MULTI = Template("""Is the following answer to my question Q semantically equivalent to any of the following answers?
+
+Question: {{ question }}
+Answer: {{ pred_answer }}
+Answers: {{ gold_answers }}
+
+Please answer with a single word, either "Yes." or "No.", and explain your reasoning.""")
 
 class CorrectnessEvaluator:
     """
@@ -41,36 +49,7 @@ class CorrectnessEvaluator:
         self.model_name = model_name
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Detect model type and load appropriately
-        if model_name.startswith('google/flan-t5') or model_name.startswith('t5-'):
-            # Seq2Seq model
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name, 
-                cache_dir=CACHE_PATH
-            )
-            self.is_seq2seq = True
-        elif model_name.startswith('Qwen/') or model_name.startswith('meta-llama/'):
-            # Causal model  
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                cache_dir=CACHE_PATH,
-                trust_remote_code=True if model_name.startswith('Qwen/') else False
-            )
-            self.is_seq2seq = False
-        else:
-            # Try seq2seq first, fall back to causal
-            try:
-                self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                    model_name,
-                    cache_dir=CACHE_PATH
-                )
-                self.is_seq2seq = True
-            except ValueError:
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    cache_dir=CACHE_PATH
-                )
-                self.is_seq2seq = False
+        self.model, self.is_seq2seq = initialize_model(model_name)
         
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
@@ -101,33 +80,14 @@ class CorrectnessEvaluator:
         Returns:
             True if the predicted answer is semantically equivalent to any gold answer
         """
-        # Try each gold answer
-        for gold_answer in gold_answers:
-            if self._check_equivalence(question, pred_answer, gold_answer):
-                return True
-        return False
-    
-    def _check_equivalence(
-        self, 
-        question: str, 
-        pred_answer: str, 
-        gold_answer: str
-    ) -> bool:
-        """
-        Check if two answers are semantically equivalent.
+        # Exact match
+        if pred_answer in gold_answers:
+            return True
         
-        Args:
-            question: The original question
-            pred_answer: The predicted answer
-            gold_answer: One ground truth answer
-            
-        Returns:
-            True if semantically equivalent
-        """
-        # Generate prompt
-        prompt = SEMANTIC_EQUIVALENCE_PROMPT.render(
+        # Semantic equivalence
+        prompt = SEMANTIC_EQUIVALENCE_PROMPT_12MULTI.render(
             question=question,
-            gold_answer=gold_answer,
+            gold_answers=gold_answers,
             pred_answer=pred_answer
         )
         

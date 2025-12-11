@@ -1,5 +1,5 @@
-from transformers import AutoTokenizer
-
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
+from callm.config import CACHE_PATH
 def get_tokenizer_for_model(model_name: str, HF_TOKEN: str = None):
     from transformers import AutoTokenizer
 
@@ -23,3 +23,39 @@ def get_tokenizer_for_model(model_name: str, HF_TOKEN: str = None):
         tokenizer.pad_token = tokenizer.eos_token
 
     return tokenizer
+
+def initialize_model(model_name: str):
+    model = None
+    is_seq2seq = None
+    
+    if model_name.startswith('google/flan-t5') or model_name.startswith('t5-'):
+        # Seq2Seq model
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name, 
+            cache_dir=CACHE_PATH
+        )
+        is_seq2seq = True
+    elif model_name.startswith('Qwen/') or model_name.startswith('meta-llama/'):
+        # Causal model  
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            cache_dir=CACHE_PATH,
+            trust_remote_code=True if model_name.startswith('Qwen/') else False
+        )
+        is_seq2seq = False
+    else:
+        # Try seq2seq first, fall back to causal
+        try:
+            model = AutoModelForSeq2SeqLM.from_pretrained(
+                model_name,
+                cache_dir=CACHE_PATH
+            )
+            is_seq2seq = True
+        except ValueError:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                cache_dir=CACHE_PATH
+            )
+            is_seq2seq = False
+    
+    return model, is_seq2seq
