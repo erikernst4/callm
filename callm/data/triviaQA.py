@@ -2,8 +2,7 @@ from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset
 from callm.utils import get_tokenizer_for_model
-from callm.prompts import VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT, generate_prompt
-from jinja2 import Template
+from callm.prompts import VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT, Prompt
 
 
 class TriviaQADataModule(LightningDataModule):
@@ -11,7 +10,7 @@ class TriviaQADataModule(LightningDataModule):
         self,
         batch_size: int = 32,
         model_name: str = "flan-t5-small",
-        prompt: Template = VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT,
+        prompt: Prompt = VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT,
         max_samples: int = None,
         seed: int = 42,
     ):
@@ -45,10 +44,7 @@ class TriviaQADataModule(LightningDataModule):
         for value in dataset["answer"]:
             answers.append(value["aliases"] + value["normalized_aliases"])
 
-        input_texts = [
-            generate_prompt(prompt=self.prompt, question=question)
-            for question in questions
-        ]
+        input_texts = [self.prompt(question=question) for question in questions]
 
         # Calculate max lengths for padding/truncation
         max_token_seq_length = 0

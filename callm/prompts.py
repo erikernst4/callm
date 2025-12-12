@@ -1,6 +1,17 @@
 from jinja2 import Template
 
-LABEL_PROB_PROMPT = Template("""Provide your best guess for the following question. Give ONLY the guess, no other words or explanation.
+
+class Prompt:
+    """A prompt for a language model. This is a wrapper around a Jinja2 template in order to make it serializable for jsonargparse."""
+
+    def __init__(self, template: str):
+        self.template = Template(template)
+
+    def __call__(self, **kwargs):
+        return self.template.render(**kwargs)
+
+
+LABEL_PROB_PROMPT = Prompt("""Provide your best guess for the following question. Give ONLY the guess, no other words or explanation.
 
 For example:
 
@@ -8,14 +19,10 @@ Guess: <most likely guess, as short as possible; not a complete sentence, just t
 
 The question is: {{ question }}""")
 
-VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT = Template("""Provide your best guess and the probability that it is correct (0.0 to 1.0) for the following question. Give ONLY the guess and probability, no other words or explanation. For example:
+VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT = Prompt("""Provide your best guess and the probability that it is correct (0.0 to 1.0) for the following question. Give ONLY the guess and probability, no other words or explanation. For example:
 
 Guess: <most likely guess, as short as possible; not a complete sentence, just the guess!>
 
 Probability: <the probability between 0.0 and 1.0 that your guess is correct, without any extra commentary whatsoever; just the probability!>
 
 The question is: {{ question }}""")
-
-
-def generate_prompt(prompt: Template, **kwargs):
-    return prompt.render(**kwargs)
