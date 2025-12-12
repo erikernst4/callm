@@ -19,14 +19,14 @@ def main():
     print("\n1. Loading TriviaQA data (10 samples)...")
     datamodule = TriviaQADataModule(
         batch_size=2,
-        model_name="flan-t5-small",
+        model_name="google/flan-t5-small",
         max_samples=10,  # Only test on 10 samples
     )
 
     # Initialize model
     print("2. Initializing LLM model (flan-t5-small)...")
     model = LLM(
-        model_name="flan-t5-small",
+        model_name="google/flan-t5-small",
         evaluator_model_name="google/flan-t5-small",  # Use small model for faster testing
         train=False,
     )

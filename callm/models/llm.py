@@ -1,7 +1,5 @@
 from lightning.pytorch import LightningModule
-from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 import torch
-from callm.config import CACHE_PATH, HF_TOKEN
 from callm.extractors import VerbalizedConfidenceExtractor
 from callm.evaluator import CorrectnessEvaluator
 from callm.metrics import (
@@ -10,62 +8,27 @@ from callm.metrics import (
     cross_entropy,
     auc_score,
 )
+from callm.utils import initialize_model, get_tokenizer_for_model
 
 
 class LLM(LightningModule):
     def __init__(
         self,
-        model_name: str = "flan-t5-small",
+        model_name: str = "google/flan-t5-small",
         evaluator_model_name: str = "google/flan-t5-base",
         hf_token: str = None,
         train: bool = False,
     ):
         super().__init__()
 
-        # Use provided token or fall back to config
-        self.hf_token = hf_token or HF_TOKEN
         self.model_name = model_name
 
         # Load main model
-        if model_name in [
-            "flan-t5-small",
-            "flan-t5-base",
-            "flan-t5-large",
-            "flan-t5-xl",
-            "flan-t5-xxl",
-        ]:
-            model_load_name = f"google/{model_name}"
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                model_load_name, cache_dir=CACHE_PATH
-            )
-            self.tokenizer = AutoTokenizer.from_pretrained(model_load_name)
-            self.is_seq2seq = True
-        elif model_name in ["Llama-2-7b-chat-hf"]:
-            model_load_name = f"meta-llama/{model_name}"
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_load_name, cache_dir=CACHE_PATH, use_auth_token=self.hf_token
-            )
+        self.model, self.is_seq2seq = initialize_model(model_name, hf_token)
+        self.tokenizer = get_tokenizer_for_model(model_name)
+
+        if self.model.config.pad_token_id is None:
             self.model.config.pad_token_id = self.model.config.eos_token_id
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_load_name, padding_side="left", use_auth_token=self.hf_token
-            )
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.is_seq2seq = False
-        elif model_name.startswith("Qwen/"):
-            # Qwen models (e.g., Qwen/Qwen3-0.6B)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_name, cache_dir=CACHE_PATH, trust_remote_code=True
-            )
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_name, padding_side="left", trust_remote_code=True
-            )
-            if self.tokenizer.pad_token is None:
-                self.tokenizer.pad_token = self.tokenizer.eos_token
-            if self.model.config.pad_token_id is None:
-                self.model.config.pad_token_id = self.model.config.eos_token_id
-            self.is_seq2seq = False
-        else:
-            raise NotImplementedError(f"Model {model_name} not supported")
 
         if not train:
             self.model.eval()

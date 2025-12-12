@@ -5,7 +5,7 @@ from callm.data.triviaQA import TriviaQADataModule
 
 # Test data module initialization and setup
 dm = TriviaQADataModule(
-    batch_size=2, model_name="flan-t5-small", max_samples=5, seed=42
+    batch_size=2, model_name="google/flan-t5-small", max_samples=5, seed=42
 )
 
 print("Preparing data...")

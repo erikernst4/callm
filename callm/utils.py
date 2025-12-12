@@ -1,26 +1,22 @@
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
-from callm.config import CACHE_PATH
+from callm.config import CACHE_PATH, HF_TOKEN
 
 
-def get_tokenizer_for_model(model_name: str, HF_TOKEN: str = None):
-    if model_name in [
-        "flan-t5-small",
-        "flan-t5-base",
-        "flan-t5-large",
-        "flan-t5-xl",
-        "flan-t5-xxl",
-    ]:
-        model_load_name = f"google/{model_name}"
-        tokenizer = AutoTokenizer.from_pretrained(model_load_name)
-    elif model_name in ["Llama-2-7b-chat-hf"]:
-        model_load_name = f"meta-llama/{model_name}"
+def get_tokenizer_for_model(model_name: str, hf_token: str = None):
+    if hf_token is None:
+        hf_token = HF_TOKEN
+    if model_name.startswith("google/flan-t5"):
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+    elif model_name.startswith("meta-llama/"):
         tokenizer = AutoTokenizer.from_pretrained(
-            model_load_name, padding_side="left", use_auth_token=HF_TOKEN
+            model_name, padding_side="left", use_auth_token=hf_token
         )
     elif model_name.startswith("Qwen/"):
-        # Qwen models (e.g., Qwen/Qwen3-0.6B)
         tokenizer = AutoTokenizer.from_pretrained(
-            model_name, padding_side="left", trust_remote_code=True
+            model_name,
+            padding_side="left",
+            trust_remote_code=True,
+            use_auth_token=hf_token,
         )
     else:
         raise NotImplementedError(
@@ -33,33 +29,25 @@ def get_tokenizer_for_model(model_name: str, HF_TOKEN: str = None):
     return tokenizer
 
 
-def initialize_model(model_name: str):
+def initialize_model(model_name: str, hf_token: str = None):
     model = None
     is_seq2seq = None
-
-    if model_name.startswith("google/flan-t5") or model_name.startswith("t5-"):
-        # Seq2Seq model
+    if hf_token is None:
+        hf_token = HF_TOKEN
+    if model_name.startswith("google/flan-t5"):
         model = AutoModelForSeq2SeqLM.from_pretrained(model_name, cache_dir=CACHE_PATH)
         is_seq2seq = True
     elif model_name.startswith("Qwen/") or model_name.startswith("meta-llama/"):
-        # Causal model
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             cache_dir=CACHE_PATH,
             trust_remote_code=True if model_name.startswith("Qwen/") else False,
+            use_auth_token=hf_token,
         )
         is_seq2seq = False
     else:
-        # Try seq2seq first, fall back to causal
-        try:
-            model = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name, cache_dir=CACHE_PATH
-            )
-            is_seq2seq = True
-        except ValueError:
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name, cache_dir=CACHE_PATH
-            )
-            is_seq2seq = False
+        raise NotImplementedError(
+            f"Model {model_name} not supported in initialize_model"
+        )
 
     return model, is_seq2seq

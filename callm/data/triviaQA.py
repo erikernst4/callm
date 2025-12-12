@@ -9,7 +9,7 @@ class TriviaQADataModule(LightningDataModule):
     def __init__(
         self,
         batch_size: int = 32,
-        model_name: str = "flan-t5-small",
+        model_name: str = "google/flan-t5-small",
         prompt: Prompt = VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT,
         max_samples: int = None,
         seed: int = 42,
