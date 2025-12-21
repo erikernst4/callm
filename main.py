@@ -4,7 +4,14 @@ from callm.data.triviaQA import TriviaQADataModule
 
 
 def cli_main():
-    cli = LightningCLI(LLM, TriviaQADataModule)
+    cli = LightningCLI(
+        LLM,
+        TriviaQADataModule,
+        parser_kwargs={
+            "validate": {"default_config_files": ["configs/config_base.yaml"]},
+            "parser_mode": "omegaconf",
+        },
+    )
 
     if hasattr(cli.model, "tokenizer") and hasattr(cli.model, "model_name"):
         if cli.datamodule.model_name != cli.model.model_name:
