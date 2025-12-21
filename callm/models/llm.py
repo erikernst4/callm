@@ -1,5 +1,8 @@
 from lightning.pytorch import LightningModule
 import torch
+import numpy as np
+import os
+import csv
 from callm.extractors import VerbalizedConfidenceExtractor
 from callm.evaluator import CorrectnessEvaluator
 from callm.metrics import (
@@ -92,10 +95,10 @@ class LLM(LightningModule):
         questions = batch["question"]
         gold_answers = batch["label"]
 
-        # Generate outputs
         with torch.no_grad():
             output_ids = self.forward(input_ids, attention_mask)
 
+        outputs = []
         # Decode outputs
         # For causal models, we need to skip the input tokens (only decode the generated part)
         if self.is_seq2seq:
@@ -107,7 +110,6 @@ class LLM(LightningModule):
             # model.generate() returns [input_tokens..., generated_tokens...]
             # So we need to skip the original input_ids length
             input_length = input_ids.shape[1]
-            outputs = []
             for i in range(len(output_ids)):
                 # Get the generated tokens (everything after the original input length)
                 generated_tokens = output_ids[i][input_length:]
@@ -121,12 +123,10 @@ class LLM(LightningModule):
         for i, (output_text, question, gold_answer_list) in enumerate(
             zip(outputs, questions, gold_answers)
         ):
-            # Extract answer and confidence
             pred_answer, confidence = self.extractor.extract(output_text)
 
-            # Evaluate correctness
             is_correct = self.evaluator.evaluate(
-                question, pred_answer, gold_answer_list
+                question, pred_answer, gold_answer_list[0]
             )
 
             # Store for metrics calculation
@@ -134,7 +134,7 @@ class LLM(LightningModule):
                 {
                     "question": question,
                     "pred_answer": pred_answer,
-                    "gold_answers": gold_answer_list,
+                    "gold_answers": gold_answer_list[0],
                     "confidence": confidence,
                     "correct": is_correct,
                     "raw_output": output_text,
@@ -150,9 +150,6 @@ class LLM(LightningModule):
         if len(self.validation_outputs) == 0:
             return
 
-        # Extract confidences and correctness
-        import numpy as np
-
         all_confidences = np.array(
             [out["confidence"] for out in self.validation_outputs]
         )
@@ -162,17 +159,12 @@ class LLM(LightningModule):
         valid_indices = ~np.isnan(all_confidences)
         n_invalid = len(all_confidences) - np.sum(valid_indices)
 
-        # Log all outputs and failures to CSV files
-        import csv
-        import os
-
         # Helper to make raw output readable
         def short_output(txt: str, limit: int = 200) -> str:
             """Keep only first line, truncate if too long."""
             if not txt:
                 return ""
-            first_line = txt.splitlines()[0] if txt else ""
-            return first_line[:limit] + ("..." if len(first_line) > limit else "")
+            return txt[:limit] + ("..." if len(txt) > limit else "")
 
         # Use log_dir if available, else current directory
         log_dir = self.trainer.log_dir or os.getcwd()
@@ -210,8 +202,6 @@ class LLM(LightningModule):
                             short_output(out["raw_output"]),
                         ]
                     )
-
-            print(f"All outputs logged to {all_outputs_file}")
         except Exception as e:
             print(f"Failed to log all outputs: {e}")
 
@@ -276,19 +266,6 @@ class LLM(LightningModule):
         self.log("val_cross_entropy", ce, prog_bar=True)
         self.log("val_auc", auc, prog_bar=True)
         self.log("val_accuracy", accuracy, prog_bar=True)
-
-        # Log some example predictions for debugging
-        print("\n" + "=" * 80)
-        print("Sample Predictions:")
-        print("=" * 80)
-        for i, out in enumerate(self.validation_outputs[:5]):  # Show first 5
-            print(f"\nExample {i+1}:")
-            print(f"  Question: {out['question']}")
-            print(f"  Gold: {out['gold_answers'][0] if out['gold_answers'] else 'N/A'}")
-            print(f"  Predicted: {out['pred_answer']}")
-            print(f"  Confidence: {out['confidence']:.3f}")
-            print(f"  Correct: {out['correct']}")
-        print("=" * 80 + "\n")
 
         # Clear outputs for next epoch
         self.validation_outputs = []
