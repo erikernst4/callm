@@ -16,6 +16,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "numpy>=1.24.0",
     "pytest>=7.0.0",
+    "ipython>=9.8.0",
 ]
 
 [build-system]
