@@ -17,21 +17,20 @@ class TriviaQADataModule(LightningDataModule):
         super().__init__()
         self.batch_size = batch_size
         self.model_name = model_name
-        # Don't initialize tokenizer here - will be set in setup() or from model
         self.tokenizer = None
         self.prompt = prompt
         self.max_samples = max_samples
         self.seed = seed
 
     def prepare_data(self):
-        self.dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
+        load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
 
     def setup(self, stage: str):
         # Initialize tokenizer if not already set (e.g., from model)
         if self.tokenizer is None:
             self.tokenizer = get_tokenizer_for_model(self.model_name)
 
-        dataset = self.dataset["validation"]
+        dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")["validation"]
 
         # Limit samples if requested
         if self.max_samples is not None:
