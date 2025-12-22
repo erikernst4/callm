@@ -9,12 +9,9 @@ from callm.models.llm import LLM
 class TestLLMInitialization:
     """Tests for LLM initialization."""
 
-    @patch("callm.models.llm.CorrectnessEvaluator")
     @patch("callm.models.llm.get_tokenizer_for_model")
     @patch("callm.models.llm.initialize_model")
-    def test_flan_t5_initialization(
-        self, mock_init_model, mock_get_tokenizer, mock_evaluator
-    ):
+    def test_flan_t5_initialization(self, mock_init_model, mock_get_tokenizer):
         """Test initialization with flan-t5 model."""
         # Setup mock model with required attributes
         mock_model_instance = Mock()
@@ -33,12 +30,9 @@ class TestLLMInitialization:
         assert llm.is_seq2seq is True
         assert mock_init_model.called
 
-    @patch("callm.models.llm.CorrectnessEvaluator")
     @patch("callm.models.llm.get_tokenizer_for_model")
     @patch("callm.models.llm.initialize_model")
-    def test_llama_initialization(
-        self, mock_init_model, mock_get_tokenizer, mock_evaluator
-    ):
+    def test_llama_initialization(self, mock_init_model, mock_get_tokenizer):
         """Test initialization with Llama model."""
         # Setup mock model
         mock_model_instance = Mock()
@@ -60,12 +54,9 @@ class TestLLMInitialization:
         assert llm.model_name == "meta-llama/Llama-2-7b-chat-hf"
         assert llm.is_seq2seq is False
 
-    @patch("callm.models.llm.CorrectnessEvaluator")
     @patch("callm.models.llm.get_tokenizer_for_model")
     @patch("callm.models.llm.initialize_model")
-    def test_unsupported_model(
-        self, mock_init_model, mock_get_tokenizer, mock_evaluator
-    ):
+    def test_unsupported_model(self, mock_init_model, mock_get_tokenizer):
         """Test that unsupported model raises error."""
         # Make initialize_model raise NotImplementedError for unsupported models
         mock_init_model.side_effect = NotImplementedError(
@@ -79,12 +70,9 @@ class TestLLMInitialization:
 class TestLLMForward:
     """Tests for forward pass."""
 
-    @patch("callm.models.llm.CorrectnessEvaluator")
     @patch("callm.models.llm.get_tokenizer_for_model")
     @patch("callm.models.llm.initialize_model")
-    def test_forward_generates(
-        self, mock_init_model, mock_get_tokenizer, mock_evaluator
-    ):
+    def test_forward_generates(self, mock_init_model, mock_get_tokenizer):
         """Test that forward calls generate."""
         # Setup mock model
         mock_model_instance = Mock()
@@ -113,12 +101,9 @@ class TestLLMForward:
 class TestLLMValidation:
     """Tests for validation step."""
 
-    @patch("callm.models.llm.CorrectnessEvaluator")
     @patch("callm.models.llm.get_tokenizer_for_model")
     @patch("callm.models.llm.initialize_model")
-    def test_validation_step_structure(
-        self, mock_init_model, mock_get_tokenizer, mock_evaluator
-    ):
+    def test_validation_step_structure(self, mock_init_model, mock_get_tokenizer):
         """Test validation step processes batch correctly."""
         # Setup mock model
         mock_model_instance = Mock()
@@ -135,10 +120,6 @@ class TestLLMValidation:
         ]
         mock_get_tokenizer.return_value = mock_tokenizer_instance
 
-        mock_evaluator_instance = Mock()
-        mock_evaluator.return_value = mock_evaluator_instance
-        mock_evaluator_instance.evaluate.return_value = True
-
         # Create LLM
         llm = LLM(model_name="google/flan-t5-small", train=False)
 
@@ -153,7 +134,7 @@ class TestLLMValidation:
         # Run validation step
         llm.validation_step(batch, 0)
 
-        # Verify outputs stored (now stores raw output_ids, decoding happens in epoch_end)
+        # Verify outputs stored
         assert len(llm.validation_outputs) == 1
         assert llm.validation_outputs[0]["question"] == "What is the capital of France?"
         assert "output_ids" in llm.validation_outputs[0]
@@ -164,12 +145,9 @@ class TestLLMValidation:
 class TestConfigureOptimizers:
     """Test optimizer configuration."""
 
-    @patch("callm.models.llm.CorrectnessEvaluator")
     @patch("callm.models.llm.get_tokenizer_for_model")
     @patch("callm.models.llm.initialize_model")
-    def test_returns_none_for_inference(
-        self, mock_init_model, mock_get_tokenizer, mock_evaluator
-    ):
+    def test_returns_none_for_inference(self, mock_init_model, mock_get_tokenizer):
         """Test that configure_optimizers returns None for inference mode."""
         # Setup mock model
         mock_model_instance = Mock()

@@ -1,5 +1,7 @@
 # lightning.pytorch==2.5.5
 seed_everything: true
+evaluator_model_name: Qwen/Qwen3-4B-Instruct-2507
+evaluator_batch_size: 8
 trainer:
   accelerator: "gpu"
   strategy: auto
@@ -43,7 +45,6 @@ trainer:
   model_registry: null
 model:
   model_name: Qwen/Qwen3-4B-Instruct-2507
-  evaluator_model_name: Qwen/Qwen3-4B-Instruct-2507
   hf_token: null
   train: false
 data:

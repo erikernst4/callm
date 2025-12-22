@@ -1,16 +1,8 @@
 from lightning.pytorch import LightningModule
 import torch
-import numpy as np
 import os
 import csv
 from callm.extractors import VerbalizedConfidenceExtractor
-from callm.evaluator import CorrectnessEvaluator
-from callm.metrics import (
-    expected_calibration_error,
-    brier_score,
-    cross_entropy,
-    auc_score,
-)
 from callm.utils import initialize_model, get_tokenizer_for_model
 
 
@@ -18,7 +10,6 @@ class LLM(LightningModule):
     def __init__(
         self,
         model_name: str = "google/flan-t5-small",
-        evaluator_model_name: str = "google/flan-t5-base",
         hf_token: str = None,
         train: bool = False,
     ):
@@ -38,11 +29,8 @@ class LLM(LightningModule):
             for param in self.model.parameters():
                 param.requires_grad = False
 
-        # Initialize extractor and evaluator
+        # Initialize extractor
         self.extractor = VerbalizedConfidenceExtractor()
-        self.evaluator = CorrectnessEvaluator(
-            model_name=evaluator_model_name,
-        )
 
         # Storage for validation predictions
         self.validation_outputs = []
@@ -87,7 +75,7 @@ class LLM(LightningModule):
     def validation_step(self, batch, batch_idx):
         """
         Validation step: generate output IDs only.
-        Decoding and evaluation are deferred to on_validation_epoch_end for efficiency.
+        Decoding and extraction are deferred to on_validation_epoch_end.
         """
         # Batch has pre-stacked tensors and questions from collate_fn
         input_ids = batch["input_ids"]
@@ -116,12 +104,13 @@ class LLM(LightningModule):
 
     def on_validation_epoch_end(self):
         """
-        Decode outputs, evaluate correctness, and calculate calibration metrics.
+        Decode outputs, extract answers/confidence, and save to CSV.
+        Evaluation is handled separately by EvaluatorModule.
         """
         if len(self.validation_outputs) == 0:
             return
 
-        # Step 1: Decode all output IDs and extract answers/confidence
+        # Decode all output IDs and extract answers/confidence
         for out in self.validation_outputs:
             if self.is_seq2seq:
                 raw_output = self.tokenizer.decode(
@@ -140,22 +129,10 @@ class LLM(LightningModule):
             out["pred_answer"] = pred_answer
             out["confidence"] = confidence
 
-        # Step 2: Evaluate correctness for all outputs
-        for out in self.validation_outputs:
-            out["correct"] = self.evaluator.evaluate(
-                out["question"], out["pred_answer"], out["gold_answers"][0]
-            )
+        # Save outputs to CSV for evaluator
+        log_dir = self.trainer.log_dir or os.getcwd()
+        outputs_file = os.path.join(log_dir, "llm_outputs.csv")
 
-        all_confidences = np.array(
-            [out["confidence"] for out in self.validation_outputs]
-        )
-        all_correctness = np.array([out["correct"] for out in self.validation_outputs])
-
-        # Filter out invalid confidences (NaN)
-        valid_indices = ~np.isnan(all_confidences)
-        n_invalid = len(all_confidences) - np.sum(valid_indices)
-
-        # Helper to make raw output readable
         def short_output(txt: str, limit: int = 200) -> str:
             """Keep only first line, truncate if too long."""
             if not txt:
@@ -163,106 +140,45 @@ class LLM(LightningModule):
             truncated_text = txt[:limit] + ("..." if len(txt) > limit else "")
             return truncated_text.replace("\n", "\\n")
 
-        # Use log_dir if available, else current directory
-        log_dir = self.trainer.log_dir or os.getcwd()
-        all_outputs_file = os.path.join(log_dir, "all_outputs.csv")
-        failure_file = os.path.join(log_dir, "failures.csv")
-
-        # Write all outputs to CSV
         try:
-            with open(all_outputs_file, "w", newline="", encoding="utf-8") as f:
+            with open(outputs_file, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow(
                     [
-                        "Question",
-                        "Gold Answer",
-                        "Predicted Answer",
-                        "Confidence",
-                        "Correct",
-                        "Raw Output",
+                        "question",
+                        "gold_answers",
+                        "pred_answer",
+                        "confidence",
+                        "raw_output",
                     ]
                 )
 
                 for out in self.validation_outputs:
-                    confidence_str = (
+                    # Format gold_answers as a string representation
+                    gold_str = (
+                        "|".join(out["gold_answers"]) if out["gold_answers"] else ""
+                    )
+                    conf_str = (
                         f"{out['confidence']:.6f}"
-                        if not np.isnan(out["confidence"])
+                        if out["confidence"] is not None
+                        and not (
+                            isinstance(out["confidence"], float)
+                            and out["confidence"] != out["confidence"]
+                        )
                         else "nan"
                     )
                     writer.writerow(
                         [
-                            short_output(out["question"]),
-                            out["gold_answers"][0] if out["gold_answers"] else "N/A",
-                            short_output(out["pred_answer"]),
-                            confidence_str,
-                            "Yes" if out["correct"] else "No",
+                            out["question"],
+                            gold_str,
+                            out["pred_answer"],
+                            conf_str,
                             short_output(out["raw_output"]),
                         ]
                     )
+            print(f"\nLLM outputs saved to {outputs_file}")
         except Exception as e:
-            print(f"Failed to log all outputs: {e}")
-
-        # Write failures to separate CSV (only if there are failures)
-        if n_invalid > 0:
-            print(
-                f"\nWarning: {n_invalid} samples have invalid confidence (NaN). Ignoring them for metrics."
-            )
-
-            try:
-                with open(failure_file, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    writer.writerow(
-                        [
-                            "Question",
-                            "Gold Answer",
-                            "Predicted Answer",
-                            "Confidence",
-                            "Raw Output",
-                            "Reason",
-                        ]
-                    )
-
-                    # Find invalid indices
-                    invalid_indices = np.where(~valid_indices)[0]
-                    for idx in invalid_indices:
-                        out = self.validation_outputs[idx]
-                        writer.writerow(
-                            [
-                                out["question"],
-                                out["gold_answers"][0]
-                                if out["gold_answers"]
-                                else "N/A",
-                                short_output(
-                                    out["pred_answer"]
-                                ),  # Truncate predicted answer too
-                                out["confidence"],
-                                short_output(out["raw_output"]),
-                                "Extractor could not parse confidence",
-                            ]
-                        )
-
-                print(f"Invalid samples logged to {failure_file}")
-            except Exception as e:
-                print(f"Failed to log failures: {e}")
-
-        confidences = all_confidences[valid_indices]
-        correctness = all_correctness[valid_indices]
-
-        # Calculate metrics
-        ece = expected_calibration_error(confidences, correctness, n_bins=10)
-        bs = brier_score(confidences, correctness)
-        ce = cross_entropy(confidences, correctness)
-        auc = auc_score(confidences, correctness)
-
-        # Calculate accuracy
-        accuracy = float(np.mean(correctness)) if len(correctness) > 0 else 0.0
-
-        # Log metrics
-        self.log("val_ece", ece, prog_bar=True)
-        self.log("val_brier_score", bs, prog_bar=True)
-        self.log("val_cross_entropy", ce, prog_bar=True)
-        self.log("val_auc", auc, prog_bar=True)
-        self.log("val_accuracy", accuracy, prog_bar=True)
+            print(f"Failed to save LLM outputs: {e}")
 
         # Clear outputs for next epoch
         self.validation_outputs = []
