@@ -87,7 +87,8 @@ class LLM(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         """
-        Validation step: generate answer, extract confidence, evaluate correctness.
+        Validation step: generate output IDs only.
+        Decoding and evaluation are deferred to on_validation_epoch_end for efficiency.
         """
         # Batch has pre-stacked tensors and questions from collate_fn
         input_ids = batch["input_ids"]
@@ -98,46 +99,17 @@ class LLM(LightningModule):
         with torch.no_grad():
             output_ids = self.forward(input_ids, attention_mask)
 
-        outputs = []
-        # Decode outputs
-        # For causal models, we need to skip the input tokens (only decode the generated part)
-        if self.is_seq2seq:
-            # Seq2seq models: decode the full output
-            outputs = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-        else:
-            # Causal models: skip input tokens, only decode generated tokens
-            # For left-padded sequences, input_ids length is the same for all items in batch
-            # model.generate() returns [input_tokens..., generated_tokens...]
-            # So we need to skip the original input_ids length
-            input_length = input_ids.shape[1]
-            for i in range(len(output_ids)):
-                # Get the generated tokens (everything after the original input length)
-                generated_tokens = output_ids[i][input_length:]
-                # Decode only the generated part
-                output_text = self.tokenizer.decode(
-                    generated_tokens, skip_special_tokens=True
-                )
-                outputs.append(output_text)
+        # Store output IDs and metadata for later processing at epoch end
+        # Keep tensors on GPU to avoid per-batch CPU transfer overhead
+        input_length = input_ids.shape[1] if not self.is_seq2seq else 0
 
-        # Process each sample in the batch
-        for i, (output_text, question, gold_answer_list) in enumerate(
-            zip(outputs, questions, gold_answers)
-        ):
-            pred_answer, confidence = self.extractor.extract(output_text)
-
-            is_correct = self.evaluator.evaluate(
-                question, pred_answer, gold_answer_list[0]
-            )
-
-            # Store for metrics calculation
+        for i, (question, gold_answer_list) in enumerate(zip(questions, gold_answers)):
             self.validation_outputs.append(
                 {
+                    "output_ids": output_ids[i],
+                    "input_length": input_length,
                     "question": question,
-                    "pred_answer": pred_answer,
-                    "gold_answers": gold_answer_list[0],
-                    "confidence": confidence,
-                    "correct": is_correct,
-                    "raw_output": output_text,
+                    "gold_answers": gold_answer_list,
                 }
             )
 
@@ -145,10 +117,35 @@ class LLM(LightningModule):
 
     def on_validation_epoch_end(self):
         """
-        Calculate and log calibration metrics at the end of validation.
+        Decode outputs, evaluate correctness, and calculate calibration metrics.
         """
         if len(self.validation_outputs) == 0:
             return
+
+        # Step 1: Decode all output IDs and extract answers/confidence
+        for out in self.validation_outputs:
+            if self.is_seq2seq:
+                raw_output = self.tokenizer.decode(
+                    out["output_ids"], skip_special_tokens=True
+                )
+            else:
+                # For causal models, skip input tokens
+                generated_tokens = out["output_ids"][out["input_length"] :]
+                raw_output = self.tokenizer.decode(
+                    generated_tokens, skip_special_tokens=True
+                )
+            out["raw_output"] = raw_output
+
+            # Extract answer and confidence
+            pred_answer, confidence = self.extractor.extract(raw_output)
+            out["pred_answer"] = pred_answer
+            out["confidence"] = confidence
+
+        # Step 2: Evaluate correctness for all outputs
+        for out in self.validation_outputs:
+            out["correct"] = self.evaluator.evaluate(
+                out["question"], out["pred_answer"], out["gold_answers"][0]
+            )
 
         all_confidences = np.array(
             [out["confidence"] for out in self.validation_outputs]

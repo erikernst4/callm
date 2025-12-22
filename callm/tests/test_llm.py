@@ -153,12 +153,12 @@ class TestLLMValidation:
         # Run validation step
         llm.validation_step(batch, 0)
 
-        # Verify outputs stored
+        # Verify outputs stored (now stores raw output_ids, decoding happens in epoch_end)
         assert len(llm.validation_outputs) == 1
         assert llm.validation_outputs[0]["question"] == "What is the capital of France?"
-        assert "pred_answer" in llm.validation_outputs[0]
-        assert "confidence" in llm.validation_outputs[0]
-        assert "correct" in llm.validation_outputs[0]
+        assert "output_ids" in llm.validation_outputs[0]
+        assert "input_length" in llm.validation_outputs[0]
+        assert "gold_answers" in llm.validation_outputs[0]
 
 
 class TestConfigureOptimizers:
