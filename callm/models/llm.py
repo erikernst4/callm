@@ -42,7 +42,6 @@ class LLM(LightningModule):
         self.extractor = VerbalizedConfidenceExtractor()
         self.evaluator = CorrectnessEvaluator(
             model_name=evaluator_model_name,
-            device=self.device.type if hasattr(self.device, "type") else "cpu",
         )
 
         # Storage for validation predictions

@@ -38,18 +38,14 @@ class CorrectnessEvaluator:
     semantically equivalent to ground truth answers.
     """
 
-    def __init__(self, model_name: str = "google/flan-t5-base", device: str = None):
+    def __init__(self, model_name: str = "google/flan-t5-base"):
         """
         Initialize the evaluator.
 
         Args:
             model_name: HuggingFace model name for the evaluator
-            device: Device to run on (cuda/cpu). If None, auto-detect.
         """
         self.model_name = model_name
-        self.device = (
-            device if device else ("cuda" if torch.cuda.is_available() else "cpu")
-        )
 
         self.model, self.is_seq2seq = initialize_model(model_name)
 
@@ -62,7 +58,6 @@ class CorrectnessEvaluator:
         if not self.is_seq2seq and self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        self.model.to(self.device)
         self.model.eval()
 
     def evaluate(
@@ -91,7 +86,7 @@ class CorrectnessEvaluator:
         # Tokenize
         inputs = self.tokenizer(
             prompt, return_tensors="pt", max_length=512, truncation=True
-        ).to(self.device)
+        )
 
         # Generate response
         with torch.no_grad():
