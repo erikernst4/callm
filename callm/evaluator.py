@@ -7,9 +7,8 @@ predicted answer is semantically equivalent to the ground truth.
 
 from typing import List
 import torch
-from transformers import AutoTokenizer
 from jinja2 import Template
-from callm.utils import initialize_model
+from callm.utils import initialize_model, get_tokenizer_for_model
 
 
 # Semantic equivalence prompt from the paper
@@ -38,7 +37,11 @@ class CorrectnessEvaluator:
     semantically equivalent to ground truth answers.
     """
 
-    def __init__(self, model_name: str = "google/flan-t5-base"):
+    def __init__(
+        self,
+        model_name: str = "google/flan-t5-base",
+        hf_token: str = None,
+    ):
         """
         Initialize the evaluator.
 
@@ -47,18 +50,12 @@ class CorrectnessEvaluator:
         """
         self.model_name = model_name
 
-        self.model, self.is_seq2seq = initialize_model(model_name)
-
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
-            trust_remote_code=True if model_name.startswith("Qwen/") else False,
-        )
-
-        # Set padding token for causal models
-        if not self.is_seq2seq and self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.model, self.is_seq2seq = initialize_model(model_name, hf_token)
+        self.tokenizer = get_tokenizer_for_model(model_name)
 
         self.model.eval()
+        for param in self.model.parameters():
+            param.requires_grad = False
 
     def evaluate(
         self, question: str, pred_answer: str, gold_answers: List[str]
