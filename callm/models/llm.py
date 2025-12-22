@@ -160,7 +160,8 @@ class LLM(LightningModule):
             """Keep only first line, truncate if too long."""
             if not txt:
                 return ""
-            return txt[:limit] + ("..." if len(txt) > limit else "")
+            truncated_text = txt[:limit] + ("..." if len(txt) > limit else "")
+            return truncated_text.replace("\n", "\\n")
 
         # Use log_dir if available, else current directory
         log_dir = self.trainer.log_dir or os.getcwd()
@@ -190,7 +191,7 @@ class LLM(LightningModule):
                     )
                     writer.writerow(
                         [
-                            out["question"],
+                            short_output(out["question"]),
                             out["gold_answers"][0] if out["gold_answers"] else "N/A",
                             short_output(out["pred_answer"]),
                             confidence_str,
