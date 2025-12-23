@@ -13,6 +13,12 @@ class CalibrationCLI(LightningCLI):
     def add_arguments_to_parser(self, parser):
         """Add evaluator-specific arguments."""
         parser.add_argument(
+            "--evaluate_correctness",
+            type=bool,
+            default=False,
+            help="Whether to evaluate correctness after validation",
+        )
+        parser.add_argument(
             "--evaluator_model_name",
             default="google/flan-t5-base",
             help="Model to use for correctness evaluation",
@@ -26,6 +32,8 @@ class CalibrationCLI(LightningCLI):
 
     def after_validate(self):
         """Run correctness evaluation after LLM validation completes."""
+        if not self.config.get("evaluate_correctness", False):
+            return
         # Get path to LLM outputs
         log_dir = self.trainer.log_dir or os.getcwd()
         llm_outputs_path = os.path.join(log_dir, "llm_outputs.csv")
