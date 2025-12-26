@@ -67,7 +67,7 @@ class EvaluatorDataModule(LightningDataModule):
             questions, gold_answers_list, pred_answers
         ):
             # Check exact match first (short-circuit)
-            if pred_answer in gold_answers:
+            if pred_answer is not None and pred_answer in gold_answers:
                 exact_matches.append(True)
                 prompts.append("")  # Won't be used
             else:
