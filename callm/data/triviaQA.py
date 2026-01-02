@@ -13,6 +13,7 @@ class TriviaQADataModule(LightningDataModule):
         prompt: Prompt = VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT,
         max_samples: int = None,
         seed: int = 42,
+        num_workers: int = 0,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -21,6 +22,7 @@ class TriviaQADataModule(LightningDataModule):
         self.prompt = prompt
         self.max_samples = max_samples
         self.seed = seed
+        self.num_workers = num_workers
 
     def prepare_data(self):
         load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
@@ -71,28 +73,32 @@ class TriviaQADataModule(LightningDataModule):
     def train_dataloader(self):
         return None
 
+    @staticmethod
+    def collate_fn(batch):
+        """Collate function that prepares tensors for forward pass."""
+        import torch
+
+        # Stack input_ids and attention_mask into batch tensors
+        input_ids = torch.stack(
+            [item["data"]["input_ids"].squeeze(0) for item in batch]
+        )
+        attention_mask = torch.stack(
+            [item["data"]["attention_mask"].squeeze(0) for item in batch]
+        )
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "question": [item["question"] for item in batch],
+            "label": [item["label"] for item in batch],
+        }
+
     def val_dataloader(self):
-        def collate_fn(batch):
-            """Collate function that prepares tensors for forward pass."""
-            import torch
-
-            # Stack input_ids and attention_mask into batch tensors
-            input_ids = torch.stack(
-                [item["data"]["input_ids"].squeeze(0) for item in batch]
-            )
-            attention_mask = torch.stack(
-                [item["data"]["attention_mask"].squeeze(0) for item in batch]
-            )
-
-            return {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask,
-                "question": [item["question"] for item in batch],
-                "label": [item["label"] for item in batch],
-            }
-
         return DataLoader(
-            self.triviaQA_val, batch_size=self.batch_size, collate_fn=collate_fn
+            self.triviaQA_val,
+            batch_size=self.batch_size,
+            collate_fn=self.collate_fn,
+            num_workers=self.num_workers,
         )
 
     def test_dataloader(self):
