@@ -158,6 +158,7 @@ class CalibrationCLI(LightningCLI):
                 "val_dataloaders",
                 "evaluator_model_name",
                 "evaluator_batch_size",
+                "num_workers",
                 # llm_outputs_path is not manually added, so let it be added by signature
             },
         }
