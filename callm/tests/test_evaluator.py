@@ -14,6 +14,7 @@ class TestEvaluatorDataModule:
         """Test that setup reads CSV and processes data correctly."""
         # Mock tokenizer
         mock_tokenizer = Mock()
+        mock_tokenizer.model_max_length = 512  # Add this attribute
         mock_tokenizer.side_effect = lambda x, return_tensors=None, **kwargs: {
             "input_ids": torch.tensor([[1, 2, 3]]),
             "attention_mask": torch.tensor([[1, 1, 1]]),

@@ -54,6 +54,7 @@ data:
   prompt: callm.prompts.VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT
   max_samples: 100
   seed: 42
+  num_workers: 4
 optimizer: null
 lr_scheduler: null
 ckpt_path: null

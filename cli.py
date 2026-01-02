@@ -12,6 +12,7 @@ class CalibrationTrainer(Trainer):
         llm_outputs_path: str = None,
         evaluator_model_name: str = "google/flan-t5-base",
         evaluator_batch_size: int = 8,
+        num_workers: int = None,
         **kwargs,
     ):
         """Run correctness evaluation on LLM outputs."""
@@ -58,11 +59,16 @@ class CalibrationTrainer(Trainer):
             )
             return
 
+        # Use num_workers from parameter or default to 0
+        if num_workers is None:
+            num_workers = 0
+
         # Create evaluator components
         evaluator_dm = EvaluatorDataModule(
             llm_outputs_path=llm_outputs_path,
             model_name=evaluator_model_name,
             batch_size=evaluator_batch_size,
+            num_workers=num_workers,
         )
         evaluator_model = EvaluatorModule(model_name=evaluator_model_name)
 
@@ -104,6 +110,12 @@ class CalibrationCLI(LightningCLI):
             default=8,
             help="Batch size for evaluator",
         )
+        parser.add_argument(
+            "--num_workers",
+            type=int,
+            default=None,
+            help="Number of workers for DataLoader (defaults to value in data config)",
+        )
 
     def after_validate(self):
         """Run correctness evaluation after LLM validation completes."""
@@ -115,11 +127,19 @@ class CalibrationCLI(LightningCLI):
         log_dir = self.trainer.log_dir or os.getcwd()
         llm_outputs_path = os.path.join(log_dir, "llm_outputs.csv")
 
+        # Get num_workers from data config if available
+        num_workers = (
+            getattr(config.data, "num_workers", None)
+            if hasattr(config, "data")
+            else None
+        )
+
         # Run evaluation using the trainer method
         self.trainer.evaluation(
             llm_outputs_path=llm_outputs_path,
             evaluator_model_name=config.evaluator_model_name,
             evaluator_batch_size=config.evaluator_batch_size,
+            num_workers=num_workers,
         )
 
     @staticmethod

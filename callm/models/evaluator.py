@@ -59,7 +59,6 @@ class EvaluatorModule(LightningModule):
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "max_new_tokens": 100,
-            "temperature": 0.1,
             "do_sample": False,
         }
 

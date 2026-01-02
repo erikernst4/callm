@@ -33,16 +33,41 @@ class EvaluatorDataModule(LightningDataModule):
         llm_outputs_path: str,
         model_name: str = "google/flan-t5-base",
         batch_size: int = 8,
+        num_workers: int = 0,
     ):
         super().__init__()
         self.llm_outputs_path = llm_outputs_path
         self.model_name = model_name
         self.batch_size = batch_size
+        self.num_workers = num_workers
         self.tokenizer = None
+        self.max_length = None
 
     def setup(self, stage: str = None):
         if self.tokenizer is None:
             self.tokenizer = get_tokenizer_for_model(self.model_name)
+
+            # Determine max_length from model config
+            # Try common config attributes for max sequence length
+            model_max_length = getattr(self.tokenizer, "model_max_length", None)
+            if (
+                model_max_length and model_max_length < 1e9
+            ):  # Check it's not a huge default
+                self.max_length = model_max_length
+            else:
+                # Fallback: try to load model config to get max position embeddings
+                from transformers import AutoConfig
+
+                try:
+                    config = AutoConfig.from_pretrained(self.model_name)
+                    self.max_length = getattr(
+                        config,
+                        "max_position_embeddings",
+                        getattr(config, "n_positions", 512),
+                    )
+                except Exception:
+                    # Last resort fallback
+                    self.max_length = 512
 
         # Read LLM outputs from CSV
         questions = []
@@ -67,7 +92,7 @@ class EvaluatorDataModule(LightningDataModule):
             questions, gold_answers_list, pred_answers
         ):
             # Check exact match first (short-circuit)
-            if pred_answer is not None and pred_answer in gold_answers:
+            if pred_answer in gold_answers:
                 exact_matches.append(True)
                 prompts.append("")  # Won't be used
             else:
@@ -80,28 +105,30 @@ class EvaluatorDataModule(LightningDataModule):
                 prompts.append(prompt)
 
         # Tokenize non-exact-match prompts
-        # Find max length for padding
-        max_length = 0
-        tokenized_prompts = []
-        for i, prompt in enumerate(prompts):
-            if exact_matches[i]:
-                tokenized_prompts.append(None)
-            else:
+        # First pass: determine actual max length needed
+        actual_max_length = 0
+        for prompt, exact_match in zip(prompts, exact_matches):
+            if not exact_match:
                 tokens = self.tokenizer(prompt, return_tensors="pt")
-                tokenized_prompts.append(tokens)
-                if tokens["input_ids"].size(1) > max_length:
-                    max_length = tokens["input_ids"].size(1)
+                actual_max_length = max(actual_max_length, tokens["input_ids"].size(1))
 
-        # Re-tokenize with padding
+        # Use the minimum of model's max and actual max to avoid unnecessary padding
+        effective_max_length = (
+            min(self.max_length, actual_max_length)
+            if actual_max_length > 0
+            else self.max_length
+        )
+
+        # Second pass: tokenize with the effective max length
         data = []
-        for i, prompt in enumerate(prompts):
-            if exact_matches[i]:
+        for prompt, exact_match in zip(prompts, exact_matches):
+            if exact_match:
                 data.append(None)
             else:
                 tokens = self.tokenizer(
                     prompt,
                     return_tensors="pt",
-                    max_length=max_length,
+                    max_length=effective_max_length,
                     padding="max_length",
                     truncation=True,
                 )
@@ -162,5 +189,9 @@ class EvaluatorDataModule(LightningDataModule):
             }
 
         return DataLoader(
-            self.dataset, batch_size=self.batch_size, collate_fn=collate_fn
+            self.dataset,
+            batch_size=self.batch_size,
+            collate_fn=collate_fn,
+            num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
