@@ -4,6 +4,7 @@ import pytest
 import torch
 from unittest.mock import Mock, patch
 from callm.models.llm import LLM
+from callm.extractors import VerbalizedConfidenceExtractor
 
 
 class TestLLMInitialization:
@@ -24,7 +25,11 @@ class TestLLMInitialization:
         mock_tokenizer_instance = Mock()
         mock_get_tokenizer.return_value = mock_tokenizer_instance
 
-        llm = LLM(model_name="google/flan-t5-small", train=False)
+        llm = LLM(
+            model_name="google/flan-t5-small",
+            train=False,
+            extractor=VerbalizedConfidenceExtractor(),
+        )
 
         assert llm.model_name == "google/flan-t5-small"
         assert llm.is_seq2seq is True
@@ -49,6 +54,7 @@ class TestLLMInitialization:
             model_name="meta-llama/Llama-2-7b-chat-hf",
             hf_token="fake_token",
             train=False,
+            extractor=VerbalizedConfidenceExtractor(),
         )
 
         assert llm.model_name == "meta-llama/Llama-2-7b-chat-hf"
@@ -64,7 +70,10 @@ class TestLLMInitialization:
         )
 
         with pytest.raises(NotImplementedError):
-            LLM(model_name="unsupported-model")
+            LLM(
+                model_name="unsupported-model",
+                extractor=VerbalizedConfidenceExtractor(),
+            )
 
 
 class TestLLMForward:
@@ -86,7 +95,11 @@ class TestLLMForward:
         mock_tokenizer_instance = Mock()
         mock_get_tokenizer.return_value = mock_tokenizer_instance
 
-        llm = LLM(model_name="google/flan-t5-small", train=False)
+        llm = LLM(
+            model_name="google/flan-t5-small",
+            train=False,
+            extractor=VerbalizedConfidenceExtractor(),
+        )
 
         # Test
         input_ids = torch.tensor([[1, 2, 3]])
@@ -121,7 +134,11 @@ class TestLLMValidation:
         mock_get_tokenizer.return_value = mock_tokenizer_instance
 
         # Create LLM
-        llm = LLM(model_name="google/flan-t5-small", train=False)
+        llm = LLM(
+            model_name="google/flan-t5-small",
+            train=False,
+            extractor=VerbalizedConfidenceExtractor(),
+        )
 
         # Create batch (matches current datamodule structure)
         batch = {
@@ -159,5 +176,9 @@ class TestConfigureOptimizers:
 
         mock_get_tokenizer.return_value = Mock()
 
-        llm = LLM(model_name="google/flan-t5-small", train=False)
+        llm = LLM(
+            model_name="google/flan-t5-small",
+            train=False,
+            extractor=VerbalizedConfidenceExtractor(),
+        )
         assert llm.configure_optimizers() is None

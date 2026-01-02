@@ -2,16 +2,18 @@ from lightning.pytorch import LightningModule
 import torch
 import os
 import csv
-from callm.extractors import VerbalizedConfidenceExtractor
+from callm.extractors import BaseExtractor
 from callm.utils import initialize_model, get_tokenizer_for_model
 
 
 class LLM(LightningModule):
     def __init__(
         self,
+        extractor: BaseExtractor,
         model_name: str = "google/flan-t5-small",
         hf_token: str = None,
         train: bool = False,
+        return_logits: bool = False,
     ):
         super().__init__()
 
@@ -29,8 +31,8 @@ class LLM(LightningModule):
             for param in self.model.parameters():
                 param.requires_grad = False
 
-        # Initialize extractor
-        self.extractor = VerbalizedConfidenceExtractor()
+        self.extractor: BaseExtractor = extractor
+        self.return_logits = return_logits
 
         # Storage for validation predictions
         self.validation_outputs = []
@@ -51,6 +53,8 @@ class LLM(LightningModule):
             "attention_mask": attention_mask,
             "max_new_tokens": 100,
             "do_sample": False,
+            "output_scores": self.return_logits,
+            "return_dict_in_generate": self.return_logits,
         }
 
         # For causal models, ensure pad_token_id is set to avoid issues
@@ -65,7 +69,6 @@ class LLM(LightningModule):
                 and self.tokenizer.pad_token_id is not None
             ):
                 generation_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
-
         return self.model.generate(**generation_kwargs)
 
     def training_step(self, batch, batch_idx):
@@ -91,14 +94,15 @@ class LLM(LightningModule):
         input_length = input_ids.shape[1] if not self.is_seq2seq else 0
 
         for i, (question, gold_answer_list) in enumerate(zip(questions, gold_answers)):
-            self.validation_outputs.append(
-                {
-                    "output_ids": output_ids[i],
-                    "input_length": input_length,
-                    "question": question,
-                    "gold_answers": gold_answer_list,
-                }
-            )
+            out = {
+                "output_ids": output_ids[i],
+                "input_length": input_length,
+                "question": question,
+                "gold_answers": gold_answer_list,
+            }
+            if self.return_logits:
+                out["logits"] = output_ids.scores[i]
+            self.validation_outputs.append(out)
 
         return {"batch_size": len(questions)}
 
@@ -125,7 +129,7 @@ class LLM(LightningModule):
             out["raw_output"] = raw_output
 
             # Extract answer and confidence
-            pred_answer, confidence = self.extractor.extract(raw_output)
+            pred_answer, confidence = self.extractor.extract(raw_output, out["logits"])
             out["pred_answer"] = pred_answer
             out["confidence"] = confidence
 
