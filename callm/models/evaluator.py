@@ -187,11 +187,11 @@ class EvaluatorModule(LightningModule):
         accuracy = float(np.mean(correctness)) if len(correctness) > 0 else 0.0
 
         # Log metrics
-        self.log("val_ece", ece, prog_bar=True)
-        self.log("val_brier_score", bs, prog_bar=True)
-        self.log("val_cross_entropy", ce, prog_bar=True)
-        self.log("val_auc", auc, prog_bar=True)
-        self.log("val_accuracy", accuracy, prog_bar=True)
+        self.log("val_ece", ece, prog_bar=True, sync_dist=True)
+        self.log("val_brier_score", bs, prog_bar=True, sync_dist=True)
+        self.log("val_cross_entropy", ce, prog_bar=True, sync_dist=True)
+        self.log("val_auc", auc, prog_bar=True, sync_dist=True)
+        self.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
 
         # Save final results
         log_dir = self.trainer.log_dir or os.getcwd()
