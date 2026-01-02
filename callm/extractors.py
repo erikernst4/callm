@@ -8,13 +8,14 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 import re
 import numpy as np
+import torch
 
 
 class BaseExtractor(ABC):
     """Abstract base class for answer extractors."""
 
     @abstractmethod
-    def extract(self, text: str) -> Tuple[str, float]:
+    def extract(self, text: str, *args, **kwargs) -> Tuple[str, float]:
         """
         Extract answer and confidence from LLM response text.
 
@@ -28,30 +29,8 @@ class BaseExtractor(ABC):
         """
         pass
 
-
-class VerbalizedConfidenceExtractor(BaseExtractor):
-    """
-    Extractor for VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT responses.
-
-    Expected format:
-        Guess: <answer>
-        Probability: <confidence>
-    """
-
-    def extract(self, text: str) -> Tuple[str, float]:
-        """
-        Extract answer and confidence from verbalized confidence format.
-
-        Args:
-            text: Raw text output from the LLM
-
-        Returns:
-            Tuple of (answer, confidence)
-            - confidence is np.nan if not found or invalid
-        """
-        # Initialize defaults
+    def extract_answer(self, text: str):
         answer = ""
-        confidence = np.nan  # Use NaN to indicate missing/invalid data
 
         # Extract guess/answer
         guess_match = re.search(r"Guess:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
@@ -62,6 +41,31 @@ class VerbalizedConfidenceExtractor(BaseExtractor):
             lines = text.strip().split("\n")
             if lines:
                 answer = lines[0].strip()
+        return answer
+
+
+class VerbalizedConfidenceExtractor(BaseExtractor):
+    """
+    Extractor for VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT responses.
+
+    Expected format:
+        Guess: <answer>
+        Probability: <confidence>
+    """
+
+    def extract(self, text: str, *args, **kwargs) -> Tuple[str, float]:
+        """
+        Extract answer and confidence from verbalized confidence format.
+
+        Args:
+            text: Raw text output from the LLM
+
+        Returns:
+            Tuple of (answer, confidence)
+            - confidence is np.nan if not found or invalid
+        """
+        answer = self.extract_answer(text)
+        confidence = np.nan  # Use NaN to indicate missing/invalid data
 
         # Extract probability/confidence
         prob_match = re.search(
@@ -79,3 +83,15 @@ class VerbalizedConfidenceExtractor(BaseExtractor):
                 pass
 
         return answer, confidence
+
+
+class SequencePosteriorConfidenceExtractor(BaseExtractor):
+    def extract(
+        self, text: str, logits: torch.Tensor, *args, **kwargs
+    ) -> Tuple[str, float]:
+        answer = self.extract_answer(text)
+        # Get indexes for the guessed answer
+        # guessed_answer_indexes =
+        # Get the log-probability of the guessed answer
+
+        return answer, np.nan
