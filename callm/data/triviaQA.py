@@ -43,7 +43,11 @@ class TriviaQADataModule(LightningDataModule):
         questions = dataset["question"]
         answers = []
         for value in dataset["answer"]:
-            possible_answers = list(set(value["aliases"] + value["normalized_aliases"]))
+            possible_answers = [
+                answer.lower()
+                for answer in value["aliases"] + value["normalized_aliases"]
+            ]
+            possible_answers = list(set(possible_answers))  # Remove duplicates
             answers.append(possible_answers)
 
         input_texts = [self.prompt(question=question) for question in questions]
