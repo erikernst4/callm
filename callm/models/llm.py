@@ -87,25 +87,33 @@ class LLM(LightningModule):
         gold_answers = batch["label"]
 
         with torch.no_grad():
-            output_ids = self.forward(input_ids, attention_mask)
+            generation_output = self.forward(input_ids, attention_mask)
+
+        if self.return_logits:
+            output_sequences = generation_output.sequences
+            output_scores = generation_output.scores  # Tuple of (batch, vocab) per step
+        else:
+            output_sequences = generation_output
+            output_scores = None
 
         input_length = input_ids.shape[1] if not self.is_seq2seq else 0
 
         for i, (question, gold_answer_list) in enumerate(zip(questions, gold_answers)):
-            generated_tokens = (
-                output_ids[i] if self.is_seq2seq else output_ids[i][input_length:]
-            )
+            if self.is_seq2seq:
+                generated_tokens = output_sequences[i]
+            else:
+                generated_tokens = output_sequences[i][input_length:]
+
             out = {
                 "output_ids": generated_tokens,
                 "question": question,
                 "gold_answers": gold_answer_list,
             }
-            if self.return_logits:
-                out["logits"] = (
-                    output_ids.scores[i]
-                    if self.is_seq2seq
-                    else output_ids.scores[i][input_length:]
+            if self.return_logits and output_scores is not None:
+                out["logits"] = torch.stack(
+                    [step_scores[i] for step_scores in output_scores]
                 )
+
             self.validation_outputs.append(out)
 
         return {"batch_size": len(questions)}
