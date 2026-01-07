@@ -89,19 +89,23 @@ class LLM(LightningModule):
         with torch.no_grad():
             output_ids = self.forward(input_ids, attention_mask)
 
-        # Store output IDs and metadata for later processing at epoch end
-        # Keep tensors on GPU to avoid per-batch CPU transfer overhead
         input_length = input_ids.shape[1] if not self.is_seq2seq else 0
 
         for i, (question, gold_answer_list) in enumerate(zip(questions, gold_answers)):
+            generated_tokens = (
+                output_ids[i] if self.is_seq2seq else output_ids[i][input_length:]
+            )
             out = {
-                "output_ids": output_ids[i],
-                "input_length": input_length,
+                "output_ids": generated_tokens,
                 "question": question,
                 "gold_answers": gold_answer_list,
             }
             if self.return_logits:
-                out["logits"] = output_ids.scores[i]
+                out["logits"] = (
+                    output_ids.scores[i]
+                    if self.is_seq2seq
+                    else output_ids.scores[i][input_length:]
+                )
             self.validation_outputs.append(out)
 
         return {"batch_size": len(questions)}
@@ -116,16 +120,9 @@ class LLM(LightningModule):
 
         # Decode all output IDs and extract answers/confidence
         for out in self.validation_outputs:
-            if self.is_seq2seq:
-                raw_output = self.tokenizer.decode(
-                    out["output_ids"], skip_special_tokens=True
-                )
-            else:
-                # For causal models, skip input tokens
-                generated_tokens = out["output_ids"][out["input_length"] :]
-                raw_output = self.tokenizer.decode(
-                    generated_tokens, skip_special_tokens=True
-                )
+            raw_output = self.tokenizer.decode(
+                out["output_ids"], skip_special_tokens=True
+            )
             out["raw_output"] = raw_output
 
             # Extract answer and confidence

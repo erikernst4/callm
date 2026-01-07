@@ -155,7 +155,6 @@ class TestLLMValidation:
         assert len(llm.validation_outputs) == 1
         assert llm.validation_outputs[0]["question"] == "What is the capital of France?"
         assert "output_ids" in llm.validation_outputs[0]
-        assert "input_length" in llm.validation_outputs[0]
         assert "gold_answers" in llm.validation_outputs[0]
 
 
