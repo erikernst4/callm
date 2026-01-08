@@ -167,7 +167,7 @@ class LLM(LightningModule):
                 print(f"Error loading flushed file {filepath}: {e}")
             finally:
                 # Clean up file
-                if self.save_outputs and os.path.exists(filepath):
+                if not self.save_outputs and os.path.exists(filepath):
                     os.remove(filepath)
 
         self.flushed_output_files = []  # Reset list
