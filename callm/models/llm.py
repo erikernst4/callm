@@ -115,9 +115,30 @@ class LLM(LightningModule):
                 "gold_answers": gold_answer_list,
             }
             if self.return_logits and output_scores is not None:
-                out["logits"] = torch.stack(
-                    [step_scores[i] for step_scores in output_scores]
-                )
+                # OPTIMIZATION: Store only the log probability of the generated token
+                # instead of the full logits tensor (size [seq_len, vocab_size]).
+                # This drastically reduces memory usage and disk I/O.
+
+                # generated_tokens has shape [seq_len] (single sequence)
+                # We need to verify alignment.
+                # output_scores has length = number of generated tokens.
+
+                scores_list = []
+
+                for step_idx, step_score_tensor in enumerate(output_scores):
+                    # step_score_tensor: [batch_size, vocab_size]
+                    # Get score for this sample (index i)
+                    token_logits = step_score_tensor[i]  # [vocab_size]
+
+                    log_probs = torch.log_softmax(token_logits, dim=-1)
+
+                    # Store only the log prob of the chosen token
+                    # equivalent to max log prob since we use greedy decoding
+                    token_id = generated_tokens[step_idx]
+                    scores_list.append(log_probs[token_id])
+
+                if scores_list:
+                    out["logits"] = torch.stack(scores_list)  # [generated_seq_len]
 
             self.validation_outputs.append(out)
 

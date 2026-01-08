@@ -124,10 +124,19 @@ class SequencePosteriorConfidenceExtractor(BaseExtractor):
 
         # Compute confidence from logits
         answer_logits = logits[answer_token_indices]
-        # Compute log probabilities
-        log_probs = torch.log_softmax(answer_logits, dim=-1)
-        # Get the maximum log probability for each token and sum for joint probability
-        max_log_probs_per_token = log_probs.max(dim=-1).values
+
+        # Check if logits are 1D (optimized storage) or 2D (full vocab)
+        if answer_logits.ndim == 1:
+            # 1D: These are already log probabilities of the tokens
+            # We can use them directly
+            max_log_probs_per_token = answer_logits
+        else:
+            # 2D: [num_tokens, vocab_size] - Traditional full logits
+            # Compute log probabilities
+            log_probs = torch.log_softmax(answer_logits, dim=-1)
+            # Get the maximum log probability for each token
+            max_log_probs_per_token = log_probs.max(dim=-1).values
+
         joint_log_prob = max_log_probs_per_token.sum().item()
         confidence = np.exp(joint_log_prob)
 

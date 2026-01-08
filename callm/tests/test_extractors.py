@@ -175,3 +175,47 @@ class TestSequencePosteriorConfidenceExtractor:
 
         answer, confidence = extractor.forward(text, logits, output_ids)
         assert answer == "Hello Universe"  # First line fallback
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_extractor_handles_1d_logits(self, mock_get_tokenizer):
+        """Test that SequencePosteriorConfidenceExtractor handles 1D logits correctly."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        extractor = SequencePosteriorConfidenceExtractor(model_name="gpt2")
+
+        # Case 1: 1D logits (Optimized)
+        text = "Guess: Paris"
+        logits_1d = torch.tensor([-0.1, -0.2, -0.5])
+
+        mock_encoding = MagicMock()
+        # "Paris" -> index 2 (last one)
+        mock_encoding.offset_mapping = [(0, 5), (5, 6), (7, 12)]
+        mock_tokenizer.return_value = mock_encoding
+        extractor.tokenizer = mock_tokenizer
+
+        # Run forward
+        answer, confidence = extractor.forward(text, logits_1d, None)
+        assert answer == "Paris"
+        # index 2 corresponds to -0.5
+        assert np.abs(confidence - np.exp(-0.5)) < 1e-6
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_extractor_backward_compatibility(self, mock_get_tokenizer):
+        """Test that Extractor still works with 2D logits."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        extractor = SequencePosteriorConfidenceExtractor(model_name="gpt2")
+
+        logits_2d = torch.randn(3, 100)  # 3 tokens, 100 vocab
+
+        text = "Guess: Paris"
+        mock_encoding = MagicMock()
+        mock_encoding.offset_mapping = [(0, 5), (5, 6), (7, 12)]
+        mock_tokenizer.return_value = mock_encoding
+        extractor.tokenizer = mock_tokenizer
+
+        answer, confidence = extractor.forward(text, logits_2d, None)
+        assert answer == "Paris"
+        assert 0 <= confidence <= 1.0

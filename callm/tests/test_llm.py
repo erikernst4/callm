@@ -248,3 +248,70 @@ class TestConfigureOptimizers:
             extractor=VerbalizedConfidenceExtractor(),
         )
         assert llm.configure_optimizers() is None
+
+    @patch("callm.models.llm.initialize_model")
+    @patch("callm.models.llm.get_tokenizer_for_model")
+    def test_llm_stores_optimized_logits(self, mock_get_tokenizer, mock_init_model):
+        """Test that LLM saves 1D log_softmax values instead of 2D full logits."""
+        # Mock init_model return
+        mock_model = Mock()
+        mock_model.config.pad_token_id = 0
+        mock_model.config.eos_token_id = 1
+        mock_model.parameters.return_value = iter([])  # Ensure it's iterable
+        mock_init_model.return_value = (mock_model, False)  # model, is_seq2seq=False
+
+        # Mock tokenizer
+        mock_tokenizer = Mock()
+        mock_tokenizer.pad_token_id = 0
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        # Mock extractor
+        extractor = Mock()
+
+        # Initialize LLM with return_logits=True
+        model = LLM(extractor=extractor, model_name="gpt2", return_logits=True)
+
+        # Mock model.generate output
+        # Batch size 1, seq len 5, vocab 10
+        batch_size = 1
+        seq_len = 5
+        vocab_size = 10
+
+        generation_scores = tuple(
+            [torch.randn(batch_size, vocab_size) for _ in range(seq_len - 1)]
+        )
+
+        # generation_output.sequences
+        output_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+
+        # patch forward to return a mock
+        mock_output = Mock()
+        mock_output.sequences = output_ids
+        mock_output.scores = generation_scores
+
+        with torch.no_grad():
+            model.forward = Mock(return_value=mock_output)
+
+            # Create a dummy batch
+            batch = {
+                "input_ids": torch.tensor([[1]]),
+                "attention_mask": torch.tensor([[1]]),
+                "question": ["q1"],
+                "label": [["a1"]],
+            }
+
+            # Run validation step
+            model.validation_step(batch, 0)
+
+            # Check stored output
+            assert len(model.validation_outputs) == 1
+            out = model.validation_outputs[0]
+
+            assert "logits" in out
+            logits = out["logits"]
+
+            # Verification:
+            # logits should be 1D
+            assert logits.ndim == 1
+            # Input length was 1, total seq_len 5 => generated 4
+            assert logits.shape[0] == seq_len - 1
