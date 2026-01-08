@@ -153,7 +153,7 @@ class TestSequencePosteriorConfidenceExtractor:
         mock_tokenizer.assert_called_with(text, return_offsets_mapping=True)
 
         assert answer == "World"
-        assert np.isnan(confidence)
+        assert 0 <= confidence <= 1  # Confidence should be in [0,1]
 
     @patch("callm.extractors.get_tokenizer_for_model")
     def test_token_extraction_no_match(self, mock_get_tokenizer, mock_tokenizer):

@@ -6,7 +6,7 @@ evaluator_batch_size: 1
 trainer:
   accelerator: "gpu"
   strategy: auto
-  devices: auto
+  devices: 1
   num_nodes: 1
   precision: null
   logger: null
@@ -49,14 +49,17 @@ model:
   hf_token: null
   train: false
   return_logits: true
-  extractor: callm.extractors.SequencePosteriorConfidenceExtractor
+  extractor:
+    class_path: callm.extractors.SequencePosteriorConfidenceExtractor
+    init_args:
+      model_name: ${model.model_name}
 data:
   batch_size: 1
   model_name: ${model.model_name}
   prompt: callm.prompts.LABEL_PROB_PROMPT
-  max_samples: 100
+  max_samples: -1
   seed: 42
-  num_workers: 4
+  num_workers: 0
 optimizer: null
 lr_scheduler: null
 ckpt_path: null

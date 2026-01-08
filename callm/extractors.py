@@ -102,23 +102,33 @@ class SequencePosteriorConfidenceExtractor(BaseExtractor):
         # Get answer token scores
         # Get first appearance of answer in text
         answer_start = text.find(answer)
-        if answer_start != -1:
-            encodings = self.tokenizer(text, return_offsets_mapping=True)
-
-            offsets = encodings.offset_mapping
-            answer_end = answer_start + len(answer)
-            answer_token_indices = []
-
-            for idx, (start, end) in enumerate(offsets):
-                # Check intersection between token range and answer range
-                # We want tokens that are substantively part of the answer
-                overlap_start = max(start, answer_start)
-                overlap_end = min(end, answer_end)
-                if overlap_start < overlap_end:
-                    answer_token_indices.append(idx)
-
-            if not answer_token_indices:
-                return answer, np.nan
-
+        if answer_start == -1:
             return answer, np.nan
-        return answer, np.nan
+
+        encodings = self.tokenizer(text, return_offsets_mapping=True)
+
+        offsets = encodings.offset_mapping
+        answer_end = answer_start + len(answer)
+        answer_token_indices = []
+
+        for idx, (start, end) in enumerate(offsets):
+            # Check intersection between token range and answer range
+            # We want tokens that are substantively part of the answer
+            overlap_start = max(start, answer_start)
+            overlap_end = min(end, answer_end)
+            if overlap_start < overlap_end:
+                answer_token_indices.append(idx)
+
+        if not answer_token_indices:
+            return answer, np.nan
+
+        # Compute confidence from logits
+        answer_logits = logits[answer_token_indices]
+        # Compute log probabilities
+        log_probs = torch.log_softmax(answer_logits, dim=-1)
+        # Get the maximum log probability for each token and sum for joint probability
+        max_log_probs_per_token = log_probs.max(dim=-1).values
+        joint_log_prob = max_log_probs_per_token.sum().item()
+        confidence = np.exp(joint_log_prob)
+
+        return answer, confidence
