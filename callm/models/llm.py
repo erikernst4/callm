@@ -15,6 +15,7 @@ class LLM(LightningModule):
         train: bool = False,
         return_logits: bool = False,
         flush_outputs_every_n_steps: int = 100,
+        save_outputs: bool = False,
     ):
         super().__init__()
 
@@ -39,6 +40,7 @@ class LLM(LightningModule):
         # Storage for validation predictions
         self.validation_outputs = []
         self.flushed_output_files = []
+        self.save_outputs = save_outputs
 
     def forward(self, input_ids, attention_mask):
         """
@@ -165,7 +167,7 @@ class LLM(LightningModule):
                 print(f"Error loading flushed file {filepath}: {e}")
             finally:
                 # Clean up file
-                if os.path.exists(filepath):
+                if self.save_outputs and os.path.exists(filepath):
                     os.remove(filepath)
 
         self.flushed_output_files = []  # Reset list
