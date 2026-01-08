@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+import os
 from unittest.mock import Mock, patch
 from callm.models.llm import LLM
 from callm.extractors import VerbalizedConfidenceExtractor
@@ -155,7 +156,73 @@ class TestLLMValidation:
         assert len(llm.validation_outputs) == 1
         assert llm.validation_outputs[0]["question"] == "What is the capital of France?"
         assert "output_ids" in llm.validation_outputs[0]
+        assert "output_ids" in llm.validation_outputs[0]
         assert "gold_answers" in llm.validation_outputs[0]
+
+    @patch("callm.models.llm.get_tokenizer_for_model")
+    @patch("callm.models.llm.initialize_model")
+    def test_validation_flushing(self, mock_init_model, mock_get_tokenizer):
+        """Test validation output flushing mechanism."""
+        # Setup mock model
+        mock_model_instance = Mock()
+        mock_model_instance.parameters.return_value = iter([])
+        mock_model_instance.config = Mock()
+        mock_model_instance.config.pad_token_id = 0
+        mock_model_instance.config.eos_token_id = 1
+        # Mock generate return value for batch of 4
+        mock_model_instance.generate.return_value = torch.tensor([[10, 11]] * 4)
+        mock_init_model.return_value = (mock_model_instance, True)
+
+        mock_tokenizer_instance = Mock()
+        mock_tokenizer_instance.decode.return_value = "decoded answer"
+        mock_get_tokenizer.return_value = mock_tokenizer_instance
+
+        # Initialize LLM with flush every 2 steps
+        llm = LLM(
+            model_name="google/flan-t5-small",
+            train=False,
+            extractor=VerbalizedConfidenceExtractor(),
+            flush_outputs_every_n_steps=2,
+        )
+
+        # Mock trainer log_dir
+        llm.trainer = Mock()
+        llm.trainer.log_dir = "tmp_test_dir"
+        llm.trainer.global_rank = 0
+        os.makedirs("tmp_test_dir", exist_ok=True)
+
+        try:
+            # Create batch with 4 items
+            batch = {
+                "input_ids": torch.tensor([[1, 2]] * 4),
+                "attention_mask": torch.tensor([[1, 1]] * 4),
+                "question": ["q1", "q2", "q3", "q4"],
+                "label": [["a1"], ["a2"], ["a3"], ["a4"]],
+            }
+
+            # Run validation step
+            # Batch size 4 >= flush step 2, so it should flush
+            llm.validation_step(batch, 0)
+
+            # Check flushing happened
+            assert len(llm.validation_outputs) == 0
+            assert len(llm.flushed_output_files) == 1
+            assert os.path.exists(llm.flushed_output_files[0])
+
+            # Run on_validation_epoch_end
+            llm.on_validation_epoch_end()
+
+            # Check if flushed files are cleaned up
+            assert len(llm.flushed_output_files) == 0
+
+            # Check if output csv was written (implies data was reloaded and processed)
+            assert os.path.exists(os.path.join("tmp_test_dir", "llm_outputs.csv"))
+
+        finally:
+            import shutil
+
+            if os.path.exists("tmp_test_dir"):
+                shutil.rmtree("tmp_test_dir")
 
 
 class TestConfigureOptimizers:

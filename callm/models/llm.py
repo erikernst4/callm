@@ -14,6 +14,7 @@ class LLM(LightningModule):
         hf_token: str = None,
         train: bool = False,
         return_logits: bool = False,
+        flush_outputs_every_n_steps: int = 100,
     ):
         super().__init__()
 
@@ -33,9 +34,11 @@ class LLM(LightningModule):
 
         self.extractor: BaseExtractor = extractor
         self.return_logits = return_logits
+        self.flush_outputs_every_n_steps = flush_outputs_every_n_steps
 
         # Storage for validation predictions
         self.validation_outputs = []
+        self.flushed_output_files = []
 
     def forward(self, input_ids, attention_mask):
         """
@@ -116,13 +119,58 @@ class LLM(LightningModule):
 
             self.validation_outputs.append(out)
 
+        # Periodically flush outputs to disk to save memory
+        if (
+            self.flush_outputs_every_n_steps > 0
+            and len(self.validation_outputs) >= self.flush_outputs_every_n_steps
+        ):
+            self._flush_validation_outputs()
+
         return {"batch_size": len(questions)}
+
+    def _flush_validation_outputs(self):
+        """Helper to save current validation outputs to a temporary file."""
+        if not self.validation_outputs:
+            return
+
+        # Use trainer log_dir or current directory
+        log_dir = self.trainer.log_dir or os.getcwd()
+        os.makedirs(log_dir, exist_ok=True)
+
+        batch_idx = len(self.flushed_output_files)
+        filename = os.path.join(
+            log_dir, f"temp_val_outputs_rank{self.global_rank}_{batch_idx}.pt"
+        )
+
+        torch.save(self.validation_outputs, filename)
+        self.flushed_output_files.append(filename)
+        self.validation_outputs = []  # Clear memory
 
     def on_validation_epoch_end(self):
         """
         Decode outputs, extract answers/confidence, and save to CSV.
         Evaluation is handled separately by EvaluatorModule.
         """
+        # Flush any remaining outputs
+        if self.validation_outputs:
+            self._flush_validation_outputs()
+
+        # Reload all flushed outputs
+        all_outputs = []
+        for filepath in self.flushed_output_files:
+            try:
+                chunk = torch.load(filepath)
+                all_outputs.extend(chunk)
+            except Exception as e:
+                print(f"Error loading flushed file {filepath}: {e}")
+            finally:
+                # Clean up file
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+
+        self.flushed_output_files = []  # Reset list
+        self.validation_outputs = all_outputs  # Restore full list for processing
+
         if len(self.validation_outputs) == 0:
             return
 
@@ -135,7 +183,7 @@ class LLM(LightningModule):
 
             # Extract answer and confidence
             pred_answer, confidence = self.extractor(
-                raw_output, out["logits"], out["output_ids"]
+                raw_output, out.get("logits"), out["output_ids"]
             )
             out["pred_answer"] = pred_answer
             out["confidence"] = confidence
