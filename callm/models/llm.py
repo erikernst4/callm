@@ -14,7 +14,7 @@ class LLM(LightningModule):
         hf_token: str = None,
         train: bool = False,
         return_logits: bool = False,
-        flush_outputs_every_n_steps: int = 100,
+        flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
     ):
         super().__init__()
