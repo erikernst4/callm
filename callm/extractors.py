@@ -102,21 +102,23 @@ class SequencePosteriorConfidenceExtractor(BaseExtractor):
         # Get answer token scores
         # Get first appearance of answer in text
         answer_start = text.find(answer)
-        from IPython import embed
-
-        embed()
         if answer_start != -1:
-            # Encode answer to token IDs
-            answer_tokens = self.tokenizer(answer, return_tensors="pt")["input_ids"][
-                0
-            ].to(self.device)
-            # Find token positions in output_ids
-            answer_token_positions = []
-            for i in range(len(output_ids) - len(answer_tokens) + 1):
-                if torch.equal(output_ids[i : i + len(answer_tokens)], answer_tokens):
-                    answer_token_positions.extend(range(i, i + len(answer_tokens)))
-                    break  # Only first occurrence
-            if not answer_token_positions:
+            encodings = self.tokenizer(text, return_offsets_mapping=True)
+
+            offsets = encodings.offset_mapping
+            answer_end = answer_start + len(answer)
+            answer_token_indices = []
+
+            for idx, (start, end) in enumerate(offsets):
+                # Check intersection between token range and answer range
+                # We want tokens that are substantively part of the answer
+                overlap_start = max(start, answer_start)
+                overlap_end = min(end, answer_end)
+                if overlap_start < overlap_end:
+                    answer_token_indices.append(idx)
+
+            if not answer_token_indices:
                 return answer, np.nan
-            # Get logits for answer tokens
+
+            return answer, np.nan
         return answer, np.nan
