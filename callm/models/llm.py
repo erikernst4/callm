@@ -134,7 +134,9 @@ class LLM(LightningModule):
             out["raw_output"] = raw_output
 
             # Extract answer and confidence
-            pred_answer, confidence = self.extractor.extract(raw_output, out["logits"])
+            pred_answer, confidence = self.extractor(
+                raw_output, out["logits"], out["output_ids"]
+            )
             out["pred_answer"] = pred_answer
             out["confidence"] = confidence
 

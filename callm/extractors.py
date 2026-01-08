@@ -9,13 +9,15 @@ from typing import Tuple
 import re
 import numpy as np
 import torch
+from lightning.pytorch import LightningModule
+from callm.utils import get_tokenizer_for_model
 
 
-class BaseExtractor(ABC):
+class BaseExtractor(LightningModule, ABC):
     """Abstract base class for answer extractors."""
 
     @abstractmethod
-    def extract(self, text: str, *args, **kwargs) -> Tuple[str, float]:
+    def forward(self, text: str, *args, **kwargs) -> Tuple[str, float]:
         """
         Extract answer and confidence from LLM response text.
 
@@ -53,7 +55,7 @@ class VerbalizedConfidenceExtractor(BaseExtractor):
         Probability: <confidence>
     """
 
-    def extract(self, text: str, *args, **kwargs) -> Tuple[str, float]:
+    def forward(self, text: str, *args, **kwargs) -> Tuple[str, float]:
         """
         Extract answer and confidence from verbalized confidence format.
 
@@ -86,12 +88,35 @@ class VerbalizedConfidenceExtractor(BaseExtractor):
 
 
 class SequencePosteriorConfidenceExtractor(BaseExtractor):
-    def extract(
-        self, text: str, logits: torch.Tensor, *args, **kwargs
-    ) -> Tuple[str, float]:
-        answer = self.extract_answer(text)
-        # Get indexes for the guessed answer
-        # guessed_answer_indexes =
-        # Get the log-probability of the guessed answer
+    def __init__(self, model_name: str, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tokenizer = get_tokenizer_for_model(model_name)
 
+    def forward(
+        self, text: str, logits: torch.Tensor, output_ids: torch.Tensor, *args, **kwargs
+    ) -> Tuple[str, float]:
+        if not text:
+            return "", np.nan
+
+        answer = self.extract_answer(text)
+        # Get answer token scores
+        # Get first appearance of answer in text
+        answer_start = text.find(answer)
+        from IPython import embed
+
+        embed()
+        if answer_start != -1:
+            # Encode answer to token IDs
+            answer_tokens = self.tokenizer(answer, return_tensors="pt")["input_ids"][
+                0
+            ].to(self.device)
+            # Find token positions in output_ids
+            answer_token_positions = []
+            for i in range(len(output_ids) - len(answer_tokens) + 1):
+                if torch.equal(output_ids[i : i + len(answer_tokens)], answer_tokens):
+                    answer_token_positions.extend(range(i, i + len(answer_tokens)))
+                    break  # Only first occurrence
+            if not answer_token_positions:
+                return answer, np.nan
+            # Get logits for answer tokens
         return answer, np.nan
