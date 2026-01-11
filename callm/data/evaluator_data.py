@@ -24,16 +24,19 @@ Answers: {{ gold_answers }}
 Please answer with a single word, either "Yes." or "No.", and explain your reasoning."""
 )
 
+DEFAULT_MAX_LENGTH = 512
+
 
 class EvaluatorDataModule(LightningDataModule):
     """DataModule for batched correctness evaluation."""
 
     def __init__(
         self,
-        llm_outputs_path: str,
+        llm_outputs_path: str = None,
         model_name: str = "google/flan-t5-base",
         batch_size: int = 8,
         num_workers: int = 0,
+        max_length: int = None,
     ):
         super().__init__()
         self.llm_outputs_path = llm_outputs_path
@@ -41,7 +44,7 @@ class EvaluatorDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.tokenizer = None
-        self.max_length = None
+        self.max_length = max_length
 
     def setup(self, stage: str = None):
         if self.tokenizer is None:
@@ -55,20 +58,8 @@ class EvaluatorDataModule(LightningDataModule):
             ):  # Check it's not a huge default
                 self.max_length = model_max_length
             else:
-                # Fallback: try to load model config to get max position embeddings
-                from transformers import AutoConfig
-
-                try:
-                    config = AutoConfig.from_pretrained(self.model_name)
-                    self.max_length = getattr(
-                        config,
-                        "max_position_embeddings",
-                        getattr(config, "n_positions", 512),
-                    )
-                except Exception:
-                    # Last resort fallback
-                    self.max_length = 512
-
+                if self.max_length is None:
+                    self.max_length = DEFAULT_MAX_LENGTH
         # Read LLM outputs from CSV
         questions = []
         gold_answers_list = []
