@@ -99,23 +99,6 @@ class CalibrationCLI(LightningCLI):
             default=False,
             help="Whether to evaluate correctness after validation",
         )
-        parser.add_argument(
-            "--evaluator_model_name",
-            default="google/flan-t5-base",
-            help="Model to use for correctness evaluation",
-        )
-        parser.add_argument(
-            "--evaluator_batch_size",
-            type=int,
-            default=8,
-            help="Batch size for evaluator",
-        )
-        parser.add_argument(
-            "--num_workers",
-            type=int,
-            default=None,
-            help="Number of workers for DataLoader (defaults to value in data config)",
-        )
 
     def after_validate(self):
         """Run correctness evaluation after LLM validation completes."""
@@ -156,9 +139,6 @@ class CalibrationCLI(LightningCLI):
                 "datamodule",
                 "train_dataloaders",
                 "val_dataloaders",
-                "evaluator_model_name",
-                "evaluator_batch_size",
-                "num_workers",
                 # llm_outputs_path is not manually added, so let it be added by signature
             },
         }
