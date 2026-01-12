@@ -34,8 +34,8 @@ class EvaluatorDataModule(LightningDataModule):
         self,
         llm_outputs_path: str = None,
         model_name: str = "google/flan-t5-base",
-        batch_size: int = 8,
-        num_workers: int = 0,
+        batch_size: int = 1,
+        num_workers: int = 8,
         max_length: int = None,
     ):
         super().__init__()
@@ -71,10 +71,14 @@ class EvaluatorDataModule(LightningDataModule):
             reader = csv.DictReader(f)
             for row in reader:
                 questions.append(row["question"])
-                gold_answers_list.append(row["gold_answers"])
+                gold_answers_list.append(
+                    [g.strip().lower() for g in row["gold_answers"].split("|")]
+                )
                 pred_answers.append(row["pred_answer"])
                 confidences.append(row["confidence"])
                 raw_outputs.append(row.get("raw_output", ""))
+
+        print(f"\nLoaded {len(questions)} rows from CSV file: {self.llm_outputs_path}")
 
         # Create evaluation prompts
         prompts = []

@@ -24,8 +24,8 @@ class TestEvaluatorDataModule:
         # Mock CSV data
         csv_content = (
             "question,gold_answers,pred_answer,confidence,raw_output\n"
-            "Q1,['A1']|['a1'],A1,0.9,A1\n"  # Exact match
-            "Q2,['B1'],B2,0.8,B2\n"  # Non-exact match
+            "Q1,A1|a1,A1,0.9,A1\n"  # Exact match
+            "Q2,B1,B2,0.8,B2\n"  # Non-exact match
         )
 
         with patch("builtins.open", mock_open(read_data=csv_content)):
