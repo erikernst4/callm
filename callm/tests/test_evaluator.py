@@ -1,6 +1,7 @@
 """Unit tests for Evaluator components."""
 
 import torch
+import os
 from unittest.mock import Mock, patch, mock_open
 from callm.models.evaluator import EvaluatorModule
 from callm.data.evaluator_data import EvaluatorDataModule
@@ -196,3 +197,74 @@ class TestEvaluatorModule:
 
             # Check file saved
             mock_file.assert_called()
+
+    @patch("callm.models.evaluator.get_tokenizer_for_model")
+    @patch("callm.models.evaluator.initialize_model")
+    def test_validation_flushing(self, mock_init_model, mock_get_tokenizer):
+        """Test evaluation results flushing mechanism."""
+        # Setup mock model
+        mock_model = Mock()
+        mock_model.parameters.return_value = iter([])
+        mock_model.config = Mock()
+        mock_model.config.pad_token_id = 0
+        mock_model.generate.return_value = torch.tensor([[10, 11]] * 3)
+        mock_init_model.return_value = (mock_model, True)
+
+        mock_tokenizer = Mock()
+        mock_tokenizer.decode.return_value = "Yes"
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        # Initialize Evaluator with flush every 2 results
+        evaluator = EvaluatorModule(
+            model_name="dummy",
+            flush_outputs_every_n_steps=2,
+        )
+
+        # Mock trainer
+        evaluator.trainer = Mock()
+        evaluator.trainer.log_dir = "tmp_eval_dir"
+        evaluator.trainer.global_rank = 0
+        os.makedirs("tmp_eval_dir", exist_ok=True)
+
+        try:
+            # Create batch with 3 items (enough for one flush and one leftover)
+            batch = {
+                "input_ids": torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]]),
+                "attention_mask": torch.tensor([[1, 1, 1], [1, 1, 1], [1, 1, 1]]),
+                "exact_match": [False, False, False],
+                "question": ["q1", "q2", "q3"],
+                "gold_answers": ["a1", "a2", "a3"],
+                "pred_answer": ["p1", "p2", "p3"],
+                "confidence": ["0.9", "0.8", "0.7"],
+                "raw_output": ["r1", "r2", "r3"],
+                "index": [0, 1, 2],
+            }
+
+            # Run validation step
+            evaluator.validation_step(batch, 0)
+
+            # Check flushing happened (3 items >= 2 limit)
+            # evaluation_results should be empty (or contain leftovers if we flushed exactly 2)
+            # Actually, the logic flushes ALL if >= limit
+            assert len(evaluator.evaluation_results) == 0
+            assert len(evaluator.flushed_output_files) == 1
+            assert os.path.exists(evaluator.flushed_output_files[0])
+
+            # Run on_validation_epoch_end
+            # Mock logger to avoid errors
+            evaluator.log = Mock()
+            evaluator.on_validation_epoch_end()
+
+            # Check if flushed files are cleaned up
+            assert len(evaluator.flushed_output_files) == 0
+
+            # Check if output csv was written
+            assert os.path.exists(
+                os.path.join("tmp_eval_dir", "evaluation_results.csv")
+            )
+
+        finally:
+            import shutil
+
+            if os.path.exists("tmp_eval_dir"):
+                shutil.rmtree("tmp_eval_dir")
