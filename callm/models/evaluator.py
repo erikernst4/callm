@@ -94,15 +94,9 @@ class EvaluatorModule(LightningModule):
         raw_outputs = batch["raw_output"]
         indices = batch["index"]
 
-        # Initialize correctness list
-        correctness = [None] * len(exact_matches)
-
-        # Handle exact matches
-        for i, is_exact in enumerate(exact_matches):
-            if is_exact:
-                correctness[i] = True
-
         # Handle non-exact matches with batched generation
+        generated_ids_list = [None] * len(exact_matches)
+
         if batch["input_ids"] is not None:
             input_ids = batch["input_ids"]
             attention_mask = batch["attention_mask"]
@@ -111,23 +105,14 @@ class EvaluatorModule(LightningModule):
             with torch.no_grad():
                 output_ids = self.forward(input_ids, attention_mask)
 
-            # Decode and parse responses
+            # Store generated IDs
             eval_idx = 0
             for i, is_exact in enumerate(exact_matches):
                 if not is_exact:
                     if self.is_seq2seq:
-                        response = self.tokenizer.decode(
-                            output_ids[eval_idx], skip_special_tokens=True
-                        )
+                        generated_ids_list[i] = output_ids[eval_idx]
                     else:
-                        generated_tokens = output_ids[eval_idx][input_length:]
-                        response = self.tokenizer.decode(
-                            generated_tokens, skip_special_tokens=True
-                        )
-
-                    # Parse Yes/No
-                    response_lower = response.lower().strip()
-                    correctness[i] = response_lower.startswith("yes")
+                        generated_ids_list[i] = output_ids[eval_idx][input_length:]
                     eval_idx += 1
 
         # Store results
@@ -142,7 +127,8 @@ class EvaluatorModule(LightningModule):
                     "pred_answer": pred_answers[i],
                     "confidence": confidences[i],
                     "raw_output": raw_outputs[i],
-                    "correct": correctness[i],
+                    "exact_match": exact_matches[i],
+                    "output_ids": generated_ids_list[i],
                 }
             )
 
@@ -207,6 +193,25 @@ class EvaluatorModule(LightningModule):
         # Sort by original index
         self.evaluation_results.sort(key=lambda x: x["index"])
 
+        # Decode and compute correctness
+        for result in self.evaluation_results:
+            if "correct" in result:
+                continue
+
+            if result.get("exact_match"):
+                result["correct"] = True
+            else:
+                if result.get("output_ids") is not None:
+                    response = self.tokenizer.decode(
+                        result["output_ids"], skip_special_tokens=True
+                    )
+                    response_lower = response.lower().strip()
+                    result["correct"] = response_lower.startswith("yes")
+                    result["evaluator_response"] = response
+                else:
+                    result["correct"] = False
+                    result["evaluator_response"] = ""
+
         # Extract arrays
         all_confidences = []
         all_correctness = []
@@ -268,6 +273,7 @@ class EvaluatorModule(LightningModule):
                         "Predicted Answer",
                         "Confidence",
                         "Correct",
+                        "Evaluator Response",
                         "Raw Output",
                     ]
                 )
@@ -277,6 +283,7 @@ class EvaluatorModule(LightningModule):
                         if result["confidence"] not in ["nan", ""]
                         else "nan"
                     )
+                    evaluator_resp = result.get("evaluator_response", "")
                     writer.writerow(
                         [
                             short_output(result["question"]),
@@ -284,6 +291,7 @@ class EvaluatorModule(LightningModule):
                             short_output(result["pred_answer"]),
                             conf_str,
                             "Yes" if result["correct"] else "No",
+                            short_output(evaluator_resp),
                             short_output(result["raw_output"]),
                         ]
                     )

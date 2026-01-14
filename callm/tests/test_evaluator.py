@@ -132,11 +132,14 @@ class TestEvaluatorModule:
         # Check results
         assert len(evaluator.evaluation_results) == 2
 
-        # First item (Exact match) should be True without generation
-        assert evaluator.evaluation_results[0]["correct"] is True
+        # First item (Exact match)
+        assert evaluator.evaluation_results[0]["exact_match"] is True
 
-        # Second item (Non-exact) should be True because decode returned "Yes"
-        assert evaluator.evaluation_results[1]["correct"] is True
+        # Second item (Non-exact) should have output_ids stored
+        assert evaluator.evaluation_results[1]["exact_match"] is False
+        assert evaluator.evaluation_results[1]["output_ids"] is not None
+        # Verify it's a tensor
+        assert torch.is_tensor(evaluator.evaluation_results[1]["output_ids"])
 
         # Verify generate called only once (for the non-exact item)
         assert mock_model.generate.call_count == 1
@@ -166,16 +169,18 @@ class TestEvaluatorModule:
                 "pred_answer": "P1",
                 "confidence": "0.9",
                 "raw_output": "P1",
-                "correct": True,
+                "exact_match": True,
+                "output_ids": None,
             },
             {
                 "index": 1,
                 "question": "Q2",
                 "gold_answers": "A2",
                 "pred_answer": "P2",
-                "confidence": "0.1",  # Calibrated wrong
+                "confidence": "0.1",
                 "raw_output": "P2",
-                "correct": False,
+                "exact_match": False,
+                "output_ids": torch.tensor([1, 2]),
             },
         ]
 
@@ -184,15 +189,49 @@ class TestEvaluatorModule:
         evaluator.trainer = Mock()
         evaluator.trainer.log_dir = "/tmp"
 
+        # Setup tokenizer decode return value
+        evaluator.tokenizer.decode.return_value = "No"
+
         # Run epoch end
-        with patch("builtins.open", mock_open()) as mock_file:
+        with patch("builtins.open", mock_open()) as mock_file, patch(
+            "csv.writer"
+        ) as mock_writer:
+            mock_csv_instance = Mock()
+            mock_writer.return_value = mock_csv_instance
+
             evaluator.on_validation_epoch_end()
 
             # Check metrics logged
             assert evaluator.log.called
+
+            # Check correctness via CSV output
+            # We expect header + 2 rows
+            assert mock_csv_instance.writerow.call_count == 3
+
+            # Check content of rows
+            # Row 1 (Header)
+            # Row 2 (Item 0) -> Correct=Yes, Evaluator Response="" (since exact match)
+            args0 = mock_csv_instance.writerow.call_args_list[1][0][0]
+            assert args0[4] == "Yes"  # 5th column is Correct
+            # 6th col is Evaluator Response (exact match has no output_ids, so empty string in my implementation?
+            # Wait, exact match doesn't go through decoding block in my code.
+            # Let's check my code:
+            # if result.get("exact_match"): result["correct"] = True
+            # else: ... decode ... result["evaluator_response"] = response
+            # So exact match might miss "evaluator_response" key entirely if not set elsewhere?
+            # get("evaluator_response", "") handles it.
+            assert args0[5] == ""
+
+            # Row 3 (Item 1) -> Correct=No (since we mocked decode="No")
+            # Evaluator Response="No"
+            args1 = mock_csv_instance.writerow.call_args_list[2][0][0]
+            assert args1[4] == "No"
+            assert args1[5] == "No"
+
             # We expect calls for accuracy, ece, brier, etc.
             logged_metrics = [call.args[0] for call in evaluator.log.call_args_list]
             assert "val_accuracy" in logged_metrics
+
             assert "val_ece" in logged_metrics
 
             # Check file saved
