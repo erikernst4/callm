@@ -46,6 +46,8 @@ model:
   init_args:
     model_name: ${evaluator_model_name}
     hf_token: null
+    flush_outputs_every_n_steps: 1000
+    save_outputs: false
 data:
   class_path: callm.data.EvaluatorDataModule
   init_args:
@@ -57,7 +59,7 @@ data:
 evaluate_correctness: false
 evaluator_model_name: Qwen/Qwen3-4B-Instruct-2507
 evaluator_batch_size: 1
-num_workers: 1
+num_workers: 24
 optimizer: null
 lr_scheduler: null
 llm_outputs_path: null
