@@ -13,12 +13,27 @@ class CalibrationTrainer(Trainer):
         evaluator_model_name: str = "google/flan-t5-base",
         evaluator_batch_size: int = 8,
         num_workers: int = None,
+        flush_outputs_every_n_steps: int = None,
+        save_outputs: bool = None,
         **kwargs,
     ):
         """Run correctness evaluation on LLM outputs."""
-        print(f"\n{'='*60}")
-        print("Running correctness evaluation...")
-        print(f"{'='*60}\n")
+        # Check if model and datamodule were already instantiated by LightningCLI
+        evaluator_model = kwargs.get("model")
+        evaluator_dm = kwargs.get("datamodule")
+
+        # Ensure they are the correct type
+        if (
+            evaluator_model is not None
+            and not isinstance(evaluator_model, EvaluatorModule)
+            or (
+                evaluator_dm is not None
+                and not isinstance(evaluator_dm, EvaluatorDataModule)
+            )
+        ):
+            raise ValueError(
+                "Evaluator model and datamodule must be of type EvaluatorModule and EvaluatorDataModule"
+            )
 
         # Resolve llm_outputs_path if not provided
         if llm_outputs_path is None:
@@ -63,14 +78,21 @@ class CalibrationTrainer(Trainer):
         if num_workers is None:
             num_workers = 0
 
-        # Create evaluator components
-        evaluator_dm = EvaluatorDataModule(
-            llm_outputs_path=llm_outputs_path,
-            model_name=evaluator_model_name,
-            batch_size=evaluator_batch_size,
-            num_workers=num_workers,
-        )
-        evaluator_model = EvaluatorModule(model_name=evaluator_model_name)
+        # Create or update evaluator components
+        if evaluator_dm is None:
+            evaluator_dm = EvaluatorDataModule(
+                llm_outputs_path=llm_outputs_path,
+                model_name=evaluator_model_name,
+                batch_size=evaluator_batch_size,
+                num_workers=num_workers,
+            )
+
+        if evaluator_model is None:
+            evaluator_model = EvaluatorModule(
+                model_name=evaluator_model_name,
+                flush_outputs_every_n_steps=flush_outputs_every_n_steps,
+                save_outputs=save_outputs,
+            )
 
         # Configure logging to a new folder with _evaluation suffix
         output_dir = os.path.dirname(llm_outputs_path)
@@ -123,6 +145,8 @@ class CalibrationCLI(LightningCLI):
             evaluator_model_name=config.evaluator_model_name,
             evaluator_batch_size=config.evaluator_batch_size,
             num_workers=num_workers,
+            flush_outputs_every_n_steps=config.model.init_args.flush_outputs_every_n_steps,
+            save_outputs=config.model.init_args.save_outputs,
         )
 
     @staticmethod
