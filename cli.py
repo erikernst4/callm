@@ -86,6 +86,11 @@ class CalibrationTrainer(Trainer):
                 batch_size=evaluator_batch_size,
                 num_workers=num_workers,
             )
+        elif evaluator_dm.llm_outputs_path is None:
+            evaluator_dm = EvaluatorDataModule(
+                llm_outputs_path=llm_outputs_path,
+                **evaluator_dm.__dict__,  # pass all attributes from evaluator_dm
+            )
 
         if evaluator_model is None:
             evaluator_model = EvaluatorModule(
