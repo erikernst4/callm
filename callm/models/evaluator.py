@@ -10,6 +10,8 @@ import torch
 import numpy as np
 import os
 import csv
+import shutil
+import glob
 
 from callm.utils import initialize_model, get_tokenizer_for_model
 from callm.metrics import (
@@ -34,10 +36,12 @@ class EvaluatorModule(LightningModule):
         hf_token: str = None,
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
+        resume_from: str = None,
     ):
         super().__init__()
 
         self.model_name = model_name
+        self.initial_flushed_files = []
 
         # Load evaluator model
         self.model, self.is_seq2seq = initialize_model(model_name, hf_token)
@@ -52,6 +56,7 @@ class EvaluatorModule(LightningModule):
 
         self.flush_outputs_every_n_steps = flush_outputs_every_n_steps
         self.save_outputs = save_outputs
+        self.resume_from = resume_from
 
         # Storage for evaluation results
         self.evaluation_results = []
@@ -158,6 +163,35 @@ class EvaluatorModule(LightningModule):
         torch.save(self.evaluation_results, filename)
         self.flushed_output_files.append(filename)
         self.evaluation_results = []  # Clear memory
+
+    def on_validation_start(self):
+        """Prepare evaluation by loading previous results if resuming."""
+        if self.resume_from:
+            if not os.path.exists(self.resume_from):
+                raise ValueError(f"Resume path {self.resume_from} does not exist.")
+            else:
+                # Look for files matching pattern
+                pattern = os.path.join(self.resume_from, "temp_eval_results_rank0_*.pt")
+                found_files = sorted(
+                    glob.glob(pattern),
+                    key=lambda x: int(x.split("_")[-1].split(".")[0]),
+                )
+
+                if found_files:
+                    print(f"Found {len(found_files)} temp files to resume from.")
+                    self.initial_flushed_files = found_files
+
+        for i, src_path in enumerate(self.initial_flushed_files):
+            # We enforce the naming convention: temp_eval_results_rank{rank}_{i}.pt
+            # Start index from 0
+            filename = os.path.join(
+                self.trainer.log_dir, f"temp_eval_results_rank{self.global_rank}_{i}.pt"
+            )
+            # Only copy if source is different from destination
+            if os.path.abspath(src_path) != os.path.abspath(filename):
+                shutil.copy(src_path, filename)
+
+            self.flushed_output_files.append(filename)
 
     def on_validation_epoch_end(self):
         """

@@ -18,6 +18,7 @@ class CalibrationTrainer(Trainer):
         num_workers: int = None,
         flush_outputs_every_n_steps: int = None,
         save_outputs: bool = None,
+        resume_from: str = None,
         **kwargs,
     ):
         """Run correctness evaluation on LLM outputs."""
@@ -88,18 +89,21 @@ class CalibrationTrainer(Trainer):
                 model_name=evaluator_model_name,
                 batch_size=evaluator_batch_size,
                 num_workers=num_workers,
+                resume_from=resume_from,
             )
-        elif evaluator_dm.llm_outputs_path is None:
-            evaluator_dm = EvaluatorDataModule(
-                llm_outputs_path=llm_outputs_path,
-                **evaluator_dm.__dict__,  # pass all attributes from evaluator_dm
+        else:
+            evaluator_dm_attributes = evaluator_dm.__dict__
+            evaluator_dm_attributes.update(
+                llm_outputs_path=llm_outputs_path, resume_from=resume_from
             )
+            evaluator_dm = EvaluatorDataModule(**evaluator_dm_attributes)
 
         if evaluator_model is None:
             evaluator_model = EvaluatorModule(
                 model_name=evaluator_model_name,
                 flush_outputs_every_n_steps=flush_outputs_every_n_steps,
                 save_outputs=save_outputs,
+                resume_from=resume_from,
             )
 
         # Configure logging to a new folder with _evaluation suffix
@@ -129,6 +133,12 @@ class CalibrationCLI(LightningCLI):
             default=False,
             help="Whether to evaluate correctness after validation",
         )
+        parser.add_argument(
+            "--resume_from",
+            type=str,
+            default=None,
+            help="Path to previous run directory to resume from (containing temp_eval_results*.pt files)",
+        )
 
     def after_validate(self):
         """Run correctness evaluation after LLM validation completes."""
@@ -155,6 +165,7 @@ class CalibrationCLI(LightningCLI):
             num_workers=num_workers,
             flush_outputs_every_n_steps=config.model.init_args.flush_outputs_every_n_steps,
             save_outputs=config.model.init_args.save_outputs,
+            resume_from=config.resume_from,
         )
 
     @staticmethod

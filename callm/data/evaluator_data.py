@@ -10,6 +10,9 @@ from torch.utils.data import DataLoader
 from datasets import Dataset
 from jinja2 import Template
 import csv
+import os
+import glob
+import torch
 
 from callm.utils import get_tokenizer_for_model
 
@@ -37,6 +40,7 @@ class EvaluatorDataModule(LightningDataModule):
         batch_size: int = 1,
         num_workers: int = 8,
         max_length: int = None,
+        resume_from: str = None,
     ):
         super().__init__()
         self.llm_outputs_path = llm_outputs_path
@@ -45,6 +49,8 @@ class EvaluatorDataModule(LightningDataModule):
         self.num_workers = num_workers
         self.tokenizer = None
         self.max_length = max_length
+        self.resume_from = resume_from
+        self.skip_indices = set()
 
     def setup(self, stage: str = None):
         if self.tokenizer is None:
@@ -66,10 +72,15 @@ class EvaluatorDataModule(LightningDataModule):
         pred_answers = []
         confidences = []
         raw_outputs = []
+        original_indices = []
+
+        self.skip_indices = self._get_skip_indices()
 
         with open(self.llm_outputs_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            for row in reader:
+            for i, row in enumerate(reader):
+                if i in self.skip_indices:
+                    continue
                 questions.append(row["question"])
                 gold_answers_list.append(
                     [g.strip().lower() for g in row["gold_answers"].split("|")]
@@ -77,6 +88,7 @@ class EvaluatorDataModule(LightningDataModule):
                 pred_answers.append(row["pred_answer"])
                 confidences.append(row["confidence"])
                 raw_outputs.append(row.get("raw_output", ""))
+                original_indices.append(i)
 
         print(f"\nLoaded {len(questions)} rows from CSV file: {self.llm_outputs_path}")
 
@@ -138,9 +150,41 @@ class EvaluatorDataModule(LightningDataModule):
                 "pred_answer": pred_answers,
                 "confidence": confidences,
                 "raw_output": raw_outputs,
-                "index": list(range(len(questions))),
+                "index": original_indices,
             }
         ).with_format("torch")
+
+    def _get_skip_indices(self):
+        skip_indices = set()
+        if self.resume_from:
+            if not os.path.exists(self.resume_from):
+                raise ValueError(f"Resume path {self.resume_from} does not exist.")
+            else:
+                # Look for files matching pattern
+                pattern = os.path.join(self.resume_from, "temp_eval_results_rank0_*.pt")
+                found_files = sorted(
+                    glob.glob(pattern),
+                    key=lambda x: int(x.split("_")[-1].split(".")[0]),
+                )
+
+                if found_files:
+                    print(f"Found {len(found_files)} temp files to resume from.")
+                    # Load all files to get indices
+                    for fpath in found_files:
+                        try:
+                            # Load on CPU to avoid CUDA errors if not available or OOM
+                            chunk = torch.load(fpath, map_location="cpu")
+                            for item in chunk:
+                                idx = item.get("index")
+                                if idx is not None:
+                                    skip_indices.add(idx)
+                        except Exception as e:
+                            print(f"Error loading {fpath}: {e}")
+
+                    print(f"Found {len(skip_indices)} indices to skip.")
+                else:
+                    print(f"No temp files found in {self.resume_from}")
+        return skip_indices
 
     def val_dataloader(self):
         def collate_fn(batch):
