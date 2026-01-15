@@ -58,15 +58,15 @@ class EvaluatorDataModule(LightningDataModule):
         if self.tokenizer is None:
             self.tokenizer = get_tokenizer_for_model(self.model_name)
 
-            # Determine max_length from model config
-            # Try common config attributes for max sequence length
-            model_max_length = getattr(self.tokenizer, "model_max_length", None)
-            if (
-                model_max_length and model_max_length < 1e9
-            ):  # Check it's not a huge default
-                self.max_length = model_max_length
-            else:
-                if self.max_length is None:
+            # Determine max_length from model config if not provided
+            if self.max_length is None:
+                # Try common config attributes for max sequence length
+                model_max_length = getattr(self.tokenizer, "model_max_length", None)
+                if (
+                    model_max_length and model_max_length < 1e9
+                ):  # Check it's not a huge default
+                    self.max_length = model_max_length
+                else:
                     self.max_length = DEFAULT_MAX_LENGTH
         # Read LLM outputs from CSV
         questions = []
