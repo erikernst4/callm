@@ -133,12 +133,6 @@ class CalibrationCLI(LightningCLI):
             default=False,
             help="Whether to evaluate correctness after validation",
         )
-        parser.add_argument(
-            "--resume_from",
-            type=str,
-            default=None,
-            help="Path to previous run directory to resume from (containing temp_eval_results*.pt files)",
-        )
 
     def after_validate(self):
         """Run correctness evaluation after LLM validation completes."""
