@@ -37,6 +37,8 @@ class EvaluatorModule(LightningModule):
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
         resume_from: str = None,
+        *args,
+        **kwargs,
     ):
         super().__init__()
 

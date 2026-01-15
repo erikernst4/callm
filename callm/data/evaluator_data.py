@@ -41,6 +41,8 @@ class EvaluatorDataModule(LightningDataModule):
         num_workers: int = 8,
         max_length: int = None,
         resume_from: str = None,
+        *args,
+        **kwargs,
     ):
         super().__init__()
         self.llm_outputs_path = llm_outputs_path
