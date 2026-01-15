@@ -5,6 +5,9 @@ from callm.data.evaluator_data import EvaluatorDataModule
 import os
 from lightning.pytorch.loggers import CSVLogger
 
+# Disable tokenizer parallelism to avoid deadlocks
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 class CalibrationTrainer(Trainer):
     def evaluation(
