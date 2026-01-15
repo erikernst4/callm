@@ -34,6 +34,8 @@ class EvaluatorModule(LightningModule):
         hf_token: str = None,
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
+        *args,
+        **kwargs,
     ):
         super().__init__()
 
