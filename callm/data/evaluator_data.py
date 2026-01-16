@@ -83,6 +83,18 @@ class EvaluatorDataModule(LightningDataModule):
             for i, row in enumerate(reader):
                 if i in self.skip_indices:
                     continue
+
+                required_cols = [
+                    "question",
+                    "gold_answers",
+                    "pred_answer",
+                    "confidence",
+                ]
+                if any(row.get(k) is None for k in required_cols):
+                    raise ValueError(
+                        f"Warning: Skipping malformed row {i} in {self.llm_outputs_path}. "
+                    )
+
                 questions.append(row["question"])
                 gold_answers_list.append(
                     [g.strip().lower() for g in row["gold_answers"].split("|")]
