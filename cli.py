@@ -10,11 +10,22 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class CalibrationTrainer(Trainer):
+    def __init__(
+        self,
+        *args,
+        evaluate_correctness: bool = False,
+        evaluator_model_name: str = "google/flan-t5-base",
+        evaluator_batch_size: int = 8,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.evaluate_correctness = evaluate_correctness
+        self.evaluator_model_name = evaluator_model_name
+        self.evaluator_batch_size = evaluator_batch_size
+
     def evaluation(
         self,
         llm_outputs_path: str = None,
-        evaluator_model_name: str = "google/flan-t5-base",
-        evaluator_batch_size: int = 8,
         num_workers: int = None,
         flush_outputs_every_n_steps: int = None,
         save_outputs: bool = None,
@@ -86,8 +97,8 @@ class CalibrationTrainer(Trainer):
         if evaluator_dm is None:
             evaluator_dm = EvaluatorDataModule(
                 llm_outputs_path=llm_outputs_path,
-                model_name=evaluator_model_name,
-                batch_size=evaluator_batch_size,
+                model_name=self.evaluator_model_name,
+                batch_size=self.evaluator_batch_size,
                 num_workers=num_workers,
                 resume_from=resume_from,
             )
@@ -100,7 +111,7 @@ class CalibrationTrainer(Trainer):
 
         if evaluator_model is None:
             evaluator_model = EvaluatorModule(
-                model_name=evaluator_model_name,
+                model_name=self.evaluator_model_name,
                 flush_outputs_every_n_steps=flush_outputs_every_n_steps,
                 save_outputs=save_outputs,
                 resume_from=resume_from,
@@ -125,20 +136,12 @@ class CalibrationCLI(LightningCLI):
         kwargs["trainer_class"] = CalibrationTrainer
         super().__init__(*args, **kwargs)
 
-    def add_arguments_to_parser(self, parser):
-        """Add evaluator-specific arguments."""
-        parser.add_argument(
-            "--evaluate_correctness",
-            type=bool,
-            default=False,
-            help="Whether to evaluate correctness after validation",
-        )
-
     def after_validate(self):
         """Run correctness evaluation after LLM validation completes."""
-        config = self.config.validate
-        if not config.evaluate_correctness:
+        if not self.trainer.evaluate_correctness:
             return
+
+        config = self.config.validate
 
         # Get path to LLM outputs
         log_dir = self.trainer.log_dir or os.getcwd()
@@ -154,8 +157,6 @@ class CalibrationCLI(LightningCLI):
         # Run evaluation using the trainer method
         self.trainer.evaluation(
             llm_outputs_path=llm_outputs_path,
-            evaluator_model_name=config.evaluator_model_name,
-            evaluator_batch_size=config.evaluator_batch_size,
             num_workers=num_workers,
             flush_outputs_every_n_steps=config.model.init_args.flush_outputs_every_n_steps,
             save_outputs=config.model.init_args.save_outputs,

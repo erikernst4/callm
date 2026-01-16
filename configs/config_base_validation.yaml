@@ -1,12 +1,12 @@
 # lightning.pytorch==2.5.5
 seed_everything: true
-evaluate_correctness: false
-evaluator_model_name: Qwen/Qwen3-4B-Instruct-2507
-evaluator_batch_size: 1
 trainer:
+  evaluate_correctness: false
+  evaluator_model_name: Qwen/Qwen3-4B-Instruct-2507
+  evaluator_batch_size: 1
   accelerator: "gpu"
   strategy: auto
-  devices: 1
+  devices: [0]
   num_nodes: 1
   precision: null
   logger: null
@@ -50,20 +50,22 @@ model:
     model_name: Qwen/Qwen3-4B-Instruct-2507
     hf_token: null
     train: false
-    return_logits: true
+    return_logits: false
     extractor:
-      class_path: callm.extractors.SequencePosteriorConfidenceExtractor
+      class_path: callm.extractors.VerbalizedConfidenceExtractor
       init_args:
         model_name: ${model.init_args.model_name}
     save_outputs: false
     flush_outputs_every_n_steps: 1000
 data:
-  batch_size: 1
-  model_name: ${model.init_args.model_name}
-  prompt: callm.prompts.LABEL_PROB_PROMPT
-  max_samples: null
-  seed: 42
-  num_workers: 8
+  class_path: callm.data.TriviaQADataModule
+  init_args:
+    batch_size: 1
+    model_name: ${model.init_args.model_name}
+    prompt: callm.prompts.VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT
+    max_samples: null
+    seed: 42
+    num_workers: 8
 optimizer: null
 lr_scheduler: null
 ckpt_path: null

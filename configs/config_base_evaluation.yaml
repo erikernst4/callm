@@ -1,9 +1,12 @@
 # lightning.pytorch==2.5.5
 seed_everything: true
 trainer:
+  evaluate_correctness: false
+  evaluator_model_name: Qwen/Qwen3-4B-Instruct-2507
+  evaluator_batch_size: 1
   accelerator: "gpu"
   strategy: auto
-  devices: 1
+  devices: [1]
   num_nodes: 1
   precision: null
   logger: null
@@ -44,22 +47,23 @@ trainer:
 model:
   class_path: callm.models.EvaluatorModule
   init_args:
-    model_name: ${evaluator_model_name}
+    model_name: ${trainer.evaluator_model_name}
     hf_token: null
-    flush_outputs_every_n_steps: 1000
+    flush_outputs_every_n_steps: 300
     save_outputs: false
+    resume_from: ${resume_from}
 data:
   class_path: callm.data.EvaluatorDataModule
   init_args:
-    batch_size: ${evaluator_batch_size}
-    model_name: ${evaluator_model_name}
+    batch_size: ${trainer.evaluator_batch_size}
+    model_name: ${trainer.evaluator_model_name}
     llm_outputs_path: ${llm_outputs_path}
     num_workers: ${num_workers}
     max_length: 553
-evaluate_correctness: false
-evaluator_model_name: Qwen/Qwen3-4B-Instruct-2507
-evaluator_batch_size: 1
+    resume_from: ${resume_from}
+
 num_workers: 24
 optimizer: null
 lr_scheduler: null
-llm_outputs_path: null
+llm_outputs_path: /home/eernst/callm/lightning_logs/version_32/llm_outputs.csv
+resume_from: null
