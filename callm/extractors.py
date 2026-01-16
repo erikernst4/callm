@@ -16,6 +16,9 @@ from callm.utils import get_tokenizer_for_model
 class BaseExtractor(LightningModule, ABC):
     """Abstract base class for answer extractors."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
     @abstractmethod
     def forward(self, text: str, *args, **kwargs) -> Tuple[str, float]:
         """
