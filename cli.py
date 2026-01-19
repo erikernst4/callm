@@ -2,6 +2,7 @@ from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.trainer import Trainer
 from callm.models.evaluator import EvaluatorModule
 from callm.data.evaluator_data import EvaluatorDataModule
+from callm.utils import get_last_llm_outputs_path
 import os
 from lightning.pytorch.loggers import CSVLogger
 
@@ -54,34 +55,7 @@ class CalibrationTrainer(Trainer):
         if llm_outputs_path is None:
             # Look for the last run in lightning_logs
             log_dir = self.default_root_dir or os.getcwd()
-            lightning_logs = os.path.join(log_dir, "lightning_logs")
-            if os.path.exists(lightning_logs):
-                # Get all version directories sorting by creation time
-                versions = sorted(
-                    [
-                        os.path.join(lightning_logs, d)
-                        for d in os.listdir(lightning_logs)
-                        if d.startswith("version_")
-                    ],
-                    key=os.path.getmtime,
-                )
-                if versions:
-                    for version_dir in reversed(versions):
-                        candidate_path = os.path.join(version_dir, "llm_outputs.csv")
-                        if os.path.exists(candidate_path):
-                            llm_outputs_path = candidate_path
-                            print(f"Found latest LLM outputs at: {llm_outputs_path}")
-                            break
-
-            if llm_outputs_path is None:
-                # Fallback to checking the current trainer's log dir if available
-                if self.log_dir:
-                    candidate_path = os.path.join(self.log_dir, "llm_outputs.csv")
-                    if os.path.exists(candidate_path):
-                        llm_outputs_path = candidate_path
-                        print(
-                            f"Found LLM outputs in current log dir: {llm_outputs_path}"
-                        )
+            llm_outputs_path = get_last_llm_outputs_path(log_dir)
 
         if not llm_outputs_path or not os.path.exists(llm_outputs_path):
             print(

@@ -1,5 +1,6 @@
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
 from callm.config import CACHE_PATH, HF_TOKEN
+import os
 
 
 def get_tokenizer_for_model(model_name: str, hf_token: str = None):
@@ -51,3 +52,35 @@ def initialize_model(model_name: str, hf_token: str = None):
         )
 
     return model, is_seq2seq
+
+
+def get_last_llm_outputs_path(log_dir: str):
+    llm_outputs_path = None
+    # Look for the last run in lightning_logs
+    lightning_logs = os.path.join(log_dir, "lightning_logs")
+    if os.path.exists(lightning_logs):
+        # Get all version directories sorting by creation time
+        versions = sorted(
+            [
+                os.path.join(lightning_logs, d)
+                for d in os.listdir(lightning_logs)
+                if d.startswith("version_")
+            ],
+            key=os.path.getmtime,
+        )
+        if versions:
+            for version_dir in reversed(versions):
+                candidate_path = os.path.join(version_dir, "llm_outputs.csv")
+                if os.path.exists(candidate_path):
+                    llm_outputs_path = candidate_path
+                    print(f"Found latest LLM outputs at: {llm_outputs_path}")
+                    break
+
+    if llm_outputs_path is None:
+        # Fallback to checking the current trainer's log dir if available
+        if log_dir:
+            candidate_path = os.path.join(log_dir, "llm_outputs.csv")
+            if os.path.exists(candidate_path):
+                llm_outputs_path = candidate_path
+                print(f"Found LLM outputs in current log dir: {llm_outputs_path}")
+    return llm_outputs_path
