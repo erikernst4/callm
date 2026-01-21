@@ -1,6 +1,7 @@
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
 from callm.config import CACHE_PATH, HF_TOKEN
 import os
+from datasets import Dataset
 
 
 def get_tokenizer_for_model(model_name: str, hf_token: str = None):
@@ -84,3 +85,11 @@ def get_last_llm_outputs_path(log_dir: str):
                 llm_outputs_path = candidate_path
                 print(f"Found LLM outputs in current log dir: {llm_outputs_path}")
     return llm_outputs_path
+
+
+def subsample_dataset(dataset: Dataset, max_samples: int, seed: int = None):
+    if max_samples is not None:
+        if seed is not None:
+            dataset = dataset.shuffle(seed=seed)
+        dataset = dataset.select(range(min(len(dataset), max_samples)))
+    return dataset

@@ -1,7 +1,7 @@
 from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset
-from callm.utils import get_tokenizer_for_model
+from callm.utils import get_tokenizer_for_model, subsample_dataset
 from callm.prompts import VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT, Prompt
 
 
@@ -35,10 +35,7 @@ class TriviaQADataModule(LightningDataModule):
         dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")["validation"]
 
         # Limit samples if requested
-        if self.max_samples is not None:
-            if self.seed is not None:
-                dataset = dataset.shuffle(seed=self.seed)
-            dataset = dataset.select(range(min(len(dataset), self.max_samples)))
+        dataset = subsample_dataset(dataset, self.max_samples, self.seed)
 
         questions = dataset["question"]
         answers = []

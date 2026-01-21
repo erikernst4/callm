@@ -16,6 +16,7 @@ class LLM(LightningModule):
         return_logits: bool = False,
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
+        max_new_tokens: int = 100,
     ):
         super().__init__()
 
@@ -36,6 +37,7 @@ class LLM(LightningModule):
         self.extractor: BaseExtractor = extractor
         self.return_logits = return_logits
         self.flush_outputs_every_n_steps = flush_outputs_every_n_steps
+        self.max_new_tokens = max_new_tokens
 
         # Storage for validation predictions
         self.validation_outputs = []
@@ -56,7 +58,7 @@ class LLM(LightningModule):
         generation_kwargs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
-            "max_new_tokens": 100,
+            "max_new_tokens": self.max_new_tokens,
             "do_sample": False,
             "output_scores": self.return_logits,
             "return_dict_in_generate": self.return_logits,
@@ -89,7 +91,11 @@ class LLM(LightningModule):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
         questions = batch["question"]
-        gold_answers = batch["label"]
+        gold_answers = (
+            batch["label"]
+            if "label" in batch
+            else [None for _ in range(len(questions))]
+        )
 
         with torch.no_grad():
             generation_output = self.forward(input_ids, attention_mask)

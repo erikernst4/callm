@@ -10,7 +10,7 @@ from callm.data.evaluator_data import EvaluatorDataModule
 class TestEvaluatorDataModule:
     """Tests for EvaluatorDataModule."""
 
-    @patch("callm.data.evaluator_data.get_tokenizer_for_model")
+    @patch("callm.data.answers_data.get_tokenizer_for_model")
     def test_setup_reads_csv_and_tokenizes(self, mock_get_tokenizer):
         """Test that setup reads CSV and processes data correctly."""
         # Mock tokenizer

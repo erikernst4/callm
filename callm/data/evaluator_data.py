@@ -5,17 +5,12 @@ Reads LLM outputs from CSV and creates tokenized semantic equivalence prompts
 for batched evaluation.
 """
 
-from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from datasets import Dataset
 from jinja2 import Template
-import csv
-import os
-import glob
-import torch
 
-from callm.utils import get_tokenizer_for_model
-
+from callm.data.answers_data import AnswersDataModule
+from callm.utils import subsample_dataset
 
 SEMANTIC_EQUIVALENCE_PROMPT = Template(
     """Is the following answer to my question Q semantically equivalent to any of the following answers?
@@ -27,84 +22,22 @@ Answers: {{ gold_answers }}
 Please answer with a single word, either "Yes." or "No.", and explain your reasoning."""
 )
 
-DEFAULT_MAX_LENGTH = 512
 
-
-class EvaluatorDataModule(LightningDataModule):
+class EvaluatorDataModule(AnswersDataModule):
     """DataModule for batched correctness evaluation."""
 
-    def __init__(
-        self,
-        llm_outputs_path: str = None,
-        model_name: str = "google/flan-t5-base",
-        batch_size: int = 1,
-        num_workers: int = 8,
-        max_length: int = None,
-        resume_from: str = None,
-        *args,
-        **kwargs,
-    ):
-        super().__init__()
-        self.llm_outputs_path = llm_outputs_path
-        self.model_name = model_name
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.tokenizer = None
-        self.max_length = max_length
-        self.resume_from = resume_from
-        self.skip_indices = set()
-
     def setup(self, stage: str = None):
-        if self.tokenizer is None:
-            self.tokenizer = get_tokenizer_for_model(self.model_name)
+        self._setup_tokenizer()
 
-            # Determine max_length from model config if not provided
-            if self.max_length is None:
-                # Try common config attributes for max sequence length
-                model_max_length = getattr(self.tokenizer, "model_max_length", None)
-                if (
-                    model_max_length and model_max_length < 1e9
-                ):  # Check it's not a huge default
-                    self.max_length = model_max_length
-                else:
-                    self.max_length = DEFAULT_MAX_LENGTH
-        # Read LLM outputs from CSV
-        questions = []
-        gold_answers_list = []
-        pred_answers = []
-        confidences = []
-        raw_outputs = []
-        original_indices = []
+        # Load LLM outputs from CSV using base class method
+        rows = self.load_llm_outputs_from_csv()
 
-        self.skip_indices = self._get_skip_indices()
-
-        with open(self.llm_outputs_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for i, row in enumerate(reader):
-                if i in self.skip_indices:
-                    continue
-
-                required_cols = [
-                    "question",
-                    "gold_answers",
-                    "pred_answer",
-                    "confidence",
-                ]
-                if any(row.get(k) is None for k in required_cols):
-                    raise ValueError(
-                        f"Warning: Skipping malformed row {i} in {self.llm_outputs_path}. "
-                    )
-
-                questions.append(row["question"])
-                gold_answers_list.append(
-                    [g.strip().lower() for g in row["gold_answers"].split("|")]
-                )
-                pred_answers.append(row["pred_answer"])
-                confidences.append(row["confidence"])
-                raw_outputs.append(row.get("raw_output", ""))
-                original_indices.append(i)
-
-        print(f"\nLoaded {len(questions)} rows from CSV file: {self.llm_outputs_path}")
+        questions = [row["question"] for row in rows]
+        gold_answers_list = [row["gold_answers"] for row in rows]
+        pred_answers = [row["pred_answer"] for row in rows]
+        confidences = [row["confidence"] for row in rows]
+        raw_outputs = [row["raw_output"] for row in rows]
+        original_indices = [row["index"] for row in rows]
 
         # Create evaluation prompts
         prompts = []
@@ -168,37 +101,7 @@ class EvaluatorDataModule(LightningDataModule):
             }
         ).with_format("torch")
 
-    def _get_skip_indices(self):
-        skip_indices = set()
-        if self.resume_from:
-            if not os.path.exists(self.resume_from):
-                raise ValueError(f"Resume path {self.resume_from} does not exist.")
-            else:
-                # Look for files matching pattern
-                pattern = os.path.join(self.resume_from, "temp_eval_results_rank0_*.pt")
-                found_files = sorted(
-                    glob.glob(pattern),
-                    key=lambda x: int(x.split("_")[-1].split(".")[0]),
-                )
-
-                if found_files:
-                    print(f"Found {len(found_files)} temp files to resume from.")
-                    # Load all files to get indices
-                    for fpath in found_files:
-                        try:
-                            # Load on CPU to avoid CUDA errors if not available or OOM
-                            chunk = torch.load(fpath, map_location="cpu")
-                            for item in chunk:
-                                idx = item.get("index")
-                                if idx is not None:
-                                    skip_indices.add(idx)
-                        except Exception as e:
-                            print(f"Error loading {fpath}: {e}")
-
-                    print(f"Found {len(skip_indices)} indices to skip.")
-                else:
-                    print(f"No temp files found in {self.resume_from}")
-        return skip_indices
+        self.dataset = subsample_dataset(self.dataset, self.max_samples, self.seed)
 
     def val_dataloader(self):
         def collate_fn(batch):

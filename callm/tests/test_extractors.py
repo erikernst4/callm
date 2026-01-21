@@ -6,7 +6,8 @@ import torch
 from unittest.mock import patch, MagicMock
 from callm.extractors import (
     VerbalizedConfidenceExtractor,
-    SequencePosteriorConfidenceExtractor,
+    SequencePosteriorExtractor,
+    IsTruePosteriorExtractor,
 )
 
 
@@ -107,7 +108,9 @@ Probability: 0.88"""
         assert confidence == 0.88
 
 
-class TestSequencePosteriorConfidenceExtractor:
+class TestSequencePosteriorLogic:
+    """Tests for the base sequence posterior logic using IsTruePosteriorExtractor."""
+
     @pytest.fixture
     def mock_tokenizer(self):
         tokenizer = MagicMock()
@@ -119,85 +122,56 @@ class TestSequencePosteriorConfidenceExtractor:
     def test_token_extraction_offset_mapping(self, mock_get_tokenizer, mock_tokenizer):
         mock_get_tokenizer.return_value = mock_tokenizer
 
-        # Setup extractor
-        extractor = SequencePosteriorConfidenceExtractor(model_name="gpt2")
-        # extractor.device is a property in LightningModule, cannot set it directly.
-
-        # Test Case 1: "Guess: World", answer="World"
-        # Layout: "Guess" (0,5), ":" (5,6), " World" (6,12)
-        # Answer "World" is at index 7 in "Guess: World" (0-indexed? No wait.)
-        # Text: "Guess: World"
-        # 012345678901
-        # G u e s s :   W o r l d
-        # Answer "World" starts at 7.
-        # Token " World" (including space): matches " World".
-        # Offsets likely: (0,5) "Guess", (5,6) ":", (6,12) " World".
-        # (Assuming space is part of World token in GPT2 style)
+        extractor = SequencePosteriorExtractor(model_name="gpt2")
 
         text = "Guess: World"
-        # output_ids/logits don't matter much for indices logic check
         output_ids = torch.tensor([1, 2, 3])
         logits = torch.randn(3, 100)
 
-        # Mock encoding
         encoding_mock = MagicMock()
         encoding_mock.offset_mapping = [(0, 5), (5, 6), (6, 12)]
         mock_tokenizer.return_value = encoding_mock
 
-        # Run forward
-        # Only test first return value logic for finding answer tokens
-        # We expect confidence to be nan because we didn't mock enough for prob calc yet
         answer, confidence = extractor(text, logits, output_ids)
 
-        # Check that we called tokenizer with return_offsets_mapping=True
         mock_tokenizer.assert_called_with(text, return_offsets_mapping=True)
-
         assert answer == "World"
-        assert 0 <= confidence <= 1  # Confidence should be in [0,1]
+        assert 0 <= confidence <= 1
 
     @patch("callm.extractors.get_tokenizer_for_model")
     def test_token_extraction_no_match(self, mock_get_tokenizer, mock_tokenizer):
         mock_get_tokenizer.return_value = mock_tokenizer
-        extractor = SequencePosteriorConfidenceExtractor(model_name="gpt2")
+        extractor = SequencePosteriorExtractor(model_name="gpt2")
 
         text = "Hello Universe"
         output_ids = torch.tensor([1, 2])
         logits = torch.randn(2, 100)
-
-        # Answer "World" not in text
-        # But extractor uses self.extract_answer(text) which usually falls back to first line
-        # "Hello Universe" -> "Hello Universe"
-        # So it will look for "Hello Universe" tokens.
 
         encoding_mock = MagicMock()
         encoding_mock.offset_mapping = [(0, 5), (6, 14)]
         mock_tokenizer.return_value = encoding_mock
 
         answer, confidence = extractor.forward(text, logits, output_ids)
-        assert answer == "Hello Universe"  # First line fallback
+        assert answer == "Hello Universe"
 
     @patch("callm.extractors.get_tokenizer_for_model")
     def test_extractor_handles_1d_logits(self, mock_get_tokenizer):
-        """Test that SequencePosteriorConfidenceExtractor handles 1D logits correctly."""
+        """Test that extractor handles 1D logits correctly."""
         mock_tokenizer = MagicMock()
         mock_get_tokenizer.return_value = mock_tokenizer
 
-        extractor = SequencePosteriorConfidenceExtractor(model_name="gpt2")
+        extractor = SequencePosteriorExtractor(model_name="gpt2")
 
-        # Case 1: 1D logits (Optimized)
         text = "Guess: Paris"
         logits_1d = torch.tensor([-0.1, -0.2, -0.5])
 
         mock_encoding = MagicMock()
-        # "Paris" -> index 2 (last one)
         mock_encoding.offset_mapping = [(0, 5), (5, 6), (7, 12)]
         mock_tokenizer.return_value = mock_encoding
         extractor.tokenizer = mock_tokenizer
 
-        # Run forward
         answer, confidence = extractor.forward(text, logits_1d, None)
         assert answer == "Paris"
-        # index 2 corresponds to -0.5
         assert np.abs(confidence - np.exp(-0.5)) < 1e-6
 
     @patch("callm.extractors.get_tokenizer_for_model")
@@ -206,9 +180,9 @@ class TestSequencePosteriorConfidenceExtractor:
         mock_tokenizer = MagicMock()
         mock_get_tokenizer.return_value = mock_tokenizer
 
-        extractor = SequencePosteriorConfidenceExtractor(model_name="gpt2")
+        extractor = SequencePosteriorExtractor(model_name="gpt2")
 
-        logits_2d = torch.randn(3, 100)  # 3 tokens, 100 vocab
+        logits_2d = torch.randn(3, 100)
 
         text = "Guess: Paris"
         mock_encoding = MagicMock()
@@ -219,3 +193,162 @@ class TestSequencePosteriorConfidenceExtractor:
         answer, confidence = extractor.forward(text, logits_2d, None)
         assert answer == "Paris"
         assert 0 <= confidence <= 1.0
+
+
+class TestSequencePosteriorExtractor:
+    """Tests for SequencePosteriorExtractor base class."""
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_compute_probability_from_logits_1d(self, mock_get_tokenizer):
+        """Test probability computation with 1D logits."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        extractor = IsTruePosteriorExtractor(model_name="gpt2")
+
+        logits = torch.tensor([-0.5, -1.0, -0.2])
+        token_indices = [0, 2]
+
+        prob = extractor.compute_probability_from_logits(logits, token_indices)
+
+        expected = np.exp(-0.7)
+        assert np.abs(prob - expected) < 1e-6
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_compute_probability_from_logits_2d(self, mock_get_tokenizer):
+        """Test probability computation with 2D logits."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        extractor = IsTruePosteriorExtractor(model_name="gpt2")
+
+        logits = torch.zeros(3, 10)
+        logits[0, 5] = 10.0
+        logits[1, 3] = 8.0
+        token_indices = [0, 1]
+
+        prob = extractor.compute_probability_from_logits(logits, token_indices)
+
+        assert 0 <= prob <= 1.0
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_compute_probability_empty_indices(self, mock_get_tokenizer):
+        """Test probability computation with empty indices."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        extractor = IsTruePosteriorExtractor(model_name="gpt2")
+
+        logits = torch.tensor([-0.5, -1.0])
+        token_indices = []
+
+        prob = extractor.compute_probability_from_logits(logits, token_indices)
+        assert np.isnan(prob)
+
+
+class TestIsTruePosteriorExtractor:
+    """Tests for IsTruePosteriorExtractor."""
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_forward_empty_text(self, mock_get_tokenizer):
+        """Test forward with empty text returns nan."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        extractor = IsTruePosteriorExtractor(model_name="gpt2")
+
+        answer, confidence = extractor.forward("", None, None)
+        assert answer == ""
+        assert np.isnan(confidence)
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_forward_none_logits(self, mock_get_tokenizer):
+        """Test forward with None logits returns nan."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        extractor = IsTruePosteriorExtractor(model_name="gpt2")
+
+        # Mock tokenizer return for extract_answer and get_target_token_indices
+        mock_encoding = MagicMock()
+        mock_encoding.offset_mapping = [(0, 3)]
+        mock_tokenizer.return_value = mock_encoding
+
+        answer, confidence = extractor.forward("A", None, None)
+        assert answer == "A"
+        assert np.isnan(confidence)
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_forward_choice_a_true(self, mock_get_tokenizer):
+        """Test forward when choice is (A) True."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        extractor = IsTruePosteriorExtractor(model_name="gpt2")
+
+        text = "A True"
+        logits = torch.tensor([-0.1])  # log prob for (A)
+
+        mock_encoding = MagicMock()
+        # Mocking A at 0:1
+        mock_encoding.offset_mapping = [(0, 1)]
+        mock_tokenizer.return_value = mock_encoding
+
+        answer, confidence = extractor.forward(text, logits, None)
+
+        assert answer == "A"
+        assert np.abs(confidence - np.exp(-0.1)) < 1e-6
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_forward_choice_b_false(self, mock_get_tokenizer):
+        """Test forward when choice is (B) False - should flip confidence."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        extractor = IsTruePosteriorExtractor(model_name="gpt2")
+
+        text = "B False"
+        logits = torch.tensor([-0.2])  # log prob for (B)
+
+        mock_encoding = MagicMock()
+        # Mocking B at 0:1
+        mock_encoding.offset_mapping = [(0, 1)]
+        mock_tokenizer.return_value = mock_encoding
+
+        answer, confidence = extractor.forward(text, logits, None)
+
+        # Confidence should NOT be flipped anymore
+        expected_seq_posterior = np.exp(-0.2)
+        assert answer == "B"
+        assert np.abs(confidence - expected_seq_posterior) < 1e-6
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_extract_answer_variants(self, mock_get_tokenizer):
+        """Test extracting choice variants."""
+        mock_get_tokenizer.return_value = MagicMock()
+        extractor = IsTruePosteriorExtractor(model_name="gpt2")
+
+        assert extractor.extract_answer("(A) True") == "A"
+        assert extractor.extract_answer("Answer is B.") == "B"
+        assert extractor.extract_answer("**A**") == "A"
+        assert extractor.extract_answer("The answer is True") == "True"
+        assert extractor.extract_answer("It is definitely False") == "False"
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_get_target_token_indices(self, mock_get_tokenizer):
+        """Test that get_target_token_indices finds the choice marker."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+        extractor = IsTruePosteriorExtractor(model_name="gpt2")
+
+        text = "(A) True"
+        mock_encoding = MagicMock()
+        mock_encoding.offset_mapping = [(0, 3), (3, 4), (4, 8)]
+
+        indices = extractor.get_target_token_indices(text, mock_encoding)
+        # Should only get the index for "(A)" which is idx 0
+        assert indices == [0]
+
+    def test_inherits_from_sequence_posterior_extractor(self):
+        """Test that IsTruePosteriorExtractor inherits from SequencePosteriorExtractor."""
+        assert issubclass(IsTruePosteriorExtractor, SequencePosteriorExtractor)

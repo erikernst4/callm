@@ -26,3 +26,16 @@ Guess: <most likely guess, as short as possible; not a complete sentence, just t
 Probability: <the probability between 0.0 and 1.0 that your guess is correct, without any extra commentary whatsoever; just the probability!>
 
 The question is: {{ question }}""")
+
+IS_TRUE_PROB_PROMPT = Prompt("""Evaluate the factual correctness of the proposed answer for the given question.
+
+Question: {{ question }}
+Proposed Answer: {{ answer }}
+
+Is the proposed answer correct?
+(A) True
+(B) False
+
+Constraint: Response must be only the letter A or B.
+
+Answer:""")
