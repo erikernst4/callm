@@ -10,6 +10,9 @@ def cli_main():
             "evaluation": {
                 "default_config_files": ["configs/config_base_evaluation.yaml"]
             },
+            "evaluate_csv": {
+                "default_config_files": ["configs/config_base_evaluation.yaml"]
+            },
             "parser_mode": "omegaconf",
         },
     )

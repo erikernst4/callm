@@ -102,6 +102,40 @@ class CalibrationTrainer(Trainer):
 
         self.validate(evaluator_model, evaluator_dm)
 
+    def evaluate_csv(
+        self,
+        csv_path: str = None,
+        model: EvaluatorModule = None,
+        llm_outputs_path: str = None,
+        num_workers: int = None,
+        resume_from: str = None,
+        **kwargs,
+    ):
+        """
+        Evaluate correctness from a CSV file.
+
+        Args:
+            csv_path: Path to the CSV file containing evaluation results.
+            model: Evaluator model instance (injected by CLI).
+        """
+        if csv_path is None:
+            print("Error: Please provide a valid CSV path using --csv_path.")
+            return
+
+        if model is None:
+            # Should be enforced by CLI, but safe fallback logic or error
+            print("Error: Model not provided.")
+            return
+
+        model.load_evaluation_results_from_csv(csv_path)
+
+        # Monkeypatch log to print metrics since we are not in a loop
+        def log_printer(name, value, **kwargs):
+            print(f"{name}: {value}")
+
+        model.log = log_printer
+        model.calculate_metrics()
+
 
 class CalibrationCLI(LightningCLI):
     """Extended LightningCLI that runs evaluation after validation."""
@@ -152,5 +186,12 @@ class CalibrationCLI(LightningCLI):
                 "train_dataloaders",
                 "val_dataloaders",
                 # llm_outputs_path is not manually added, so let it be added by signature
+            },
+            "evaluate_csv": {
+                "model",
+                "dataloaders",
+                "datamodule",
+                "train_dataloaders",
+                "val_dataloaders",
             },
         }

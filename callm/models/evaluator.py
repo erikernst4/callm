@@ -248,46 +248,7 @@ class EvaluatorModule(LightningModule):
                     result["correct"] = False
                     result["evaluator_response"] = ""
 
-        # Extract arrays
-        all_confidences = []
-        all_correctness = []
-        for result in self.evaluation_results:
-            try:
-                conf = float(result["confidence"])
-            except (ValueError, TypeError):
-                conf = float("nan")
-            all_confidences.append(conf)
-            all_correctness.append(result["correct"])
-
-        all_confidences = np.array(all_confidences)
-        all_correctness = np.array(all_correctness)
-
-        # Filter invalid confidences
-        valid_indices = ~np.isnan(all_confidences)
-        n_invalid = len(all_confidences) - np.sum(valid_indices)
-
-        if n_invalid > 0:
-            print(
-                f"\nWarning: {n_invalid} samples have invalid confidence (NaN). "
-                "Ignoring them for metrics."
-            )
-
-        confidences = all_confidences[valid_indices]
-        correctness = all_correctness[valid_indices]
-
-        # Calculate metrics
-        ece = expected_calibration_error(confidences, correctness, n_bins=10)
-        bs = brier_score(confidences, correctness)
-        ce = cross_entropy(confidences, correctness)
-        auc = auc_score(confidences, correctness)
-        accuracy = float(np.mean(correctness)) if len(correctness) > 0 else 0.0
-
-        # Log metrics
-        self.log("val_ece", ece, prog_bar=True, sync_dist=True)
-        self.log("val_brier_score", bs, prog_bar=True, sync_dist=True)
-        self.log("val_cross_entropy", ce, prog_bar=True, sync_dist=True)
-        self.log("val_auc", auc, prog_bar=True, sync_dist=True)
-        self.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
+        self.calculate_metrics()
 
         # Save final results
         log_dir = self.trainer.log_dir or os.getcwd()
@@ -340,3 +301,78 @@ class EvaluatorModule(LightningModule):
 
     def configure_optimizers(self):
         return None
+
+    def load_evaluation_results_from_csv(self, csv_path: str):
+        """
+        Load evaluation results from a CSV file.
+
+        The CSV is expected to have columns: 'Confidence' and 'Correct'.
+        'Correct' should be 'Yes' or 'No'.
+        """
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+        self.evaluation_results = []
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    confidence = float(row["Confidence"])
+                except (ValueError, KeyError):
+                    confidence = float("nan")
+
+                is_correct = row.get("Correct", "").strip().lower() == "yes"
+
+                self.evaluation_results.append(
+                    {
+                        "confidence": confidence,
+                        "correct": is_correct,
+                        # Other fields are not strictly necessary for calculate_metrics
+                        # but we can keep them for completeness if needed.
+                        "question": row.get("Question", ""),
+                        "gold_answers": row.get("Gold Answers", ""),
+                        "pred_answer": row.get("Predicted Answer", ""),
+                    }
+                )
+        print(f"Loaded {len(self.evaluation_results)} results from {csv_path}")
+
+    def calculate_metrics(self):
+        all_confidences = []
+        all_correctness = []
+        for result in self.evaluation_results:
+            try:
+                conf = float(result["confidence"])
+            except (ValueError, TypeError):
+                conf = float("nan")
+            all_confidences.append(conf)
+            all_correctness.append(result["correct"])
+
+        all_confidences = np.array(all_confidences)
+        all_correctness = np.array(all_correctness)
+
+        # Filter invalid confidences
+        valid_indices = ~np.isnan(all_confidences)
+        n_invalid = len(all_confidences) - np.sum(valid_indices)
+
+        if n_invalid > 0:
+            print(
+                f"\nWarning: {n_invalid} samples have invalid confidence (NaN). "
+                "Ignoring them for metrics."
+            )
+
+        confidences = all_confidences[valid_indices]
+        correctness = all_correctness[valid_indices]
+
+        # Calculate metrics
+        ece = expected_calibration_error(confidences, correctness, n_bins=10)
+        bs = brier_score(confidences, correctness)
+        ce = cross_entropy(confidences, correctness)
+        auc = auc_score(confidences, correctness)
+        accuracy = float(np.mean(correctness)) if len(correctness) > 0 else 0.0
+
+        # Log metrics
+        self.log("val_ece", ece, prog_bar=True, sync_dist=True)
+        self.log("val_brier_score", bs, prog_bar=True, sync_dist=True)
+        self.log("val_cross_entropy", ce, prog_bar=True, sync_dist=True)
+        self.log("val_auc", auc, prog_bar=True, sync_dist=True)
+        self.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
