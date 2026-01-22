@@ -36,6 +36,6 @@ Is the proposed answer correct?
 (A) True
 (B) False
 
-Constraint: Response must be only the letter A or B.
+Constraint: Response must be only the letter A or B. Nothing else, no explanation, no other words.
 
 Answer:""")
