@@ -2,12 +2,15 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausa
 from callm.config import CACHE_PATH, HF_TOKEN
 import os
 from datasets import Dataset
+from transformers import AutoProcessor, Glm4vForConditionalGeneration
 
 
 def get_tokenizer_for_model(model_name: str, hf_token: str = None):
     if hf_token is None:
         hf_token = HF_TOKEN
-    if model_name.startswith("google/flan-t5"):
+    if model_name == "zai-org/GLM-4.6V-Flash":
+        tokenizer = AutoProcessor.from_pretrained(model_name)
+    if model_name.startswith("google/flan-t5") or model_name.startswith("zai-org"):
         tokenizer = AutoTokenizer.from_pretrained(model_name)
     elif model_name.startswith("meta-llama/"):
         tokenizer = AutoTokenizer.from_pretrained(
@@ -39,12 +42,20 @@ def initialize_model(model_name: str, hf_token: str = None):
     if model_name.startswith("google/flan-t5"):
         model = AutoModelForSeq2SeqLM.from_pretrained(model_name, cache_dir=CACHE_PATH)
         is_seq2seq = True
-    elif model_name.startswith("Qwen/") or model_name.startswith("meta-llama/"):
+    elif model_name == "zai-org/GLM-4.6V-Flash":
+        model = model = Glm4vForConditionalGeneration.from_pretrained(
+            pretrained_model_name_or_path=model_name,
+        )
+    elif (
+        model_name.startswith("Qwen/")
+        or model_name.startswith("meta-llama/")
+        or model_name.startswith("zai-org")
+    ):
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             cache_dir=CACHE_PATH,
             trust_remote_code=True if model_name.startswith("Qwen/") else False,
-            use_auth_token=hf_token,
+            # use_auth_token=hf_token,
         )
         is_seq2seq = False
     else:

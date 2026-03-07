@@ -26,7 +26,9 @@ class LLM(LightningModule):
         self.model, self.is_seq2seq = initialize_model(model_name, hf_token)
         self.tokenizer = get_tokenizer_for_model(model_name)
 
-        if self.model.config.pad_token_id is None:
+        if hasattr(self.model.config, "text_config"):
+            self.model.config.pad_token_id = self.model.config.text_config.pad_token_id
+        elif self.model.config.pad_token_id is None:
             self.model.config.pad_token_id = self.model.config.eos_token_id
 
         if not train:

@@ -19,6 +19,7 @@ class TestLLMInitialization:
         mock_model_instance = Mock()
         mock_model_instance.parameters.return_value = iter([])
         mock_model_instance.config = Mock()
+        mock_model_instance.config.configure_mock(text_config=Mock(pad_token_id=0))
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
         mock_init_model.return_value = (mock_model_instance, True)  # is_seq2seq=True
@@ -43,7 +44,7 @@ class TestLLMInitialization:
         # Setup mock model
         mock_model_instance = Mock()
         mock_model_instance.parameters.return_value = iter([])
-        mock_model_instance.config = Mock()
+        mock_model_instance.config = Mock(spec=["pad_token_id", "eos_token_id"])
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
         mock_init_model.return_value = (mock_model_instance, False)  # is_seq2seq=False
@@ -87,7 +88,7 @@ class TestLLMForward:
         # Setup mock model
         mock_model_instance = Mock()
         mock_model_instance.parameters.return_value = iter([])
-        mock_model_instance.config = Mock()
+        mock_model_instance.config = Mock(spec=["pad_token_id", "eos_token_id"])
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
         mock_model_instance.generate.return_value = torch.tensor([[1, 2, 3]])
@@ -122,7 +123,7 @@ class TestLLMValidation:
         # Setup mock model
         mock_model_instance = Mock()
         mock_model_instance.parameters.return_value = iter([])
-        mock_model_instance.config = Mock()
+        mock_model_instance.config = Mock(spec=["pad_token_id", "eos_token_id"])
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
         mock_model_instance.generate.return_value = torch.tensor([[1, 2, 3]])
@@ -166,7 +167,7 @@ class TestLLMValidation:
         # Setup mock model
         mock_model_instance = Mock()
         mock_model_instance.parameters.return_value = iter([])
-        mock_model_instance.config = Mock()
+        mock_model_instance.config = Mock(spec=["pad_token_id", "eos_token_id"])
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
         # Mock generate return value for batch of 4
@@ -235,7 +236,7 @@ class TestConfigureOptimizers:
         # Setup mock model
         mock_model_instance = Mock()
         mock_model_instance.parameters.return_value = iter([])
-        mock_model_instance.config = Mock()
+        mock_model_instance.config = Mock(spec=["pad_token_id", "eos_token_id"])
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
         mock_init_model.return_value = (mock_model_instance, True)
@@ -255,6 +256,7 @@ class TestConfigureOptimizers:
         """Test that LLM saves 1D log_softmax values instead of 2D full logits."""
         # Mock init_model return
         mock_model = Mock()
+        mock_model.config = Mock(spec=["pad_token_id", "eos_token_id"])
         mock_model.config.pad_token_id = 0
         mock_model.config.eos_token_id = 1
         mock_model.parameters.return_value = iter([])  # Ensure it's iterable
