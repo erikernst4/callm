@@ -37,6 +37,7 @@ class EvaluatorModule(LightningModule):
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
         resume_from: str = None,
+        max_new_tokens: int = 100,
         *args,
         **kwargs,
     ):
@@ -59,6 +60,7 @@ class EvaluatorModule(LightningModule):
         self.flush_outputs_every_n_steps = flush_outputs_every_n_steps
         self.save_outputs = save_outputs
         self.resume_from = resume_from
+        self.max_new_tokens = max_new_tokens
 
         # Storage for evaluation results
         self.evaluation_results = []
@@ -71,7 +73,7 @@ class EvaluatorModule(LightningModule):
         generation_kwargs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
-            "max_new_tokens": 100,
+            "max_new_tokens": self.max_new_tokens,
             "do_sample": False,
         }
 
