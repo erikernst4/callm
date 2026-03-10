@@ -144,6 +144,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Credentials in jsons
+*.json
+
 # Spyder project settings
 .spyderproject
 .spyproject
