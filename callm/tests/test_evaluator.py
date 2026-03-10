@@ -233,6 +233,7 @@ class TestEvaluatorModule:
             assert "val_accuracy" in logged_metrics
 
             assert "val_ece" in logged_metrics
+            assert "val_confidence_cost" in logged_metrics
 
             # Check file saved
             mock_file.assert_called()

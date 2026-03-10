@@ -1,143 +1,111 @@
 """
 Calibration metrics for evaluating confidence predictions.
 
-Implements ECE, AUC, Brier Score, and Cross Entropy metrics.
+Uses torchmetrics built-ins where available (ECE, AUROC, Brier/MSE) and
+provides custom implementations for Cross Entropy and Confidence Cost.
 """
 
-import numpy as np
-from sklearn.metrics import roc_auc_score
-from typing import List, Union
+import torch
+from torchmetrics import Metric, MeanSquaredError
+from torchmetrics.classification import BinaryCalibrationError, BinaryAUROC
+import torch.nn.functional as F
 
 
-def expected_calibration_error(
-    confidences: Union[List[float], np.ndarray],
-    correctness: Union[List[bool], np.ndarray],
-    n_bins: int = 10,
-) -> float:
+# ──────────────────────────────────────────────────────
+# Built-in wrappers — thin adapters so every metric
+# has the same (confidences, correctness) signature.
+# ──────────────────────────────────────────────────────
+
+
+class ExpectedCalibrationError(BinaryCalibrationError):
+    """ECE via torchmetrics BinaryCalibrationError (L1 norm)."""
+
+    def __init__(self, n_bins: int = 10, **kwargs):
+        super().__init__(n_bins=n_bins, norm="l1", **kwargs)
+
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        super().update(confidences.float(), correctness.long())
+
+
+class AUCScore(BinaryAUROC):
+    """AUROC via torchmetrics BinaryAUROC."""
+
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        super().update(confidences.float(), correctness.long())
+
+    def compute(self) -> torch.Tensor:
+        try:
+            return super().compute()
+        except (ValueError, IndexError):
+            # Single class or empty — undefined
+            return torch.tensor(float("nan"))
+
+
+class BrierScore(MeanSquaredError):
+    """Brier Score = MSE between confidence and correctness."""
+
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        super().update(confidences.float(), correctness.float())
+
+
+# ──────────────────────────────────────────────────────
+# Custom metrics
+# ──────────────────────────────────────────────────────
+
+
+class CrossEntropy(Metric):
     """
-    Calculate Expected Calibration Error (ECE).
+    Binary Cross Entropy between confidence and correctness.
 
-    ECE measures the difference between predicted confidence and actual accuracy
-    across bins.
-
-    Args:
-        confidences: Array of confidence scores (0.0 to 1.0)
-        correctness: Array of boolean correctness values
-        n_bins: Number of bins for calibration
-
-    Returns:
-        ECE value (lower is better, 0 is perfect calibration), or np.nan if undefined
+    CE = -mean[ y·log(p) + (1-y)·log(1-p) ]
     """
-    confidences = np.array(confidences)
-    correctness = np.array(correctness, dtype=float)
 
-    if len(confidences) == 0:
-        return np.nan
+    full_state_update = False
 
-    # Create bins
-    bin_edges = np.linspace(0, 1, n_bins + 1)
-    bin_indices = np.digitize(confidences, bin_edges) - 1
-    bin_indices = np.clip(bin_indices, 0, n_bins - 1)
+    def __init__(self, epsilon: float = 1e-7, **kwargs):
+        super().__init__(**kwargs)
+        self.epsilon = epsilon
+        self.add_state("sum_ce", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
 
-    ece = 0.0
-    for i in range(n_bins):
-        bin_mask = bin_indices == i
-        if np.sum(bin_mask) > 0:
-            bin_confidences = confidences[bin_mask]
-            bin_correctness = correctness[bin_mask]
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        conf = confidences.float().clamp(self.epsilon, 1 - self.epsilon)
+        corr = correctness.float()
+        ce = F.binary_cross_entropy(conf, corr, reduction="sum")
+        self.sum_ce += ce
+        self.count += confidences.numel()
 
-            avg_confidence = np.mean(bin_confidences)
-            avg_accuracy = np.mean(bin_correctness)
-            bin_weight = np.sum(bin_mask) / len(confidences)
-
-            ece += bin_weight * np.abs(avg_confidence - avg_accuracy)
-
-    return float(ece)
+    def compute(self) -> torch.Tensor:
+        if self.count == 0:
+            return torch.tensor(float("nan"))
+        return self.sum_ce / self.count
 
 
-def brier_score(
-    confidences: Union[List[float], np.ndarray],
-    correctness: Union[List[bool], np.ndarray],
-) -> float:
+class ConfidenceCost(Metric):
     """
-    Calculate Brier Score (BS).
+    Confidence Cost metric.
 
-    BS measures the mean squared difference between predicted probabilities
-    and actual outcomes.
+    cost = log(2 - q_m) · (2 - 𝟙) − log(1 - q_m) · (1 - 𝟙)
 
-    Args:
-        confidences: Array of confidence scores (0.0 to 1.0)
-        correctness: Array of boolean correctness values
-
-    Returns:
-        Brier Score (lower is better, 0 is perfect), or np.nan if undefined
+    where q_m is the confidence and 𝟙 is 1 when correct, 0 otherwise.
     """
-    confidences = np.array(confidences)
-    correctness = np.array(correctness, dtype=float)
 
-    if len(confidences) == 0:
-        return np.nan
+    full_state_update = False
 
-    return float(np.mean((confidences - correctness) ** 2))
+    def __init__(self, epsilon: float = 1e-7, **kwargs):
+        super().__init__(**kwargs)
+        self.epsilon = epsilon
+        self.add_state("sum_cost", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
 
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        q = confidences.float().clamp(self.epsilon, 1 - self.epsilon)
+        indicator = correctness.float()
+        cost = torch.log(2 - q) * (2 - indicator) - torch.log(1 - q) * (1 - indicator)
+        self.sum_cost += cost.sum()
+        self.count += confidences.numel()
 
-def cross_entropy(
-    confidences: Union[List[float], np.ndarray],
-    correctness: Union[List[bool], np.ndarray],
-    epsilon: float = 1e-10,
-) -> float:
-    """
-    Calculate Cross Entropy (CE).
-
-    CE measures the negative log-likelihood of the predictions.
-
-    Args:
-        confidences: Array of confidence scores (0.0 to 1.0)
-        correctness: Array of boolean correctness values
-        epsilon: Small value to avoid log(0)
-
-    Returns:
-        Cross Entropy (lower is better), or np.nan if undefined
-    """
-    confidences = np.array(confidences)
-    correctness = np.array(correctness, dtype=float)
-
-    if len(confidences) == 0:
-        return np.nan
-
-    # Clip confidences to avoid log(0)
-    confidences = np.clip(confidences, epsilon, 1 - epsilon)
-
-    # Calculate cross entropy
-    ce = -np.mean(
-        correctness * np.log(confidences) + (1 - correctness) * np.log(1 - confidences)
-    )
-
-    return float(ce)
-
-
-def auc_score(
-    confidences: Union[List[float], np.ndarray],
-    correctness: Union[List[bool], np.ndarray],
-) -> float:
-    """
-    Calculate Area Under ROC Curve (AUC).
-
-    AUC measures the model's ability to rank correct predictions higher
-    than incorrect ones.
-
-    Args:
-        confidences: Array of confidence scores (0.0 to 1.0)
-        correctness: Array of boolean correctness values
-
-    Returns:
-        AUC score (higher is better, 0.5 is random, 1.0 is perfect), or np.nan if undefined
-    """
-    confidences = np.array(confidences)
-    correctness = np.array(correctness, dtype=int)
-
-    if len(confidences) == 0 or len(np.unique(correctness)) < 2:
-        # Cannot compute AUC with empty data or only one class
-        return np.nan
-
-    return float(roc_auc_score(correctness, confidences))
+    def compute(self) -> torch.Tensor:
+        if self.count == 0:
+            return torch.tensor(float("nan"))
+        return self.sum_cost / self.count

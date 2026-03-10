@@ -15,10 +15,11 @@ import glob
 
 from callm.utils import initialize_model, get_tokenizer_for_model
 from callm.metrics import (
-    expected_calibration_error,
-    brier_score,
-    cross_entropy,
-    auc_score,
+    ExpectedCalibrationError,
+    BrierScore,
+    CrossEntropy,
+    AUCScore,
+    ConfidenceCost,
 )
 
 
@@ -362,19 +363,22 @@ class EvaluatorModule(LightningModule):
                 "Ignoring them for metrics."
             )
 
-        confidences = all_confidences[valid_indices]
-        correctness = all_correctness[valid_indices]
+        confidences = torch.tensor(all_confidences[valid_indices], dtype=torch.float32)
+        correctness = torch.tensor(all_correctness[valid_indices], dtype=torch.float32)
 
-        # Calculate metrics
-        ece = expected_calibration_error(confidences, correctness, n_bins=10)
-        bs = brier_score(confidences, correctness)
-        ce = cross_entropy(confidences, correctness)
-        auc = auc_score(confidences, correctness)
-        accuracy = float(np.mean(correctness)) if len(correctness) > 0 else 0.0
+        accuracy = float(correctness.mean()) if len(correctness) > 0 else 0.0
 
-        # Log metrics
-        self.log("val_ece", ece, prog_bar=True, sync_dist=True)
-        self.log("val_brier_score", bs, prog_bar=True, sync_dist=True)
-        self.log("val_cross_entropy", ce, prog_bar=True, sync_dist=True)
-        self.log("val_auc", auc, prog_bar=True, sync_dist=True)
+        # Calculate metrics using torchmetrics classes
+        metrics = {
+            "val_ece": ExpectedCalibrationError(n_bins=10),
+            "val_brier_score": BrierScore(),
+            "val_cross_entropy": CrossEntropy(),
+            "val_auc": AUCScore(),
+            "val_confidence_cost": ConfidenceCost(),
+        }
+
+        for name, metric in metrics.items():
+            metric.update(confidences, correctness)
+            self.log(name, metric.compute(), prog_bar=True, sync_dist=True)
+
         self.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
