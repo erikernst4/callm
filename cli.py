@@ -31,9 +31,10 @@ class CalibrationTrainer(Trainer):
         flush_outputs_every_n_steps: int = None,
         save_outputs: bool = None,
         resume_from: str = None,
+        use_existing_csv: bool = False,
         **kwargs,
     ):
-        """Run correctness evaluation on LLM outputs."""
+        """Run correctness evaluation on LLM outputs or recalculate metrics."""
         # Check if model and datamodule were already instantiated by LightningCLI
         evaluator_model = kwargs.get("model")
         evaluator_dm = kwargs.get("datamodule")
@@ -61,6 +62,56 @@ class CalibrationTrainer(Trainer):
             print(
                 "Error: LLM outputs not found. Please provide a valid path using --llm_outputs_path."
             )
+            return
+
+        output_dir = os.path.dirname(llm_outputs_path)
+        eval_log_dir = f"{output_dir}_evaluation"
+
+        if use_existing_csv:
+            import glob
+
+            csv_files = glob.glob(
+                os.path.join(eval_log_dir, "version_*", "evaluation_results.csv")
+            )
+            if not csv_files:
+                print(
+                    f"Error: No existing evaluation_results.csv found in {eval_log_dir}."
+                )
+                return
+
+            # Use the latest version
+            csv_path = sorted(
+                csv_files,
+                key=lambda x: int(os.path.basename(os.path.dirname(x)).split("_")[-1]),
+            )[-1]
+
+            if evaluator_model is None:
+                evaluator_model = EvaluatorModule(
+                    model_name=self.evaluator_model_name,
+                    flush_outputs_every_n_steps=flush_outputs_every_n_steps,
+                    save_outputs=save_outputs,
+                    resume_from=resume_from,
+                )
+
+            print(f"Using existing CSV for metrics computation: {csv_path}")
+            evaluator_model.load_evaluation_results_from_csv(csv_path)
+
+            logger = CSVLogger(
+                save_dir=os.path.dirname(eval_log_dir),
+                name=os.path.basename(eval_log_dir),
+            )
+
+            metrics_log = {}
+
+            def log_printer(name, value, **kwargs):
+                print(f"{name}: {value}")
+                metrics_log[name] = value.item() if hasattr(value, "item") else value
+
+            evaluator_model.log = log_printer
+            evaluator_model.calculate_metrics()
+
+            logger.log_metrics(metrics_log)
+            logger.save()
             return
 
         # Use num_workers from parameter or default to 0
@@ -92,8 +143,6 @@ class CalibrationTrainer(Trainer):
             )
 
         # Configure logging to a new folder with _evaluation suffix
-        output_dir = os.path.dirname(llm_outputs_path)
-        eval_log_dir = f"{output_dir}_evaluation"
         logger = CSVLogger(
             save_dir=os.path.dirname(eval_log_dir), name=os.path.basename(eval_log_dir)
         )
