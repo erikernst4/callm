@@ -154,11 +154,11 @@ class TestLLMValidation:
         llm.validation_step(batch, 0)
 
         # Verify outputs stored
-        assert len(llm.validation_outputs) == 1
-        assert llm.validation_outputs[0]["question"] == "What is the capital of France?"
-        assert "output_ids" in llm.validation_outputs[0]
-        assert "output_ids" in llm.validation_outputs[0]
-        assert "gold_answers" in llm.validation_outputs[0]
+        assert len(llm.outputs) == 1
+        assert llm.outputs[0]["question"] == "What is the capital of France?"
+        assert "output_ids" in llm.outputs[0]
+        assert "output_ids" in llm.outputs[0]
+        assert "gold_answers" in llm.outputs[0]
 
     @patch("callm.models.llm.get_tokenizer_for_model")
     @patch("callm.models.llm.initialize_model")
@@ -206,7 +206,7 @@ class TestLLMValidation:
             llm.validation_step(batch, 0)
 
             # Check flushing happened
-            assert len(llm.validation_outputs) == 0
+            assert len(llm.outputs) == 0
             assert len(llm.flushed_output_files) == 1
             assert os.path.exists(llm.flushed_output_files[0])
 
@@ -306,8 +306,8 @@ class TestConfigureOptimizers:
             model.validation_step(batch, 0)
 
             # Check stored output
-            assert len(model.validation_outputs) == 1
-            out = model.validation_outputs[0]
+            assert len(model.outputs) == 1
+            out = model.outputs[0]
 
             assert "logits" in out
             logits = out["logits"]

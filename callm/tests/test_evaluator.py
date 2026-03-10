@@ -130,16 +130,16 @@ class TestEvaluatorModule:
         evaluator.validation_step(batch, 0)
 
         # Check results
-        assert len(evaluator.evaluation_results) == 2
+        assert len(evaluator.outputs) == 2
 
         # First item (Exact match)
-        assert evaluator.evaluation_results[0]["exact_match"] is True
+        assert evaluator.outputs[0]["exact_match"] is True
 
         # Second item (Non-exact) should have output_ids stored
-        assert evaluator.evaluation_results[1]["exact_match"] is False
-        assert evaluator.evaluation_results[1]["output_ids"] is not None
+        assert evaluator.outputs[1]["exact_match"] is False
+        assert evaluator.outputs[1]["output_ids"] is not None
         # Verify it's a tensor
-        assert torch.is_tensor(evaluator.evaluation_results[1]["output_ids"])
+        assert torch.is_tensor(evaluator.outputs[1]["output_ids"])
 
         # Verify generate called only once (for the non-exact item)
         assert mock_model.generate.call_count == 1
@@ -161,7 +161,7 @@ class TestEvaluatorModule:
         evaluator = EvaluatorModule(model_name="dummy")
 
         # Populate results directly
-        evaluator.evaluation_results = [
+        evaluator.outputs = [
             {
                 "index": 0,
                 "question": "Q1",
@@ -284,9 +284,9 @@ class TestEvaluatorModule:
             evaluator.validation_step(batch, 0)
 
             # Check flushing happened (3 items >= 2 limit)
-            # evaluation_results should be empty (or contain leftovers if we flushed exactly 2)
+            # outputs should be empty (or contain leftovers if we flushed exactly 2)
             # Actually, the logic flushes ALL if >= limit
-            assert len(evaluator.evaluation_results) == 0
+            assert len(evaluator.outputs) == 0
             assert len(evaluator.flushed_output_files) == 1
             assert os.path.exists(evaluator.flushed_output_files[0])
 

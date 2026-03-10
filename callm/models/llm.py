@@ -1,12 +1,12 @@
-from lightning.pytorch import LightningModule
 import torch
 import os
 import csv
 from callm.extractors import BaseExtractor
 from callm.utils import initialize_model, get_tokenizer_for_model
+from callm.models.base import BaseLightningModule
 
 
-class LLM(LightningModule):
+class LLM(BaseLightningModule):
     def __init__(
         self,
         extractor: BaseExtractor,
@@ -18,7 +18,10 @@ class LLM(LightningModule):
         save_outputs: bool = False,
         max_new_tokens: int = 100,
     ):
-        super().__init__()
+        super().__init__(
+            flush_outputs_every_n_steps=flush_outputs_every_n_steps,
+            save_outputs=save_outputs,
+        )
 
         self.model_name = model_name
 
@@ -38,13 +41,7 @@ class LLM(LightningModule):
 
         self.extractor: BaseExtractor = extractor
         self.return_logits = return_logits
-        self.flush_outputs_every_n_steps = flush_outputs_every_n_steps
         self.max_new_tokens = max_new_tokens
-
-        # Storage for validation predictions
-        self.validation_outputs = []
-        self.flushed_output_files = []
-        self.save_outputs = save_outputs
 
     def forward(self, input_ids, attention_mask):
         """
@@ -148,34 +145,16 @@ class LLM(LightningModule):
                 if scores_list:
                     out["logits"] = torch.stack(scores_list)  # [generated_seq_len]
 
-            self.validation_outputs.append(out)
+            self.outputs.append(out)
 
         # Periodically flush outputs to disk to save memory
         if (
             self.flush_outputs_every_n_steps > 0
-            and len(self.validation_outputs) >= self.flush_outputs_every_n_steps
+            and len(self.outputs) >= self.flush_outputs_every_n_steps
         ):
-            self._flush_validation_outputs()
+            self._flush_outputs(prefix="temp_val_outputs")
 
         return {"batch_size": len(questions)}
-
-    def _flush_validation_outputs(self):
-        """Helper to save current validation outputs to a temporary file."""
-        if not self.validation_outputs:
-            return
-
-        # Use trainer log_dir or current directory
-        log_dir = self.trainer.log_dir or os.getcwd()
-        os.makedirs(log_dir, exist_ok=True)
-
-        batch_idx = len(self.flushed_output_files)
-        filename = os.path.join(
-            log_dir, f"temp_val_outputs_rank{self.global_rank}_{batch_idx}.pt"
-        )
-
-        torch.save(self.validation_outputs, filename)
-        self.flushed_output_files.append(filename)
-        self.validation_outputs = []  # Clear memory
 
     def on_validation_epoch_end(self):
         """
@@ -183,30 +162,18 @@ class LLM(LightningModule):
         Evaluation is handled separately by EvaluatorModule.
         """
         # Flush any remaining outputs
-        if self.validation_outputs:
-            self._flush_validation_outputs()
+        if self.outputs and (
+            self.flushed_output_files or self.flush_outputs_every_n_steps > 0
+        ):
+            self._flush_outputs(prefix="temp_val_outputs")
 
-        # Reload all flushed outputs
-        all_outputs = []
-        for filepath in self.flushed_output_files:
-            try:
-                chunk = torch.load(filepath)
-                all_outputs.extend(chunk)
-            except Exception as e:
-                print(f"Error loading flushed file {filepath}: {e}")
-            finally:
-                # Clean up file
-                if not self.save_outputs and os.path.exists(filepath):
-                    os.remove(filepath)
+        self._reload_flushed_outputs()
 
-        self.flushed_output_files = []  # Reset list
-        self.validation_outputs = all_outputs  # Restore full list for processing
-
-        if len(self.validation_outputs) == 0:
+        if len(self.outputs) == 0:
             return
 
         # Decode all output IDs and extract answers/confidence
-        for out in self.validation_outputs:
+        for out in self.outputs:
             raw_output = self.tokenizer.decode(
                 out["output_ids"], skip_special_tokens=True
             )
@@ -243,7 +210,7 @@ class LLM(LightningModule):
                     ]
                 )
 
-                for out in self.validation_outputs:
+                for out in self.outputs:
                     # Format gold_answers as a string representation
                     gold_str = (
                         "|".join(out["gold_answers"]) if out["gold_answers"] else ""
@@ -271,8 +238,4 @@ class LLM(LightningModule):
             print(f"Failed to save LLM outputs: {e}")
 
         # Clear outputs for next epoch
-        self.validation_outputs = []
-
-    def configure_optimizers(self):
-        # Not training, return None
-        return None
+        self.outputs = []

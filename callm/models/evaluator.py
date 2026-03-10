@@ -5,7 +5,6 @@ Performs batched inference to determine if predicted answers are
 semantically equivalent to ground truth answers.
 """
 
-from lightning.pytorch import LightningModule
 import torch
 import numpy as np
 import os
@@ -21,9 +20,10 @@ from callm.metrics import (
     AUCScore,
     ConfidenceCost,
 )
+from callm.models.base import BaseLightningModule
 
 
-class EvaluatorModule(LightningModule):
+class EvaluatorModule(BaseLightningModule):
     """
     LightningModule for batched correctness evaluation.
 
@@ -42,7 +42,10 @@ class EvaluatorModule(LightningModule):
         *args,
         **kwargs,
     ):
-        super().__init__()
+        super().__init__(
+            flush_outputs_every_n_steps=flush_outputs_every_n_steps,
+            save_outputs=save_outputs,
+        )
 
         self.model_name = model_name
         self.initial_flushed_files = []
@@ -58,14 +61,8 @@ class EvaluatorModule(LightningModule):
         for param in self.model.parameters():
             param.requires_grad = False
 
-        self.flush_outputs_every_n_steps = flush_outputs_every_n_steps
-        self.save_outputs = save_outputs
         self.resume_from = resume_from
         self.max_new_tokens = max_new_tokens
-
-        # Storage for evaluation results
-        self.evaluation_results = []
-        self.flushed_output_files = []
 
     def forward(self, input_ids, attention_mask):
         """
@@ -127,7 +124,7 @@ class EvaluatorModule(LightningModule):
 
         # Store results
         for i in range(len(exact_matches)):
-            self.evaluation_results.append(
+            self.outputs.append(
                 {
                     "index": indices[i].item()
                     if hasattr(indices[i], "item")
@@ -145,29 +142,11 @@ class EvaluatorModule(LightningModule):
         # Periodically flush results to disk to save memory
         if (
             self.flush_outputs_every_n_steps > 0
-            and len(self.evaluation_results) >= self.flush_outputs_every_n_steps
+            and len(self.outputs) >= self.flush_outputs_every_n_steps
         ):
-            self._flush_evaluation_results()
+            self._flush_outputs(prefix="temp_eval_results")
 
         return {"batch_size": len(exact_matches)}
-
-    def _flush_evaluation_results(self):
-        """Helper to save current evaluation results to a temporary file."""
-        if not self.evaluation_results:
-            return
-
-        # Use trainer log_dir or current directory
-        log_dir = self.trainer.log_dir or os.getcwd()
-        os.makedirs(log_dir, exist_ok=True)
-
-        batch_idx = len(self.flushed_output_files)
-        filename = os.path.join(
-            log_dir, f"temp_eval_results_rank{self.global_rank}_{batch_idx}.pt"
-        )
-
-        torch.save(self.evaluation_results, filename)
-        self.flushed_output_files.append(filename)
-        self.evaluation_results = []  # Clear memory
 
     def on_validation_start(self):
         """Prepare evaluation by loading previous results if resuming."""
@@ -204,36 +183,21 @@ class EvaluatorModule(LightningModule):
         """
         # Flush any remaining results only if we have already flushed some,
         # or if periodic flushing is enabled.
-        if self.evaluation_results and (
+        if self.outputs and (
             self.flushed_output_files or self.flush_outputs_every_n_steps > 0
         ):
-            self._flush_evaluation_results()
+            self._flush_outputs(prefix="temp_eval_results")
 
-        # If we have flushed files, reload them all
-        if self.flushed_output_files:
-            all_results = []
-            for filepath in self.flushed_output_files:
-                try:
-                    chunk = torch.load(filepath)
-                    all_results.extend(chunk)
-                except Exception as e:
-                    print(f"Error loading flushed file {filepath}: {e}")
-                finally:
-                    # Clean up file
-                    if not self.save_outputs and os.path.exists(filepath):
-                        os.remove(filepath)
+        self._reload_flushed_outputs()
 
-            self.flushed_output_files = []  # Reset list
-            self.evaluation_results = all_results  # Restore full list for processing
-
-        if len(self.evaluation_results) == 0:
+        if len(self.outputs) == 0:
             return
 
         # Sort by original index
-        self.evaluation_results.sort(key=lambda x: x["index"])
+        self.outputs.sort(key=lambda x: x["index"])
 
         # Decode and compute correctness
-        for result in self.evaluation_results:
+        for result in self.outputs:
             if "correct" in result:
                 continue
 
@@ -277,7 +241,7 @@ class EvaluatorModule(LightningModule):
                         "Raw Output",
                     ]
                 )
-                for result in self.evaluation_results:
+                for result in self.outputs:
                     conf_str = (
                         f"{float(result['confidence']):.6f}"
                         if result["confidence"] not in ["nan", ""]
@@ -300,10 +264,7 @@ class EvaluatorModule(LightningModule):
             print(f"Failed to save evaluation results: {e}")
 
         # Clear for next epoch
-        self.evaluation_results = []
-
-    def configure_optimizers(self):
-        return None
+        self.outputs = []
 
     def load_evaluation_results_from_csv(self, csv_path: str):
         """
@@ -315,7 +276,7 @@ class EvaluatorModule(LightningModule):
         if not os.path.exists(csv_path):
             raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
-        self.evaluation_results = []
+        self.outputs = []
         with open(csv_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -326,7 +287,7 @@ class EvaluatorModule(LightningModule):
 
                 is_correct = row.get("Correct", "").strip().lower() == "yes"
 
-                self.evaluation_results.append(
+                self.outputs.append(
                     {
                         "confidence": confidence,
                         "correct": is_correct,
@@ -337,12 +298,12 @@ class EvaluatorModule(LightningModule):
                         "pred_answer": row.get("Predicted Answer", ""),
                     }
                 )
-        print(f"Loaded {len(self.evaluation_results)} results from {csv_path}")
+        print(f"Loaded {len(self.outputs)} results from {csv_path}")
 
     def calculate_metrics(self):
         all_confidences = []
         all_correctness = []
-        for result in self.evaluation_results:
+        for result in self.outputs:
             try:
                 conf = float(result["confidence"])
             except (ValueError, TypeError):
