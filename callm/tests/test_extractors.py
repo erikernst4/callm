@@ -8,6 +8,8 @@ from callm.extractors import (
     VerbalizedConfidenceExtractor,
     SequencePosteriorExtractor,
     IsTruePosteriorExtractor,
+    GCPSequencePosteriorExtractor,
+    GCPIsTruePosteriorExtractor,
 )
 
 
@@ -352,3 +354,57 @@ class TestIsTruePosteriorExtractor:
     def test_inherits_from_sequence_posterior_extractor(self):
         """Test that IsTruePosteriorExtractor inherits from SequencePosteriorExtractor."""
         assert issubclass(IsTruePosteriorExtractor, SequencePosteriorExtractor)
+
+
+class TestGCPSequencePosteriorExtractor:
+    """Tests for GCPSequencePosteriorExtractor."""
+
+    def test_forward_valid(self):
+        extractor = GCPSequencePosteriorExtractor()
+        logits = torch.tensor([-0.5, -0.2])  # sum is -0.7
+        text = "Guess: Paris"
+
+        answer, confidence = extractor(text, logits, None)
+        assert answer == "Paris"
+        assert np.abs(confidence - np.exp(-0.7)) < 1e-6
+
+    def test_forward_none_logits(self):
+        extractor = GCPSequencePosteriorExtractor()
+        text = "Guess: Paris"
+
+        answer, confidence = extractor(text, None, None)
+        assert answer == "Paris"
+        assert np.isnan(confidence)
+
+    def test_forward_empty_text(self):
+        extractor = GCPSequencePosteriorExtractor()
+        logits = torch.tensor([-0.5])
+
+        answer, confidence = extractor("", logits, None)
+        assert answer == ""
+        assert np.isnan(confidence)
+
+
+class TestGCPIsTruePosteriorExtractor:
+    """Tests for GCPIsTruePosteriorExtractor."""
+
+    def test_forward_choice_a(self):
+        extractor = GCPIsTruePosteriorExtractor()
+        logits = torch.tensor([-0.1])
+        text = "(A) True"
+
+        answer, confidence = extractor(text, logits, None)
+        assert answer == "A"
+        assert np.abs(confidence - np.exp(-0.1)) < 1e-6
+
+    def test_extract_answer_variants(self):
+        extractor = GCPIsTruePosteriorExtractor()
+
+        assert extractor.extract_answer("(A) True") == "A"
+        assert extractor.extract_answer("Answer is B.") == "B"
+        assert extractor.extract_answer("**A**") == "A"
+        assert extractor.extract_answer("The answer is True") == "True"
+        assert extractor.extract_answer("It is definitely False") == "False"
+
+    def test_inheritance(self):
+        assert issubclass(GCPIsTruePosteriorExtractor, GCPSequencePosteriorExtractor)

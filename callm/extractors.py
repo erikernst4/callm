@@ -225,3 +225,62 @@ class IsTruePosteriorExtractor(SequencePosteriorExtractor):
             return "False"
 
         return ""
+
+
+class GCPSequencePosteriorExtractor(BaseExtractor):
+    """
+    Sequence posterior confidence extractor for GCP models.
+
+    Returns confidence by exponentiating the sum of log probabilities
+    returned by the GCP model, ignoring any tokenizer alignment.
+    """
+
+    def __init__(self, model_name: str = None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(
+        self,
+        text: str,
+        logits: torch.Tensor = None,
+        output_ids: torch.Tensor = None,
+        *args,
+        **kwargs,
+    ) -> Tuple[str, float]:
+        if not text:
+            return "", np.nan
+
+        answer = self.extract_answer(text)
+
+        if logits is None:
+            return answer, np.nan
+
+        # For GCP models, the returned 'logits' are already the log probabilities
+        # of the generated tokens. We just sum them.
+        try:
+            joint_log_prob = logits.sum().item()
+            confidence = np.exp(joint_log_prob)
+        except Exception:
+            confidence = np.nan
+
+        return answer, confidence
+
+
+class GCPIsTruePosteriorExtractor(GCPSequencePosteriorExtractor):
+    """
+    Extractor for IS_TRUE_PROB_PROMPT that computes joint logprob for GCP generated text.
+    """
+
+    def extract_answer(self, text: str) -> str:
+        """Extract the A/B choice from the text."""
+        # Find first occurrence of A or B as a whole word
+        match = re.search(r"\b(A|B)\b", text, re.IGNORECASE)
+        if match:
+            return match.group(0).upper()
+
+        # Fallback to True/False if labels not found
+        if "True" in text:
+            return "True"
+        if "False" in text:
+            return "False"
+
+        return ""
