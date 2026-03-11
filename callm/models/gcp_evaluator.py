@@ -26,7 +26,6 @@ class GCPEvaluatorModule(BaseLightningModule):
         self,
         model_name: str = "gemini-3-flash-preview",
         location: str = "global",
-        project: str = None,
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
         resume_from: str = None,
@@ -43,8 +42,6 @@ class GCPEvaluatorModule(BaseLightningModule):
         self.initial_flushed_files = []
 
         kwargs = {"vertexai": True, "location": location}
-        if project:
-            kwargs["project"] = project
 
         self.client = genai.Client(**kwargs)
 

@@ -14,7 +14,6 @@ class GCPLLM(BaseLightningModule):
         extractor: BaseExtractor,
         model_name: str = "gemini-3-flash-preview",
         location: str = "global",
-        project: str = None,
         return_logits: bool = False,
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
@@ -30,8 +29,6 @@ class GCPLLM(BaseLightningModule):
         # Security: Allow implicit credentials (like GOOGLE_APPLICATION_CREDENTIALS)
         # or require explicitly setting project logic securely, without hardcoding service account JSON paths inside the code.
         kwargs = {"vertexai": True, "location": location}
-        if project:
-            kwargs["project"] = project
 
         self.client = genai.Client(**kwargs)
 

@@ -12,13 +12,10 @@ class TestGCPLLM:
             extractor=extractor,
             model_name="my-test-model",
             location="us-central1",
-            project="test-project",
         )
         assert llm.model_name == "my-test-model"
         assert llm.client is not None
-        mock_genai.Client.assert_called_with(
-            vertexai=True, location="us-central1", project="test-project"
-        )
+        mock_genai.Client.assert_called_with(vertexai=True, location="us-central1")
 
     @patch("callm.models.gcp_llm.types")
     @patch("callm.models.gcp_llm.genai")
