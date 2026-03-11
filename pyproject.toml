@@ -18,6 +18,8 @@ dependencies = [
     "pytest>=7.0.0",
     "ipython>=9.8.0",
     "torchvision>=0.25.0",
+    "google-genai>=1.66.0",
+    "ipykernel>=7.2.0",
 ]
 
 [build-system]
