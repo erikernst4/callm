@@ -39,19 +39,6 @@ class CalibrationTrainer(Trainer):
         evaluator_model = kwargs.get("model")
         evaluator_dm = kwargs.get("datamodule")
 
-        # Ensure they are the correct type
-        if (
-            evaluator_model is not None
-            and not isinstance(evaluator_model, EvaluatorModule)
-            or (
-                evaluator_dm is not None
-                and not isinstance(evaluator_dm, EvaluatorDataModule)
-            )
-        ):
-            raise ValueError(
-                "Evaluator model and datamodule must be of type EvaluatorModule and EvaluatorDataModule"
-            )
-
         # Resolve llm_outputs_path if not provided
         if llm_outputs_path is None:
             # Look for the last run in lightning_logs
@@ -127,7 +114,7 @@ class CalibrationTrainer(Trainer):
                 num_workers=num_workers,
                 resume_from=resume_from,
             )
-        else:
+        elif evaluator_dm is not None and resume_from:
             evaluator_dm_attributes = evaluator_dm.__dict__
             evaluator_dm_attributes.update(
                 llm_outputs_path=llm_outputs_path, resume_from=resume_from
