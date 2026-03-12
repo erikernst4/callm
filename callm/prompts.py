@@ -11,13 +11,17 @@ class Prompt:
         return self.template.render(**kwargs)
 
 
-LABEL_PROB_PROMPT = Prompt("""Provide your best guess for the following question. Give ONLY the guess, no other words or explanation.
+LABEL_PROB_PROMPT_ZERO_SHOT = Prompt("""Provide your best guess for the following question. Give ONLY the guess, no other words or explanation. Return the answer in the following format: 'Guess: <your guess>'.
+
+Question: {{ question }}""")
+
+LABEL_PROB_PROMPT_ONE_SHOT = Prompt("""Provide your best guess for the following question. Give ONLY the guess, no other words or explanation. Return the answer in the following format: 'Guess: <your guess>'.
 
 For example:
+Question: What is the capital of France?
+Guess: Paris
 
-Guess: <most likely guess, as short as possible; not a complete sentence, just the guess!>
-
-The question is: {{ question }}""")
+Question: {{ question }}""")
 
 VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT = Prompt("""Provide your best guess and the probability that it is correct (0.0 to 1.0) for the following question. Give ONLY the guess and probability, no other words or explanation. For example:
 
@@ -33,9 +37,5 @@ Question: {{ question }}
 Proposed Answer: {{ answer }}
 
 Is the proposed answer correct?
-(A) True
-(B) False
 
-Constraint: Response must be only the letter A or B. Nothing else, no explanation, no other words.
-
-Answer:""")
+Response must be only the word 'True' or 'False'. Nothing else, no explanation, no other words.""")

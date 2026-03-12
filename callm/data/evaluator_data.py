@@ -13,13 +13,13 @@ from callm.data.answers_data import AnswersDataModule
 from callm.utils import subsample_dataset
 
 SEMANTIC_EQUIVALENCE_PROMPT = Template(
-    """Is the following answer to my question Q semantically equivalent to any of the following answers?
+    """Is the predicted answer to my question semantically equivalent to any of the gold standard answers?
 
 Question: {{ question }}
-Answer: {{ pred_answer }}
-Answers: {{ gold_answers }}
+Predicted answer: {{ pred_answer }}
+Gold Standard Answers: {{ gold_answers }}
 
-Please answer with a single word, either "Yes." or "No.", and explain your reasoning."""
+Please answer with a single word, either 'Yes.' or 'No.'"""
 )
 
 
