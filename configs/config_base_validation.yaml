@@ -2,11 +2,11 @@
 seed_everything: true
 trainer:
   evaluate_correctness: false
-  evaluator_model_name: Qwen/Qwen3-4B-Instruct-2507
+  evaluator_model_name: Qwen/Qwen3.5-9B
   evaluator_batch_size: 1
   accelerator: "gpu"
   strategy: auto
-  devices: [0]
+  devices: [1]
   num_nodes: 1
   precision: null
   logger: null
@@ -47,25 +47,28 @@ trainer:
 model:
   class_path: callm.models.LLM
   init_args:
-    model_name: Qwen/Qwen3-4B-Instruct-2507
+    model_name: Qwen/Qwen3.5-9B
     hf_token: null
     train: false
-    return_logits: false
+    return_logits: true
     extractor:
-      class_path: callm.extractors.VerbalizedConfidenceExtractor
+      class_path: callm.extractors.SequencePosteriorExtractor
       init_args:
         model_name: ${model.init_args.model_name}
     save_outputs: false
     flush_outputs_every_n_steps: 1000
+    max_new_tokens: 200
 data:
   class_path: callm.data.TriviaQADataModule
   init_args:
     batch_size: 1
     model_name: ${model.init_args.model_name}
-    prompt: callm.prompts.VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT
-    max_samples: null
+    prompt: callm.prompts.CHAT_LABEL_PROB_PROMPT_ZERO_SHOT
+    max_samples: 1000
     seed: 42
-    num_workers: 8
+    num_workers: 24
+    disable_thinking: true
+    #llm_outputs_path: /home/eernst/callm/lightning_logs/label_prob_Qwen3.5-9B/llm_outputs.csv
 optimizer: null
 lr_scheduler: null
 ckpt_path: null

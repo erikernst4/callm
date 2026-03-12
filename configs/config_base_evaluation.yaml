@@ -2,7 +2,7 @@
 seed_everything: true
 trainer:
   evaluate_correctness: false
-  evaluator_model_name: Qwen/Qwen3-4B-Instruct-2507
+  evaluator_model_name: Qwen/Qwen3.5-9B
   evaluator_batch_size: 1
   accelerator: "gpu"
   strategy: auto
@@ -52,6 +52,7 @@ model:
     flush_outputs_every_n_steps: 300
     save_outputs: false
     resume_from: ${resume_from}
+    max_new_tokens: 10
 data:
   class_path: callm.data.EvaluatorDataModule
   init_args:
@@ -65,5 +66,5 @@ data:
 num_workers: 24
 optimizer: null
 lr_scheduler: null
-llm_outputs_path: /home/eernst/callm/lightning_logs/version_32/llm_outputs.csv
+llm_outputs_path: /home/eernst/callm/lightning_logs/verbalized_Qwen3.5-9B/llm_outputs.csv
 resume_from: null
