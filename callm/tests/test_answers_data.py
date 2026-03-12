@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch, mock_open
 
 from callm.data.answers_data import AnswersDataModule
 from callm.data.is_true_data import IsTrueDataModule
+from callm.prompts import CHAT_IS_TRUE_PROB_PROMPT
 
 
 class TestAnswersDataModule:
@@ -262,3 +263,27 @@ class TestIsTrueDataModule:
         """Test that IsTrueDataModule inherits from AnswersDataModule."""
         dm = IsTrueDataModule()
         assert isinstance(dm, AnswersDataModule)
+
+    @patch("callm.data.answers_data.get_tokenizer_for_model")
+    def test_setup_unsupported_chat_template_raises_error(self, mock_get_tokenizer):
+        """Test that setup raises AttributeError when tokenizer lacks apply_chat_template but ChatPrompt is used."""
+        mock_tokenizer = Mock()
+        mock_tokenizer.model_max_length = 512
+        # Mocking a tokenizer that doesn't have apply_chat_template
+        del mock_tokenizer.apply_chat_template
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        csv_content = (
+            "question,gold_answers,pred_answer,confidence,raw_output\n"
+            "Q1,A1,A1,0.9,raw1\n"
+        )
+
+        with patch("builtins.open", mock_open(read_data=csv_content)):
+            dm = IsTrueDataModule(
+                llm_outputs_path="dummy.csv",
+                model_name="unsupported-model",
+                prompt=CHAT_IS_TRUE_PROB_PROMPT,  # Explicitly use a ChatPrompt
+            )
+            # Setup should fail when it tries to call apply_chat_template
+            with pytest.raises(AttributeError):
+                dm.setup()
