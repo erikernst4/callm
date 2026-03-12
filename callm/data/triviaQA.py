@@ -2,7 +2,7 @@ from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset
 from callm.utils import get_tokenizer_for_model, subsample_dataset
-from callm.prompts import VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT, Prompt
+from callm.prompts import CHAT_LABEL_PROB_PROMPT_ZERO_SHOT, ChatPrompt, Prompt
 
 
 class TriviaQADataModule(LightningDataModule):
@@ -10,10 +10,11 @@ class TriviaQADataModule(LightningDataModule):
         self,
         batch_size: int = 32,
         model_name: str = "google/flan-t5-small",
-        prompt: Prompt = VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT,
+        prompt: Prompt = CHAT_LABEL_PROB_PROMPT_ZERO_SHOT,
         max_samples: int = None,
         seed: int = 42,
         num_workers: int = 0,
+        disable_thinking: bool = False,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -23,6 +24,7 @@ class TriviaQADataModule(LightningDataModule):
         self.max_samples = max_samples
         self.seed = seed
         self.num_workers = num_workers
+        self.disable_thinking = disable_thinking
 
     def prepare_data(self):
         load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
@@ -52,21 +54,47 @@ class TriviaQADataModule(LightningDataModule):
         # Calculate max lengths for padding/truncation
         max_token_seq_length = 0
         for input_text in input_texts:
-            x = self.tokenizer(input_text, return_tensors="pt")
-            if x["input_ids"].size(1) > max_token_seq_length:
-                max_token_seq_length = x["input_ids"].size(1)
+            if isinstance(self.prompt, ChatPrompt):
+                tokenized = self.tokenizer.apply_chat_template(
+                    input_text,
+                    tokenize=True,
+                    return_tensors="pt",
+                    add_generation_prompt=True,
+                    return_dict=True,
+                    enable_thinking=not self.disable_thinking,
+                )
+                length = tokenized["input_ids"].size(1)
+            else:
+                x = self.tokenizer(input_text, return_tensors="pt")
+                length = x["input_ids"].size(1)
+
+            if length > max_token_seq_length:
+                max_token_seq_length = length
 
         # Tokenize
-        data = [
-            self.tokenizer(
-                input_text,
-                return_tensors="pt",
-                max_length=max_token_seq_length,
-                padding="max_length",
-                truncation=True,
-            )
-            for input_text in input_texts
-        ]
+        data = []
+        for input_text in input_texts:
+            if isinstance(self.prompt, ChatPrompt):
+                tokens = self.tokenizer.apply_chat_template(
+                    input_text,
+                    tokenize=True,
+                    return_tensors="pt",
+                    max_length=max_token_seq_length,
+                    padding="max_length",
+                    truncation=True,
+                    add_generation_prompt=True,
+                    return_dict=True,
+                    enable_thinking=not self.disable_thinking,
+                )
+            else:
+                tokens = self.tokenizer(
+                    input_text,
+                    return_tensors="pt",
+                    max_length=max_token_seq_length,
+                    padding="max_length",
+                    truncation=True,
+                )
+            data.append(tokens)
 
         self.triviaQA_val = Dataset.from_dict(
             {"data": data, "question": questions, "label": answers}

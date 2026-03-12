@@ -183,6 +183,16 @@ class TestIsTrueDataModule:
             "input_ids": torch.tensor([[1, 2, 3]]),
             "attention_mask": torch.tensor([[1, 1, 1]]),
         }
+        mock_tokenizer.apply_chat_template = Mock(
+            side_effect=lambda x, return_tensors=None, **kwargs: (
+                torch.tensor([[1, 2, 3]])
+                if not kwargs.get("return_dict")
+                else {
+                    "input_ids": torch.tensor([[1, 2, 3]]),
+                    "attention_mask": torch.tensor([[1, 1, 1]]),
+                }
+            )
+        )
         mock_get_tokenizer.return_value = mock_tokenizer
 
         csv_content = (
@@ -212,6 +222,16 @@ class TestIsTrueDataModule:
             "input_ids": torch.tensor([[1, 2, 3]]),
             "attention_mask": torch.tensor([[1, 1, 1]]),
         }
+        mock_tokenizer.apply_chat_template = Mock(
+            side_effect=lambda x, return_tensors=None, **kwargs: (
+                torch.tensor([[1, 2, 3]])
+                if not kwargs.get("return_dict")
+                else {
+                    "input_ids": torch.tensor([[1, 2, 3]]),
+                    "attention_mask": torch.tensor([[1, 1, 1]]),
+                }
+            )
+        )
         mock_get_tokenizer.return_value = mock_tokenizer
 
         csv_content = (
