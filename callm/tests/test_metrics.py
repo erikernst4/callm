@@ -42,6 +42,16 @@ class TestExpectedCalibrationError:
         ece = metric.compute().item()
         assert np.isnan(ece)
 
+    def test_nan_input_raises_error(self):
+        """Test that passing NaN values raises ValueError."""
+        metric = ExpectedCalibrationError()
+        confidences = torch.tensor([float("nan"), 0.5])
+        correctness = torch.tensor([True, False])
+        import pytest
+
+        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+            metric.update(confidences, correctness)
+
     def test_single_bin(self):
         """Test ECE with single bin."""
         confidences = torch.tensor([0.5, 0.5, 0.5, 0.5])
@@ -105,6 +115,16 @@ class TestBrierScore:
         bs = metric.compute().item()
         assert np.isnan(bs)
 
+    def test_nan_input_raises_error(self):
+        """Test that passing NaN values raises ValueError."""
+        metric = BrierScore()
+        confidences = torch.tensor([float("nan"), 0.5])
+        correctness = torch.tensor([True, False])
+        import pytest
+
+        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+            metric.update(confidences, correctness)
+
     def test_incremental_update(self):
         """Test that multiple updates accumulate correctly."""
         confidences = torch.tensor([0.8, 0.6, 0.3, 0.9])
@@ -149,6 +169,16 @@ class TestCrossEntropy:
         metric = CrossEntropy()
         ce = metric.compute().item()
         assert np.isnan(ce)
+
+    def test_nan_input_raises_error(self):
+        """Test that passing NaN values raises ValueError."""
+        metric = CrossEntropy()
+        confidences = torch.tensor([float("nan"), 0.5])
+        correctness = torch.tensor([True, False])
+        import pytest
+
+        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+            metric.update(confidences, correctness)
 
     def test_clipping(self):
         """Test that extreme values are clipped."""
@@ -197,6 +227,16 @@ class TestAUCScore:
         metric.update(torch.tensor([]), torch.tensor([]))
         auc = metric.compute().item()
         assert np.isnan(auc)
+
+    def test_nan_input_raises_error(self):
+        """Test that passing NaN values raises ValueError."""
+        metric = AUCScore()
+        confidences = torch.tensor([float("nan"), 0.5])
+        correctness = torch.tensor([True, False])
+        import pytest
+
+        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+            metric.update(confidences, correctness)
 
     def test_single_class(self):
         """Test AUC with only one class. BinaryAUROC returns 0.0."""
@@ -274,6 +314,16 @@ class TestConfidenceCost:
         metric = ConfidenceCost()
         cost = metric.compute().item()
         assert np.isnan(cost)
+
+    def test_nan_input_raises_error(self):
+        """Test that passing NaN values raises ValueError."""
+        metric = ConfidenceCost()
+        confidences = torch.tensor([float("nan"), 0.5])
+        correctness = torch.tensor([True, False])
+        import pytest
+
+        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+            metric.update(confidences, correctness)
 
     def test_incremental_update(self):
         """Test that multiple updates accumulate correctly."""

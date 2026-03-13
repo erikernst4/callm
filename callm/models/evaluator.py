@@ -319,9 +319,9 @@ class EvaluatorModule(BaseLightningModule):
         n_invalid = len(all_confidences) - np.sum(valid_indices)
 
         if n_invalid > 0:
-            print(
-                f"\nWarning: {n_invalid} samples have invalid confidence (NaN). "
-                "Ignoring them for metrics."
+            raise ValueError(
+                f"{n_invalid} samples have invalid confidence (NaN). "
+                "Metrics cannot be computed with NaN values."
             )
 
         confidences = torch.tensor(all_confidences[valid_indices], dtype=torch.float32)
