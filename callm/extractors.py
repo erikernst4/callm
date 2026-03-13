@@ -37,12 +37,12 @@ class BaseExtractor(LightningModule, ABC):
     def extract_answer(self, text: str):
         answer = ""
 
-        # Extract guess/answer
+        # Extract guess/answer — handles both prefilled and non-prefilled outputs
         guess_match = re.search(r"Guess:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
         if guess_match:
             answer = guess_match.group(1).strip()
         else:
-            # Fallback: try to extract first line as answer
+            # Fallback: use the full text (stripped), taking first line
             lines = text.strip().split("\n")
             if lines:
                 answer = lines[0].strip()

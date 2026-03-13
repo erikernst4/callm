@@ -51,17 +51,31 @@ class TriviaQADataModule(LightningDataModule):
 
         input_texts = [self.prompt(question=question) for question in questions]
 
+        # Determine whether to use continue_final_message (assistant prefill)
+        # or add_generation_prompt based on whether the prompt has an assistant template
+        has_assistant_prefill = (
+            isinstance(self.prompt, ChatPrompt)
+            and self.prompt.assistant_template is not None
+        )
+
+        chat_template_kwargs = {
+            "tokenize": True,
+            "return_dict": True,
+            "enable_thinking": not self.disable_thinking,
+        }
+        if has_assistant_prefill:
+            chat_template_kwargs["continue_final_message"] = True
+        else:
+            chat_template_kwargs["add_generation_prompt"] = True
+
         # Calculate max lengths for padding/truncation
         max_token_seq_length = 0
         for input_text in input_texts:
             if isinstance(self.prompt, ChatPrompt):
                 tokenized = self.tokenizer.apply_chat_template(
                     input_text,
-                    tokenize=True,
                     return_tensors="pt",
-                    add_generation_prompt=True,
-                    return_dict=True,
-                    enable_thinking=not self.disable_thinking,
+                    **chat_template_kwargs,
                 )
                 length = tokenized["input_ids"].size(1)
             else:
@@ -77,14 +91,11 @@ class TriviaQADataModule(LightningDataModule):
             if isinstance(self.prompt, ChatPrompt):
                 tokens = self.tokenizer.apply_chat_template(
                     input_text,
-                    tokenize=True,
                     return_tensors="pt",
                     max_length=max_token_seq_length,
                     padding="max_length",
                     truncation=True,
-                    add_generation_prompt=True,
-                    return_dict=True,
-                    enable_thinking=not self.disable_thinking,
+                    **chat_template_kwargs,
                 )
             else:
                 tokens = self.tokenizer(
