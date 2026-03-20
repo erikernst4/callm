@@ -2,14 +2,17 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausa
 from callm.config import CACHE_PATH, HF_TOKEN
 import os
 from datasets import Dataset
-from transformers import AutoProcessor, Glm4vForConditionalGeneration
+from transformers import Glm4vForConditionalGeneration
+from transformers import (
+    Mistral3ForConditionalGeneration,
+    FineGrainedFP8Config,
+    MistralCommonBackend,
+)
 
 
 def get_tokenizer_for_model(model_name: str, hf_token: str = None):
     if hf_token is None:
         hf_token = HF_TOKEN
-    if model_name == "zai-org/GLM-4.6V-Flash":
-        tokenizer = AutoProcessor.from_pretrained(model_name)
     if model_name.startswith("google/flan-t5") or model_name.startswith("zai-org"):
         tokenizer = AutoTokenizer.from_pretrained(model_name)
     elif model_name.startswith("meta-llama/"):
@@ -23,6 +26,8 @@ def get_tokenizer_for_model(model_name: str, hf_token: str = None):
             trust_remote_code=True,
             use_auth_token=hf_token,
         )
+    elif model_name.startswith("mistralai"):
+        tokenizer = MistralCommonBackend.from_pretrained(model_name)
     else:
         raise NotImplementedError(
             f"Model {model_name} not supported in get_tokenizer_for_model"
@@ -58,6 +63,10 @@ def initialize_model(model_name: str, hf_token: str = None):
             # use_auth_token=hf_token,
         )
         is_seq2seq = False
+    elif model_name.startswith("mistralai"):
+        model = Mistral3ForConditionalGeneration.from_pretrained(
+            model_name, quantization_config=FineGrainedFP8Config(dequantize=True)
+        )
     else:
         raise NotImplementedError(
             f"Model {model_name} not supported in initialize_model"

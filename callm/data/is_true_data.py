@@ -57,8 +57,9 @@ class IsTrueDataModule(AnswersDataModule):
         chat_template_kwargs = {
             "tokenize": True,
             "return_dict": True,
-            "enable_thinking": not self.disable_thinking,
         }
+        if self.disable_thinking:
+            chat_template_kwargs["enable_thinking"] = False
         if has_assistant_prefill:
             chat_template_kwargs["continue_final_message"] = True
         else:

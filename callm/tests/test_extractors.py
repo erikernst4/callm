@@ -347,7 +347,7 @@ class TestIsTruePosteriorExtractor:
         mock_encoding = MagicMock()
         mock_encoding.offset_mapping = [(0, 3), (3, 4), (4, 8)]
 
-        indices = extractor.get_target_token_indices(text, mock_encoding)
+        indices = extractor.get_target_token_indices(text, [(0, 3), (3, 4), (4, 8)])
         # Should only get the index for "(A)" which is idx 0
         assert indices == [0]
 
@@ -408,3 +408,96 @@ class TestGCPIsTruePosteriorExtractor:
 
     def test_inheritance(self):
         assert issubclass(GCPIsTruePosteriorExtractor, GCPSequencePosteriorExtractor)
+
+
+class TestOffsetMappingFallback:
+    """Tests for the fallback offset mapping when tokenizer doesn't support return_offsets_mapping."""
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_fallback_triggers_on_value_error(self, mock_get_tokenizer):
+        """Test that ValueError from tokenizer triggers fallback to manual offset mapping."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        # Simulate Mistral's ValueError on return_offsets_mapping
+        mock_tokenizer.side_effect = ValueError(
+            "`MistralCommonBackend` does not support `return_offsets_mapping`"
+        )
+        # But decode should work for the fallback
+        mock_tokenizer.decode = MagicMock(
+            side_effect=lambda ids, **kw: {  # incremental prefix decoding
+                1: "Guess",
+                2: "Guess:",
+                3: "Guess: Paris",
+            }[len(ids)]
+        )
+
+        extractor = SequencePosteriorExtractor(model_name="mistralai/test")
+        extractor.tokenizer = mock_tokenizer
+
+        text = "Guess: Paris"
+        logits = torch.tensor([-0.1, -0.2, -0.5])
+        output_ids = torch.tensor([101, 102, 103])
+
+        answer, confidence = extractor.forward(text, logits, output_ids)
+
+        assert answer == "Paris"
+        # Token index 2 maps to "Paris" (chars 7-12), so confidence = exp(-0.5)
+        assert np.abs(confidence - np.exp(-0.5)) < 1e-6
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_fallback_none_output_ids_returns_nan(self, mock_get_tokenizer):
+        """Test that fallback with None output_ids returns nan confidence."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        mock_tokenizer.side_effect = ValueError("no offset mapping")
+
+        extractor = SequencePosteriorExtractor(model_name="mistralai/test")
+        extractor.tokenizer = mock_tokenizer
+
+        text = "Guess: Paris"
+        logits = torch.tensor([-0.1])
+
+        answer, confidence = extractor.forward(text, logits, None)
+        assert answer == "Paris"
+        assert np.isnan(confidence)
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_build_offset_mapping_special_tokens(self, mock_get_tokenizer):
+        """Test that special tokens producing no text get (0, 0) offsets."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        # Token 0 is a special token that produces no text
+        # Token 1 produces "Hello"
+        mock_tokenizer.decode = MagicMock(
+            side_effect=lambda ids, **kw: {1: "", 2: "Hello"}[len(ids)]
+        )
+
+        extractor = SequencePosteriorExtractor(model_name="gpt2")
+        extractor.tokenizer = mock_tokenizer
+
+        offsets = extractor._build_offset_mapping_from_ids(torch.tensor([999, 101]))
+        assert offsets == [(0, 0), (0, 5)]
+
+    @patch("callm.extractors.get_tokenizer_for_model")
+    def test_build_offset_mapping_whitespace(self, mock_get_tokenizer):
+        """Test that whitespace between tokens is handled correctly."""
+        mock_tokenizer = MagicMock()
+        mock_get_tokenizer.return_value = mock_tokenizer
+
+        # BPE-style: token 2 includes a leading space
+        mock_tokenizer.decode = MagicMock(
+            side_effect=lambda ids, **kw: {
+                1: "Hello",
+                2: "Hello World",
+            }[len(ids)]
+        )
+
+        extractor = SequencePosteriorExtractor(model_name="gpt2")
+        extractor.tokenizer = mock_tokenizer
+
+        offsets = extractor._build_offset_mapping_from_ids(torch.tensor([10, 20]))
+        # "Hello" spans chars 0-5, " World" spans chars 5-11
+        assert offsets == [(0, 5), (5, 11)]

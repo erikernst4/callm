@@ -46,6 +46,10 @@ class BaseExtractor(LightningModule, ABC):
             lines = text.strip().split("\n")
             if lines:
                 answer = lines[0].strip()
+
+        # Remove markdown bold/italic formatting (e.g. **answer** or __answer__)
+        answer = re.sub(r"^[\*\_]+|[\*\_]+$", "", answer).strip()
+
         return answer
 
 
@@ -102,18 +106,18 @@ class SequencePosteriorExtractor(BaseExtractor, ABC):
         super().__init__(*args, **kwargs)
         self.tokenizer = get_tokenizer_for_model(model_name)
 
-    def get_target_token_indices(self, text: str, encodings: dict) -> List[int]:
+    def get_target_token_indices(self, text: str, offsets: list) -> List[int]:
         """Get the token indices to compute probability for.
 
         Args:
             text: The generated text
-            encodings: Tokenizer output with offset_mapping
+            offsets: List of (start, end) character offset tuples per token
 
         Returns:
             List of token indices to use for probability computation
         """
         choice = self.extract_answer(text)
-        return self._get_token_indices_for_text(text, choice, encodings)
+        return self._get_token_indices_for_text(text, choice, offsets)
 
     def compute_probability_from_logits(
         self, logits: torch.Tensor, token_indices: List[int]
@@ -148,15 +152,45 @@ class SequencePosteriorExtractor(BaseExtractor, ABC):
 
         return confidence
 
+    def _build_offset_mapping_from_ids(self, output_ids: torch.Tensor) -> list:
+        """Build character offset mapping by incremental prefix decoding.
+
+        Decodes output_ids[0:1], output_ids[0:2], ..., output_ids[0:n] and
+        computes each token's character span from the length differences.
+        This is resilient to whitespace/special characters because the
+        tokenizer reconstructs the full string context at each step.
+
+        Args:
+            output_ids: 1D tensor of generated token IDs
+
+        Returns:
+            List of (start, end) character offset tuples per token
+        """
+        offsets = []
+        prev_len = 0
+        ids_list = output_ids.tolist()
+        for i in range(len(ids_list)):
+            prefix_text = self.tokenizer.decode(
+                ids_list[: i + 1], skip_special_tokens=True
+            )
+            curr_len = len(prefix_text)
+            if curr_len > prev_len:
+                offsets.append((prev_len, curr_len))
+            else:
+                # Special/control token that produces no text
+                offsets.append((0, 0))
+            prev_len = curr_len
+        return offsets
+
     def _get_token_indices_for_text(
-        self, text: str, query: str, encodings: dict
+        self, text: str, query: str, offsets: list
     ) -> List[int]:
         """Helper to find token indices for a specific substring within the text.
 
         Args:
             text: The full generated text
             query: The substring to find indices for
-            encodings: Tokenizer output with offset_mapping
+            offsets: List of (start, end) character offset tuples per token
 
         Returns:
             List of token indices corresponding to the query
@@ -165,7 +199,6 @@ class SequencePosteriorExtractor(BaseExtractor, ABC):
         if start_pos == -1:
             return []
 
-        offsets = encodings.offset_mapping
         end_pos = start_pos + len(query)
         token_indices = []
 
@@ -189,8 +222,17 @@ class SequencePosteriorExtractor(BaseExtractor, ABC):
         if logits is None:
             return answer, np.nan
 
-        encodings = self.tokenizer(text, return_offsets_mapping=True)
-        token_indices = self.get_target_token_indices(text, encodings)
+        # Try native offset mapping first; fall back to manual reconstruction
+        # for tokenizers that don't support it (e.g. Mistral's MistralCommonBackend)
+        try:
+            encodings = self.tokenizer(text, return_offsets_mapping=True)
+            offsets = encodings.offset_mapping
+        except (ValueError, TypeError):
+            if output_ids is None:
+                return answer, np.nan
+            offsets = self._build_offset_mapping_from_ids(output_ids)
+
+        token_indices = self.get_target_token_indices(text, offsets)
 
         if not token_indices:
             return answer, np.nan
