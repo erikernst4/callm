@@ -113,3 +113,37 @@ def subsample_dataset(dataset: Dataset, max_samples: int, seed: int = None):
             dataset = dataset.shuffle(seed=seed)
         dataset = dataset.select(range(min(len(dataset), max_samples)))
     return dataset
+
+
+def normalize_answer(text: str) -> str:
+    if not isinstance(text, str):
+        return str(text) if text is not None else ""
+    t = text.lower().strip()
+    t = t.replace("**", "")
+    t = t.strip("\"'")
+    t = t.strip()
+    t = t.rstrip(".")
+    t = t.strip()
+    return t
+
+
+def remove_apostrophes_and_dashes(answer: str) -> str:
+    return answer.replace("'", "").replace("-", "")
+
+
+def check_exact_match(pred_answer: str, gold_answers: list) -> bool:
+    if pred_answer is None:
+        return False
+
+    norm_pred = normalize_answer(pred_answer)
+    norm_golds = [normalize_answer(g) for g in gold_answers]
+
+    if norm_pred in norm_golds:
+        res = True
+    else:
+        # Try removing apostrophes and dashes
+        norm_pred_second = remove_apostrophes_and_dashes(norm_pred)
+        norm_golds_second = [remove_apostrophes_and_dashes(g) for g in norm_golds]
+        res = norm_pred_second in norm_golds_second
+
+    return res

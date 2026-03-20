@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 from datasets import Dataset
 
 from callm.data.answers_data import AnswersDataModule
-from callm.utils import subsample_dataset
+from callm.utils import subsample_dataset, check_exact_match
 from callm.data.evaluator_data import SEMANTIC_EQUIVALENCE_PROMPT
 
 
@@ -33,9 +33,7 @@ class UntokenizedEvaluatorDataModule(AnswersDataModule):
         ):
             # Check exact match first
             # The pred_answer might not be lowercased yet, while gold answers usually are.
-            if pred_answer is not None and pred_answer.lower().strip() in [
-                g.lower().strip() for g in gold_answers
-            ]:
+            if check_exact_match(pred_answer, gold_answers):
                 exact_matches.append(True)
                 prompts.append("")  # Won't be used
             else:

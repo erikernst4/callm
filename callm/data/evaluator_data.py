@@ -10,7 +10,7 @@ from datasets import Dataset
 from jinja2 import Template
 
 from callm.data.answers_data import AnswersDataModule
-from callm.utils import subsample_dataset
+from callm.utils import subsample_dataset, check_exact_match
 
 SEMANTIC_EQUIVALENCE_PROMPT = Template(
     """Is the predicted answer to my question semantically equivalent to any of the gold standard answers?
@@ -46,7 +46,7 @@ class EvaluatorDataModule(AnswersDataModule):
             questions, gold_answers_list, pred_answers
         ):
             # Check exact match first (short-circuit)
-            if pred_answer.lower() in gold_answers:
+            if check_exact_match(pred_answer, gold_answers):
                 exact_matches.append(True)
                 prompts.append("")  # Won't be used
             else:
