@@ -8,6 +8,7 @@ from callm.metrics import (
     CrossEntropy,
     AUCScore,
     ConfidenceCost,
+    GammaCCAG,
 )
 
 
@@ -360,6 +361,195 @@ class TestConfidenceCost:
         assert np.isfinite(cost)
 
 
+class TestGammaCCAG:
+    """Tests for Gamma-CCAG metric."""
+
+    # Parametrization 1: a=1, b=gamma
+    P1_A = staticmethod(lambda g: 1.0)
+    P1_B = staticmethod(lambda g: g)
+
+    # Parametrization 2: a=1/(1-gamma), b=1/gamma
+    P2_A = staticmethod(lambda g: 1.0 / (1.0 - g))
+    P2_B = staticmethod(lambda g: 1.0 / g)
+
+    def test_all_correct_high_confidence_p1(self):
+        """All correct with high confidence → all answers, cost = 0."""
+        confidences = torch.tensor([0.99, 0.95, 0.98])
+        correctness = torch.tensor([True, True, True])
+        metric = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=0.5)
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        # s = [0.01, 0.05, 0.02], threshold = 0.5
+        # All s <= 0.5, so all answer. Cost = 1 * 0 = 0 for each
+        assert cost == 0.0
+
+    def test_all_incorrect_high_confidence_p1(self):
+        """All incorrect with high confidence → all answers, cost = a(γ)."""
+        confidences = torch.tensor([0.99, 0.95, 0.98])
+        correctness = torch.tensor([False, False, False])
+        metric = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=0.5)
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        # All answer (s <= 0.5), cost = 1*1 = 1 each, mean = 1.0
+        assert abs(cost - 1.0) < 1e-6
+
+    def test_all_abstain_low_confidence_p1(self):
+        """Low confidence, low gamma → all abstain, cost = b(γ) = gamma."""
+        confidences = torch.tensor([0.01, 0.02, 0.03])
+        correctness = torch.tensor([True, False, True])
+        metric = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=0.05)
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        # s = [0.99, 0.98, 0.97], threshold = 0.05
+        # All s > 0.05, so all abstain. Cost = 0.05 each
+        assert abs(cost - 0.05) < 1e-6
+
+    def test_manual_mixed_p1(self):
+        """Manual calculation with mixed predictions, P1, gamma=0.5."""
+        confidences = torch.tensor([0.8, 0.3, 0.9])
+        correctness = torch.tensor([True, False, True])
+        metric = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=0.5)
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        # s = [0.2, 0.7, 0.1], threshold = 0.5
+        # Sample 0: s=0.2 <= 0.5 → answer, correct → cost = 1*0 = 0
+        # Sample 1: s=0.7 > 0.5 → abstain → cost = 0.5
+        # Sample 2: s=0.1 <= 0.5 → answer, correct → cost = 1*0 = 0
+        # Mean = (0 + 0.5 + 0) / 3 = 0.1667
+        expected = 0.5 / 3
+        assert abs(cost - expected) < 1e-5
+
+    def test_manual_mixed_p2(self):
+        """Manual calculation with P2, gamma=0.5."""
+        confidences = torch.tensor([0.8, 0.3, 0.9])
+        correctness = torch.tensor([True, False, True])
+        # P2: a=1/(1-0.5)=2, b=1/0.5=2, threshold=1.0
+        metric = GammaCCAG(a_func=self.P2_A, b_func=self.P2_B, gamma=0.5)
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        # s = [0.2, 0.7, 0.1], threshold = 2/2 = 1.0
+        # All s <= 1.0, so all answer
+        # Sample 0: correct → cost = 2*0 = 0
+        # Sample 1: incorrect → cost = 2*1 = 2
+        # Sample 2: correct → cost = 2*0 = 0
+        # Mean = (0 + 2 + 0) / 3 = 0.6667
+        expected = 2.0 / 3
+        assert abs(cost - expected) < 1e-5
+
+    def test_different_gammas_produce_different_results(self):
+        """Different gamma values should produce different costs."""
+        # Use data with confidence values that cross different thresholds
+        confidences = torch.tensor([0.95, 0.85, 0.55, 0.35, 0.15, 0.05])
+        correctness = torch.tensor([True, False, True, False, True, False])
+
+        costs = []
+        for gamma in [0.1, 0.5, 0.9]:
+            metric = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=gamma)
+            metric.update(confidences, correctness)
+            costs.append(metric.compute().item())
+
+        # All costs should be different since thresholds cross different
+        # confidence boundaries
+        assert costs[0] != costs[1]
+        assert costs[1] != costs[2]
+
+    def test_p1_vs_p2_different(self):
+        """P1 and P2 should generally produce different results."""
+        confidences = torch.tensor([0.9, 0.5, 0.3, 0.8, 0.1])
+        correctness = torch.tensor([True, False, True, True, False])
+
+        m1 = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=0.2)
+        m1.update(confidences, correctness)
+        c1 = m1.compute().item()
+
+        m2 = GammaCCAG(a_func=self.P2_A, b_func=self.P2_B, gamma=0.2)
+        m2.update(confidences, correctness)
+        c2 = m2.compute().item()
+
+        assert c1 != c2
+
+    def test_nan_input_raises_error(self):
+        """Test that NaN inputs raise ValueError."""
+        metric = GammaCCAG(gamma=0.5)
+        confidences = torch.tensor([float("nan"), 0.5])
+        correctness = torch.tensor([True, False])
+        import pytest
+
+        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+            metric.update(confidences, correctness)
+
+    def test_empty_input(self):
+        """Test with no data returns NaN."""
+        metric = GammaCCAG(gamma=0.5)
+        cost = metric.compute().item()
+        assert np.isnan(cost)
+
+    def test_incremental_update(self):
+        """Test that multiple updates accumulate correctly."""
+        confidences = torch.tensor([0.9, 0.5, 0.3, 0.8])
+        correctness = torch.tensor([True, False, True, False])
+
+        # Single update
+        m1 = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=0.5)
+        m1.update(confidences, correctness)
+        c1 = m1.compute().item()
+
+        # Incremental updates
+        m2 = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=0.5)
+        m2.update(confidences[:2], correctness[:2])
+        m2.update(confidences[2:], correctness[2:])
+        c2 = m2.compute().item()
+
+        assert abs(c1 - c2) < 1e-6
+
+    def test_extreme_gamma_p1_low(self):
+        """At very low gamma (P1), threshold is very low → most abstain."""
+        confidences = torch.tensor([0.9, 0.5, 0.3])
+        correctness = torch.tensor([True, False, True])
+        metric = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=0.05)
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        # threshold = 0.05, s = [0.1, 0.5, 0.7]
+        # All s > 0.05 → all abstain → cost = 0.05
+        assert abs(cost - 0.05) < 1e-6
+
+    def test_extreme_gamma_p1_high(self):
+        """At very high gamma (P1), threshold is high → most answer."""
+        confidences = torch.tensor([0.9, 0.5, 0.3])
+        correctness = torch.tensor([True, False, True])
+        metric = GammaCCAG(a_func=self.P1_A, b_func=self.P1_B, gamma=0.95)
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        # threshold = 0.95
+        # s = [0.1, 0.5, 0.7] → all s <= 0.95 → all answer
+        # costs = [0, 1, 0] → mean = 1/3
+        expected = 1.0 / 3
+        assert abs(cost - expected) < 1e-5
+
+    def test_extreme_gamma_p2_low(self):
+        """At very low gamma (P2), b is huge → all abstain at high cost."""
+        confidences = torch.tensor([0.9, 0.5, 0.3])
+        correctness = torch.tensor([True, False, True])
+        metric = GammaCCAG(a_func=self.P2_A, b_func=self.P2_B, gamma=0.05)
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        # a = 1/0.95 ≈ 1.053, b = 1/0.05 = 20, threshold = 20/1.053 ≈ 19
+        # s = [0.1, 0.5, 0.7] → all s <= 19 → all ANSWER
+        # costs = [1.053*0, 1.053*1, 1.053*0] → mean = 1.053/3
+        expected = (1.0 / 0.95) / 3
+        assert abs(cost - expected) < 1e-4
+
+    def test_cost_non_negative(self):
+        """Cost should always be non-negative."""
+        torch.manual_seed(42)
+        for gamma in [0.05, 0.1, 0.5, 0.9, 0.95]:
+            for a_func, b_func in [(self.P1_A, self.P1_B), (self.P2_A, self.P2_B)]:
+                metric = GammaCCAG(a_func=a_func, b_func=b_func, gamma=gamma)
+                metric.update(torch.rand(50), (torch.rand(50) > 0.5).float())
+                cost = metric.compute().item()
+                assert cost >= 0, f"Negative cost at gamma={gamma}"
+
+
 class TestIntegration:
     """Integration tests for all metrics together."""
 
@@ -376,6 +566,14 @@ class TestIntegration:
             "ce": CrossEntropy(),
             "auc": AUCScore(),
             "cc": ConfidenceCost(),
+            "gamma_ccag_p1": GammaCCAG(
+                a_func=lambda g: 1.0, b_func=lambda g: g, gamma=0.5
+            ),
+            "gamma_ccag_p2": GammaCCAG(
+                a_func=lambda g: 1.0 / (1.0 - g),
+                b_func=lambda g: 1.0 / g,
+                gamma=0.5,
+            ),
         }
 
         for metric in metrics.values():
@@ -386,6 +584,8 @@ class TestIntegration:
         ce = metrics["ce"].compute().item()
         auc = metrics["auc"].compute().item()
         cc = metrics["cc"].compute().item()
+        gc1 = metrics["gamma_ccag_p1"].compute().item()
+        gc2 = metrics["gamma_ccag_p2"].compute().item()
 
         # All should be in valid ranges
         assert 0 <= ece <= 1
@@ -393,6 +593,8 @@ class TestIntegration:
         assert ce >= 0
         assert 0 <= auc <= 1
         assert np.isfinite(cc)
+        assert gc1 >= 0
+        assert gc2 >= 0
 
     def test_reset_works(self):
         """Test that metric reset clears state."""

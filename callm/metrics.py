@@ -119,3 +119,86 @@ class ConfidenceCost(Metric):
         if self.count == 0:
             return torch.tensor(float("nan"))
         return self.sum_cost / self.count
+
+
+class GammaCCAG(Metric):
+    """
+    Gamma-CCAG (Confidence Cost Abstention Game) metric.
+
+    Evaluates the expected cost of a selective prediction system that can
+    abstain based on confidence scores. At a given gamma, the cost is:
+
+        C_γ(y_k, d_j) = a(γ) · C̃(y_k, d_j)   if d_j ≠ d_r  (answer)
+                       = b(γ)                    if d_j = d_r  (abstain)
+
+    The decision rule abstains when s(q) > b(γ)/a(γ), where s = 1 - confidence.
+    The base cost C̃ is 0-1 loss (1 if incorrect, 0 if correct).
+
+    Parameters
+    ----------
+    a_func : callable
+        Function gamma -> a(gamma). Scales the base cost when answering.
+    b_func : callable
+        Function gamma -> b(gamma). Fixed cost when abstaining.
+    gamma : float
+        The operating point gamma ∈ (0, 1).
+    epsilon : float
+        Small value to avoid division by zero.
+    """
+
+    full_state_update = False
+
+    def __init__(
+        self,
+        a_func=None,
+        b_func=None,
+        gamma: float = 0.5,
+        epsilon: float = 1e-7,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.a_func = a_func if a_func is not None else (lambda g: 1.0)
+        self.b_func = b_func if b_func is not None else (lambda g: g)
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.add_state("all_confidences", default=[], dist_reduce_fx="cat")
+        self.add_state("all_correctness", default=[], dist_reduce_fx="cat")
+
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
+            raise ValueError("NaN values found in input tensors.")
+        self.all_confidences.append(confidences.float())
+        self.all_correctness.append(correctness.float())
+
+    def compute(self) -> torch.Tensor:
+        if not self.all_confidences:
+            return torch.tensor(float("nan"))
+
+        confidences = torch.cat(self.all_confidences)
+        correctness = torch.cat(self.all_correctness)
+
+        if len(confidences) == 0:
+            return torch.tensor(float("nan"))
+
+        a_val = self.a_func(self.gamma)
+        b_val = self.b_func(self.gamma)
+        threshold = b_val / a_val
+
+        # Score: estimated error probability
+        s = 1.0 - confidences
+
+        # Decision: abstain if s > threshold, answer otherwise
+        abstain_mask = s > threshold
+        answer_mask = ~abstain_mask
+
+        # Cost when answering: a(γ) * C̃  where C̃ = 1 - correctness (0-1 loss)
+        base_cost = 1.0 - correctness  # 0 if correct, 1 if incorrect
+        answer_costs = a_val * base_cost[answer_mask]
+
+        # Cost when abstaining: b(γ)
+        n_abstain = abstain_mask.sum()
+        abstain_costs = b_val * n_abstain.float()
+
+        # Expected cost = mean over all samples
+        total_cost = answer_costs.sum() + abstain_costs
+        return total_cost / len(confidences)
