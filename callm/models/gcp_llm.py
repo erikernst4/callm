@@ -36,6 +36,51 @@ class GCPLLM(BaseLightningModule):
         self.return_logits = return_logits
         self.max_new_tokens = max_new_tokens
 
+    def _build_contents(self, prompt_text):
+        """Convert prompt input to GCP Content objects.
+
+        Args:
+            prompt_text: Either a plain string (from Prompt), a list of
+                message dicts in GCP format (from ChatPrompt with gcp=True),
+                or a list of message dicts in standard format (from ChatPrompt
+                with gcp=False).
+
+        Returns:
+            Tuple of (contents list, system_instruction string or None).
+        """
+        system_instruction = None
+
+        if isinstance(prompt_text, list):
+            contents = []
+            for msg in prompt_text:
+                role = msg["role"]
+                # Extract text from either format
+                if "parts" in msg:
+                    text = msg["parts"][0]["text"]
+                else:
+                    text = msg["content"]
+
+                if role == "system":
+                    system_instruction = text
+                else:
+                    # Map "assistant" role to "model" for GCP
+                    gcp_role = "model" if role == "assistant" else role
+                    contents.append(
+                        types.Content(
+                            role=gcp_role,
+                            parts=[types.Part.from_text(text=text)],
+                        )
+                    )
+        else:
+            # Plain string prompt
+            contents = [
+                types.Content(
+                    role="user", parts=[types.Part.from_text(text=prompt_text)]
+                )
+            ]
+
+        return contents, system_instruction
+
     def validation_step(self, batch, batch_idx):
         """
         Validation step: make API calls to GCP for each text input in the batch.
@@ -51,11 +96,7 @@ class GCPLLM(BaseLightningModule):
         for i, (prompt_text, question, gold_answer_list) in enumerate(
             zip(inputs, questions, gold_answers)
         ):
-            contents = [
-                types.Content(
-                    role="user", parts=[types.Part.from_text(text=prompt_text)]
-                )
-            ]
+            contents, system_instruction = self._build_contents(prompt_text)
 
             # Use `return_logits` appropriately
             # In google.genai API, you request logprobs with specific configs
@@ -67,6 +108,8 @@ class GCPLLM(BaseLightningModule):
             if self.return_logits:
                 config_kwargs["response_logprobs"] = True
                 config_kwargs["logprobs"] = 1  # fetch logprob only for the chosen token
+            if system_instruction:
+                config_kwargs["system_instruction"] = system_instruction
 
             config = types.GenerateContentConfig(**config_kwargs)
 

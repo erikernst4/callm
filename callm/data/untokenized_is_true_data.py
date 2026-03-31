@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from datasets import Dataset
 
 from callm.data.answers_data import AnswersDataModule
-from callm.prompts import IS_TRUE_PROB_PROMPT
+from callm.prompts import GCP_CHAT_IS_TRUE_PROB_PROMPT
 from callm.utils import subsample_dataset
 
 
@@ -33,7 +33,7 @@ class UntokenizedIsTrueDataModule(AnswersDataModule):
         # Create IS_TRUE prompts
         prompts = []
         for question, pred_answer in zip(questions, pred_answers):
-            prompt = IS_TRUE_PROB_PROMPT(question=question, answer=pred_answer)
+            prompt = GCP_CHAT_IS_TRUE_PROB_PROMPT(question=question, answer=pred_answer)
             prompts.append(prompt)
 
         self.dataset = Dataset.from_dict(

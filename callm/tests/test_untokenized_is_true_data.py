@@ -38,9 +38,10 @@ class TestUntokenizedIsTrueData:
         assert "label" in dm.dataset.features
 
         # Verify prompt construction
-        assert "Is the sky blue?" in dm.dataset[0]["input"]
-        assert "Yes" in dm.dataset[0]["input"]
-        assert "Is the proposed answer correct?" in dm.dataset[0]["input"]
+        prompt_str = str(dm.dataset[0]["input"])
+        assert "Is the sky blue?" in prompt_str
+        assert "Yes" in prompt_str
+        assert "Is the proposed answer correct?" in prompt_str
 
         # Test dataloader collate
         loader = dm.val_dataloader()
@@ -48,7 +49,7 @@ class TestUntokenizedIsTrueData:
 
         assert "input" in batch
         assert len(batch["input"]) == 2
-        assert isinstance(batch["input"][0], str)
+        assert isinstance(batch["input"][0], list)
 
         assert "question" in batch
         assert batch["question"][0] == "Is the sky blue?"

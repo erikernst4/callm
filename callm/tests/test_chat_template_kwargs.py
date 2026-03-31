@@ -9,6 +9,9 @@ from callm.prompts import (
     CHAT_LABEL_PROB_PROMPT_ONE_SHOT,
     CHAT_VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT,
     CHAT_IS_TRUE_PROB_PROMPT,
+    GCP_CHAT_LABEL_PROB_PROMPT_ZERO_SHOT,
+    GCP_CHAT_LABEL_PROB_PROMPT_ONE_SHOT,
+    GCP_CHAT_IS_TRUE_PROB_PROMPT,
 )
 
 
@@ -235,3 +238,77 @@ class TestIsTrueDataChatTemplateKwargs:
                 assert "add_generation_prompt" not in kwargs
         finally:
             os.unlink(csv_path)
+
+
+class TestGCPChatPromptFormat:
+    """Tests that ChatPrompt with gcp=True produces GCP-compatible output."""
+
+    def test_gcp_zero_shot_uses_model_role(self):
+        messages = GCP_CHAT_LABEL_PROB_PROMPT_ZERO_SHOT(
+            question="What is the capital of France?"
+        )
+        roles = [m["role"] for m in messages]
+        assert "assistant" not in roles
+        assert "model" in roles
+
+    def test_gcp_zero_shot_uses_parts_key(self):
+        messages = GCP_CHAT_LABEL_PROB_PROMPT_ZERO_SHOT(
+            question="What is the capital of France?"
+        )
+        for msg in messages:
+            assert "parts" in msg
+            assert "content" not in msg
+
+    def test_gcp_system_in_messages(self):
+        messages = GCP_CHAT_LABEL_PROB_PROMPT_ZERO_SHOT(
+            question="What is the capital of France?"
+        )
+        system_msgs = [m for m in messages if m["role"] == "system"]
+        assert len(system_msgs) == 1
+        assert "text" in system_msgs[0]["parts"][0]
+
+    def test_gcp_prompt_message_order(self):
+        messages = GCP_CHAT_LABEL_PROB_PROMPT_ZERO_SHOT(
+            question="What is the capital of France?"
+        )
+        roles = [m["role"] for m in messages]
+        assert roles == ["system", "user", "model"]
+
+    def test_gcp_is_true_has_no_model_prefill(self):
+        messages = GCP_CHAT_IS_TRUE_PROB_PROMPT(question="What is 2+2?", answer="4")
+        roles = [m["role"] for m in messages]
+        assert "model" not in roles
+        assert roles == ["system", "user"]
+
+    def test_gcp_custom_prompt(self):
+        prompt = ChatPrompt(
+            system="Be helpful", user="{{ question }}", assistant="Answer:", gcp=True
+        )
+        messages = prompt(question="Hello")
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert messages[2]["role"] == "model"
+        assert messages[2]["parts"][0]["text"] == "Answer:"
+
+    def test_standard_format_unchanged(self):
+        """Ensure gcp=False (default) still produces standard HuggingFace format."""
+        messages = CHAT_LABEL_PROB_PROMPT_ZERO_SHOT(
+            question="What is the capital of France?"
+        )
+        for msg in messages:
+            assert "content" in msg
+            assert "parts" not in msg
+        roles = [m["role"] for m in messages]
+        assert "assistant" in roles
+        assert "model" not in roles
+
+    def test_gcp_parts_text_content(self):
+        messages = GCP_CHAT_LABEL_PROB_PROMPT_ONE_SHOT(
+            question="What is the capital of France?"
+        )
+        user_msg = [m for m in messages if m["role"] == "user"][0]
+        assert (
+            user_msg["parts"][0]["text"] == "Question: What is the capital of France?"
+        )
+        model_msg = [m for m in messages if m["role"] == "model"][0]
+        assert model_msg["parts"][0]["text"] == "Guess:"

@@ -109,3 +109,77 @@ class TestGCPEvaluator:
 
         # Exact Match didn't trigger api call, the second item triggered 1 call
         assert evaluator.client.models.generate_content.call_count == 1
+
+
+class TestGCPLLMChatPromptInput:
+    """Tests that GCPLLM handles ChatPrompt GCP-format message lists."""
+
+    @patch("callm.models.gcp_llm.types")
+    @patch("callm.models.gcp_llm.genai")
+    def test_validation_step_with_chat_prompt_messages(self, mock_genai, mock_types):
+        """When input is a list of dicts (ChatPrompt gcp=True), should build contents correctly."""
+        extractor = Mock()
+        llm = GCPLLM(extractor=extractor, model_name="test-model")
+
+        mock_resp = Mock()
+        mock_resp.text = "Paris"
+        llm.client.models.generate_content.return_value = mock_resp
+
+        # Simulate ChatPrompt(gcp=True) output
+        chat_messages = [
+            {"role": "system", "parts": [{"text": "Be helpful"}]},
+            {
+                "role": "user",
+                "parts": [{"text": "Question: What is the capital of France?"}],
+            },
+            {"role": "model", "parts": [{"text": "Guess:"}]},
+        ]
+
+        batch = {
+            "input": [chat_messages],
+            "question": ["What is the capital of France?"],
+            "label": [["paris"]],
+        }
+
+        llm.validation_step(batch, 0)
+
+        assert len(llm.outputs) == 1
+        assert llm.outputs[0]["raw_output"] == "Paris"
+
+        # Verify system_instruction was passed in config
+        config_call = mock_types.GenerateContentConfig.call_args
+        assert config_call[1].get("system_instruction") == "Be helpful"
+
+        # Verify contents were constructed (system should be excluded from contents)
+        generate_call = llm.client.models.generate_content.call_args
+        contents = generate_call[1]["contents"]
+        # Should have 2 Content objects (user + model), not 3
+        assert len(contents) == 2
+
+    @patch("callm.models.gcp_llm.types")
+    @patch("callm.models.gcp_llm.genai")
+    def test_validation_step_with_plain_string_still_works(
+        self, mock_genai, mock_types
+    ):
+        """Plain string input should still work as before."""
+        extractor = Mock()
+        llm = GCPLLM(extractor=extractor, model_name="test-model")
+
+        mock_resp = Mock()
+        mock_resp.text = "generated text"
+        llm.client.models.generate_content.return_value = mock_resp
+
+        batch = {
+            "input": ["Plain prompt text"],
+            "question": ["q1"],
+            "label": [["a1"]],
+        }
+
+        llm.validation_step(batch, 0)
+
+        assert len(llm.outputs) == 1
+        assert llm.outputs[0]["raw_output"] == "generated text"
+
+        # No system_instruction should be in config
+        config_call = mock_types.GenerateContentConfig.call_args
+        assert "system_instruction" not in config_call[1]
