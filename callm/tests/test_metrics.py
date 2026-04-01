@@ -7,7 +7,7 @@ from callm.metrics import (
     BrierScore,
     CrossEntropy,
     AUCScore,
-    ConfidenceCost,
+    CCAG,
     GammaCCAG,
 )
 
@@ -249,14 +249,14 @@ class TestAUCScore:
         assert auc == 0.0
 
 
-class TestConfidenceCost:
-    """Tests for Confidence Cost metric."""
+class TestCCAG:
+    """Tests for CCAG metric."""
 
     def test_correct_high_confidence(self):
         """When correct with high confidence, cost should be relatively low."""
         confidences = torch.tensor([0.9])
         correctness = torch.tensor([True])
-        metric = ConfidenceCost()
+        metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # indicator=1: log(2-0.9)*(2-1) - log(1-0.9)*(1-1)
@@ -267,7 +267,7 @@ class TestConfidenceCost:
         """When correct with low confidence, cost should still be moderate."""
         confidences = torch.tensor([0.2])
         correctness = torch.tensor([True])
-        metric = ConfidenceCost()
+        metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # indicator=1: log(2-0.2)*1 - log(1-0.2)*0 = log(1.8) ≈ 0.5878
@@ -277,7 +277,7 @@ class TestConfidenceCost:
         """When incorrect with high confidence, cost should be high (penalized)."""
         confidences = torch.tensor([0.9])
         correctness = torch.tensor([False])
-        metric = ConfidenceCost()
+        metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # indicator=0: log(2-0.9)*2 - log(1-0.9)*1
@@ -289,7 +289,7 @@ class TestConfidenceCost:
         """When incorrect with low confidence, cost should be lower."""
         confidences = torch.tensor([0.2])
         correctness = torch.tensor([False])
-        metric = ConfidenceCost()
+        metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # indicator=0: log(2-0.2)*2 - log(1-0.2)*1
@@ -301,7 +301,7 @@ class TestConfidenceCost:
         """Test with a mix of correct and incorrect predictions."""
         confidences = torch.tensor([0.9, 0.2])
         correctness = torch.tensor([True, False])
-        metric = ConfidenceCost()
+        metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # Mean of correct_high (≈0.0953) and incorrect_low (≈1.3988)
@@ -312,13 +312,13 @@ class TestConfidenceCost:
 
     def test_empty_input(self):
         """Test with no data."""
-        metric = ConfidenceCost()
+        metric = CCAG()
         cost = metric.compute().item()
         assert np.isnan(cost)
 
     def test_nan_input_raises_error(self):
         """Test that passing NaN values raises ValueError."""
-        metric = ConfidenceCost()
+        metric = CCAG()
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
         import pytest
@@ -331,11 +331,11 @@ class TestConfidenceCost:
         confidences = torch.tensor([0.9, 0.2, 0.5, 0.7])
         correctness = torch.tensor([True, False, True, False])
 
-        metric1 = ConfidenceCost()
+        metric1 = CCAG()
         metric1.update(confidences, correctness)
         cost1 = metric1.compute().item()
 
-        metric2 = ConfidenceCost()
+        metric2 = CCAG()
         metric2.update(confidences[:2], correctness[:2])
         metric2.update(confidences[2:], correctness[2:])
         cost2 = metric2.compute().item()
@@ -346,7 +346,7 @@ class TestConfidenceCost:
         """Test that confidence near 1.0 doesn't cause errors."""
         confidences = torch.tensor([0.9999])
         correctness = torch.tensor([False])
-        metric = ConfidenceCost()
+        metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         assert np.isfinite(cost)
@@ -355,7 +355,7 @@ class TestConfidenceCost:
         """Test that confidence near 0.0 doesn't cause errors."""
         confidences = torch.tensor([0.0001])
         correctness = torch.tensor([True])
-        metric = ConfidenceCost()
+        metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         assert np.isfinite(cost)
@@ -565,7 +565,7 @@ class TestIntegration:
             "brier": BrierScore(),
             "ce": CrossEntropy(),
             "auc": AUCScore(),
-            "cc": ConfidenceCost(),
+            "cc": CCAG(),
             "gamma_ccag_p1": GammaCCAG(
                 a_func=lambda g: 1.0, b_func=lambda g: g, gamma=0.5
             ),

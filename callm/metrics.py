@@ -2,7 +2,7 @@
 Calibration metrics for evaluating confidence predictions.
 
 Uses torchmetrics built-ins where available (ECE, AUROC, Brier/MSE) and
-provides custom implementations for Cross Entropy and Confidence Cost.
+provides custom implementations for Cross Entropy, CCAG, and Gamma-CCAG.
 """
 
 import torch
@@ -89,9 +89,9 @@ class CrossEntropy(Metric):
         return self.sum_ce / self.count
 
 
-class ConfidenceCost(Metric):
+class CCAG(Metric):
     """
-    Confidence Cost metric.
+    CCAG (Confidence Cost Abstention Game) metric.
 
     cost = log(2 - q_m) · (2 - 𝟙) − log(1 - q_m) · (1 - 𝟙)
 
@@ -100,18 +100,26 @@ class ConfidenceCost(Metric):
 
     full_state_update = False
 
-    def __init__(self, epsilon: float = 1e-7, **kwargs):
+    def __init__(self, cost_func=None, epsilon: float = 1e-7, **kwargs):
         super().__init__(**kwargs)
         self.epsilon = epsilon
+        self.cost_fun = (
+            cost_func if cost_func is not None else self._default_integrated_cost
+        )
         self.add_state("sum_cost", default=torch.tensor(0.0), dist_reduce_fx="sum")
         self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def _default_integrated_cost(self, q: float, correct_indicator: float) -> float:
+        return torch.log(2 - q) * (2 - correct_indicator) - torch.log(1 - q) * (
+            1 - correct_indicator
+        )
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
         if torch.isnan(confidences).any() or torch.isnan(correctness).any():
             raise ValueError("NaN values found in input tensors.")
         q = confidences.float().clamp(self.epsilon, 1 - self.epsilon)
         indicator = correctness.float()
-        cost = torch.log(2 - q) * (2 - indicator) - torch.log(1 - q) * (1 - indicator)
+        cost = self.cost_fun(q, indicator)
         self.sum_cost += cost.sum()
         self.count += confidences.numel()
 

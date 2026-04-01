@@ -18,7 +18,7 @@ from callm.metrics import (
     BrierScore,
     CrossEntropy,
     AUCScore,
-    ConfidenceCost,
+    CCAG,
 )
 from callm.models.base import BaseLightningModule
 
@@ -335,7 +335,7 @@ class EvaluatorModule(BaseLightningModule):
             "val_brier_score": BrierScore(),
             "val_cross_entropy": CrossEntropy(),
             "val_auc": AUCScore(),
-            "val_confidence_cost": ConfidenceCost(),
+            "val_ccag": CCAG(),
         }
 
         for name, metric in metrics.items():
