@@ -59,7 +59,7 @@ class BrierScore(MeanSquaredError):
 # ──────────────────────────────────────────────────────
 
 
-class CrossEntropy(Metric):
+class ConfidenceCrossEntropy(Metric):
     """
     Binary Cross Entropy between confidence and correctness.
 
@@ -89,56 +89,42 @@ class CrossEntropy(Metric):
         return self.sum_ce / self.count
 
 
-class CCAG(Metric):
+class ClassificationCrossEntropy(Metric):
+    ## TODO: implement multiclass cross entropy if needed
+    pass
+
+
+class CnCAG(Metric):
     """
-    CCAG (Confidence Cost Abstention Game) metric.
+    CnCAG (Confidence Cost Abstention Game) metric.
 
-    cost = log(2 - q_m) · (2 - 𝟙) − log(1 - q_m) · (1 - 𝟙)
+    $$
+    \\begin{align}
+    C_n^*(y_k,\\mathbf{q}) = 
+        \\begin{cases}
+            (1-q_e)^{n+1} + \\frac{(n+1)}{n}(1-(1-q_e)^n) I(k \\neq\ e) & \\text{if } n \in \mathbb{N} \\
+            1-q_e - I(k \\neq e) \log(1-q_e) & \\text{if } n = 0
+        \end{cases}
+    \end{align}
+    $$
 
-    where q_m is the confidence and 𝟙 is 1 when correct, 0 otherwise.
+    where q_e is the confidence and I is the indicator function.
     """
 
     full_state_update = False
 
-    def __init__(self, cost_func=None, epsilon: float = 1e-7, **kwargs):
+    def __init__(self, n: int = 0, epsilon: float = 1e-7, **kwargs):
         super().__init__(**kwargs)
+        self.n = n
         self.epsilon = epsilon
-        if cost_func == "case1":
-            self.cost_fun = self._integrated_cost_case1_w_1
-        elif cost_func == "case3":
-            self.cost_fun = self._integrated_cost_case3
-        elif cost_func == "case2" or cost_func is None:
-            self.cost_fun = self._integrated_cost_case1_w_1_gamma
-        elif callable(cost_func):
-            self.cost_fun = cost_func
+        if n == 0:
+            self.cost_fun = lambda q, correct_indicator: 1 - q - (1 - correct_indicator) * torch.log(1 - q)
+        elif n > 0:
+            self.cost_fun = lambda q, correct_indicator: (1 - q)**(n+1) + (n+1)/n * (1 - (1 - q)**n) * (1 - correct_indicator)
         else:
-            raise ValueError(
-                "cost_func must be a callable or one of 'case1', 'case2', 'case3'"
-            )
+            raise ValueError("n must be non-negative.")
         self.add_state("sum_cost", default=torch.tensor(0.0), dist_reduce_fx="sum")
         self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
-
-    def _default_integrated_cost(
-        self, q: torch.Tensor, correct_indicator: torch.Tensor
-    ) -> torch.Tensor:
-        return torch.log(2 - q) * (2 - correct_indicator) - torch.log(1 - q) * (
-            1 - correct_indicator
-        )
-
-    def _integrated_cost_case1_w_1_gamma(
-        self, q: torch.Tensor, correct_indicator: torch.Tensor
-    ) -> torch.Tensor:
-        return 1 - q - correct_indicator * torch.log(1 - q)
-
-    def _integrated_cost_case1_w_1(
-        self, q: torch.Tensor, correct_indicator: torch.Tensor
-    ) -> torch.Tensor:
-        return (1 - q) ** 2 + correct_indicator * 2 * q
-
-    def _integrated_cost_case3(
-        self, q: torch.Tensor, correct_indicator: torch.Tensor
-    ) -> torch.Tensor:
-        return 2 * ((1 - q) / 2 - q) ** 2 + correct_indicator * 2 / (2 - q) ** 2
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
         if torch.isnan(confidences).any() or torch.isnan(correctness).any():
@@ -153,27 +139,22 @@ class CCAG(Metric):
         if self.count == 0:
             return torch.tensor(float("nan"))
         return self.sum_cost / self.count
-
+    
 
 class GammaCCAG(Metric):
     """
-    Gamma-CCAG (Confidence Cost Abstention Game) metric.
+    Gamma-CnCAG (Confidence Cost Abstention Game) metric.
 
     Evaluates the expected cost of a selective prediction system that can
     abstain based on confidence scores. At a given gamma, the cost is:
 
-        C_γ(y_k, d_j) = a(γ) · C̃(y_k, d_j)   if d_j ≠ d_r  (answer)
-                       = b(γ)                    if d_j = d_r  (abstain)
+        C_γ(y_k, d_j)  = I(k ≠ j)   if d_j ≠ d_r  (answer)
+                       = γ          if d_j = d_r  (abstain)
 
-    The decision rule abstains when s(q) > b(γ)/a(γ), where s = 1 - confidence.
-    The base cost C̃ is 0-1 loss (1 if incorrect, 0 if correct).
+    The decision rule abstains when s(q) < γ, where s = 1 - confidence.
 
     Parameters
     ----------
-    a_func : callable
-        Function gamma -> a(gamma). Scales the base cost when answering.
-    b_func : callable
-        Function gamma -> b(gamma). Fixed cost when abstaining.
     gamma : float
         The operating point gamma ∈ (0, 1).
     epsilon : float
@@ -184,15 +165,11 @@ class GammaCCAG(Metric):
 
     def __init__(
         self,
-        a_func=None,
-        b_func=None,
         gamma: float = 0.5,
         epsilon: float = 1e-7,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.a_func = a_func if a_func is not None else (lambda g: 1.0)
-        self.b_func = b_func if b_func is not None else (lambda g: g)
         self.gamma = gamma
         self.epsilon = epsilon
         self.add_state("all_confidences", default=[], dist_reduce_fx="cat")
@@ -214,24 +191,20 @@ class GammaCCAG(Metric):
         if len(confidences) == 0:
             return torch.tensor(float("nan"))
 
-        a_val = self.a_func(self.gamma)
-        b_val = self.b_func(self.gamma)
-        threshold = b_val / a_val
-
         # Score: estimated error probability
         s = 1.0 - confidences
 
         # Decision: abstain if s > threshold, answer otherwise
-        abstain_mask = s > threshold
+        abstain_mask = s < self.gamma
         answer_mask = ~abstain_mask
 
-        # Cost when answering: a(γ) * C̃  where C̃ = 1 - correctness (0-1 loss)
+        # Cost when answering: C̃  where C̃ = 1 - correctness (0-1 loss)
         base_cost = 1.0 - correctness  # 0 if correct, 1 if incorrect
-        answer_costs = a_val * base_cost[answer_mask]
+        answer_costs = base_cost[answer_mask]
 
-        # Cost when abstaining: b(γ)
+        # Cost when abstaining: γ
         n_abstain = abstain_mask.sum()
-        abstain_costs = b_val * n_abstain.float()
+        abstain_costs = self.gamma * n_abstain.float()
 
         # Expected cost = mean over all samples
         total_cost = answer_costs.sum() + abstain_costs
