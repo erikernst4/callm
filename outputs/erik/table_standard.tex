@@ -1,0 +1,41 @@
+\begin{table}[h]
+\centering
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{cc|cccccc}
+\toprule
+\textbf{LLM} & \textbf{Method} & \textbf{Acc} & \textbf{AUROC} & \textbf{ECE} & \textbf{BS} & \textbf{CE} & \textbf{CCAG}\\
+\hline
+\multirow{3}{*}{Qwen3.5 4B} & Sequence Posterior & 0.448 & \textbf{0.889} & \textbf{0.108} & \textbf{0.149} & \textbf{0.468} & \textbf{0.775} \\
+ & Is True & 0.448 & 0.835 & 0.333 & 0.301 & 0.948 & 1.113 \\
+ & Verbalized & \textbf{0.452} & 0.738 & 0.438 & 0.417 & 4.190 & 4.164 \\
+\hline
+\multirow{3}{*}{Qwen3.5 9B} & Sequence Posterior & 0.554 & \textbf{0.891} & \textbf{0.090} & \textbf{0.144} & \textbf{0.440} & \textbf{0.675} \\
+ & Is True & 0.554 & 0.829 & 0.260 & 0.254 & 0.775 & 0.901 \\
+ & Verbalized & \textbf{0.572} & 0.718 & 0.367 & 0.365 & 1.507 & 1.522 \\
+\hline
+\multirow{3}{*}{GLM-4.6V-Flash} & Sequence Posterior & \textbf{0.607} & \textbf{0.873} & \textbf{0.030} & \textbf{0.141} & \textbf{0.442} & \textbf{0.628} \\
+ & Is True & \textbf{0.607} & 0.487 & 0.136 & 0.263 & 0.749 & 0.830 \\
+ & Verbalized & 0.593 & 0.730 & 0.307 & 0.307 & 1.230 & 1.289 \\
+\hline
+\multirow{3}{*}{Ministral-3-8B-Instruct-2512} & Sequence Posterior & 0.447 & \textbf{0.846} & \textbf{0.108} & \textbf{0.172} & \textbf{0.669} & \textbf{0.786} \\
+ & Is True & 0.447 & 0.814 & 0.243 & 0.254 & 0.836 & 1.036 \\
+ & Verbalized & \textbf{0.489} & 0.686 & 0.347 & 0.341 & 1.464 & 1.368 \\
+\hline
+\multirow{3}{*}{Gemini 2.5 Flash Lite} & Sequence Posterior & 0.780 & \textbf{0.837} & \textbf{0.075} & \textbf{0.125} & \textbf{0.434} & \textbf{0.494} \\
+ & Is True & 0.780 & 0.763 & 0.173 & 0.176 & 1.366 & 1.251 \\
+ & Verbalized & \textbf{0.784} & 0.781 & 0.146 & 0.161 & 0.956 & 0.990 \\
+\hline
+\multirow{3}{*}{Gemini 2.5 Flash} & Sequence Posterior & 0.852 & \textbf{0.805} & \textbf{0.069} & \textbf{0.105} & \textbf{0.406} & \textbf{0.435} \\
+ & Is True & 0.852 & 0.698 & 0.126 & 0.125 & 1.457 & 1.282 \\
+ & Verbalized & \textbf{0.858} & 0.659 & 0.124 & 0.129 & 1.429 & 1.422 \\
+\hline
+\multirow{3}{*}{Gemini 2.5 pro} & Sequence Posterior & \textbf{0.869} & \textbf{0.674} & 0.131 & 0.132 & \textbf{0.435} & \textbf{0.430} \\
+ & Is True & \textbf{0.869} & 0.674 & 0.130 & 0.130 & 1.162 & 1.013 \\
+ & Verbalized & 0.864 & 0.669 & \textbf{0.109} & \textbf{0.126} & 0.795 & 0.774 \\
+\hline
+\bottomrule
+\end{tabular}
+}
+\caption{Standard Calibration Metrics}
+\label{tab:standard}
+\end{table}
