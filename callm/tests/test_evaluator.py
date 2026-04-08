@@ -4,7 +4,7 @@ import torch
 import os
 from unittest.mock import Mock, patch, mock_open
 from callm.models.evaluator import EvaluatorModule
-from callm.data.evaluator_data import EvaluatorDataModule
+from callm.data.triviaqa import EvaluatorDataModule
 
 
 class TestEvaluatorDataModule:

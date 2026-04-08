@@ -6,7 +6,7 @@ Tests the full pipeline on a small subset of TriviaQA validation data.
 """
 
 from callm.models.llm import LLM
-from callm.data.triviaQA import TriviaQADataModule
+from callm.data.triviaqa import TriviaQADataModule
 from lightning import Trainer
 
 

@@ -120,7 +120,7 @@ class TestSequencePosteriorLogic:
         tokenizer.eos_token = "</s>"
         return tokenizer
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_token_extraction_offset_mapping(self, mock_get_tokenizer, mock_tokenizer):
         mock_get_tokenizer.return_value = mock_tokenizer
 
@@ -140,7 +140,7 @@ class TestSequencePosteriorLogic:
         assert answer == "World"
         assert 0 <= confidence <= 1
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_token_extraction_no_match(self, mock_get_tokenizer, mock_tokenizer):
         mock_get_tokenizer.return_value = mock_tokenizer
         extractor = SequencePosteriorExtractor(model_name="gpt2")
@@ -156,7 +156,7 @@ class TestSequencePosteriorLogic:
         answer, confidence = extractor.forward(text, logits, output_ids)
         assert answer == "Hello Universe"
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_extractor_handles_1d_logits(self, mock_get_tokenizer):
         """Test that extractor handles 1D logits correctly."""
         mock_tokenizer = MagicMock()
@@ -176,7 +176,7 @@ class TestSequencePosteriorLogic:
         assert answer == "Paris"
         assert np.abs(confidence - np.exp(-0.5)) < 1e-6
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_extractor_backward_compatibility(self, mock_get_tokenizer):
         """Test that Extractor still works with 2D logits."""
         mock_tokenizer = MagicMock()
@@ -200,7 +200,7 @@ class TestSequencePosteriorLogic:
 class TestSequencePosteriorExtractor:
     """Tests for SequencePosteriorExtractor base class."""
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_compute_probability_from_logits_1d(self, mock_get_tokenizer):
         """Test probability computation with 1D logits."""
         mock_tokenizer = MagicMock()
@@ -216,7 +216,7 @@ class TestSequencePosteriorExtractor:
         expected = np.exp(-0.7)
         assert np.abs(prob - expected) < 1e-6
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_compute_probability_from_logits_2d(self, mock_get_tokenizer):
         """Test probability computation with 2D logits."""
         mock_tokenizer = MagicMock()
@@ -233,7 +233,7 @@ class TestSequencePosteriorExtractor:
 
         assert 0 <= prob <= 1.0
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_compute_probability_empty_indices(self, mock_get_tokenizer):
         """Test probability computation with empty indices."""
         mock_tokenizer = MagicMock()
@@ -251,7 +251,7 @@ class TestSequencePosteriorExtractor:
 class TestIsTruePosteriorExtractor:
     """Tests for IsTruePosteriorExtractor."""
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_forward_empty_text(self, mock_get_tokenizer):
         """Test forward with empty text returns nan."""
         mock_tokenizer = MagicMock()
@@ -263,7 +263,7 @@ class TestIsTruePosteriorExtractor:
         assert answer == ""
         assert np.isnan(confidence)
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_forward_none_logits(self, mock_get_tokenizer):
         """Test forward with None logits returns nan."""
         mock_tokenizer = MagicMock()
@@ -280,7 +280,7 @@ class TestIsTruePosteriorExtractor:
         assert answer == "A"
         assert np.isnan(confidence)
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_forward_choice_a_true(self, mock_get_tokenizer):
         """Test forward when choice is (A) True."""
         mock_tokenizer = MagicMock()
@@ -301,7 +301,7 @@ class TestIsTruePosteriorExtractor:
         assert answer == "A"
         assert np.abs(confidence - np.exp(-0.1)) < 1e-6
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_forward_choice_b_false(self, mock_get_tokenizer):
         """Test forward when choice is (B) False - should flip confidence."""
         mock_tokenizer = MagicMock()
@@ -324,7 +324,7 @@ class TestIsTruePosteriorExtractor:
         assert answer == "B"
         assert np.abs(confidence - expected_seq_posterior) < 1e-6
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_extract_answer_variants(self, mock_get_tokenizer):
         """Test extracting choice variants."""
         mock_get_tokenizer.return_value = MagicMock()
@@ -336,7 +336,7 @@ class TestIsTruePosteriorExtractor:
         assert extractor.extract_answer("The answer is True") == "True"
         assert extractor.extract_answer("It is definitely False") == "False"
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_get_target_token_indices(self, mock_get_tokenizer):
         """Test that get_target_token_indices finds the choice marker."""
         mock_tokenizer = MagicMock()
@@ -413,7 +413,7 @@ class TestGCPIsTruePosteriorExtractor:
 class TestOffsetMappingFallback:
     """Tests for the fallback offset mapping when tokenizer doesn't support return_offsets_mapping."""
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_fallback_triggers_on_value_error(self, mock_get_tokenizer):
         """Test that ValueError from tokenizer triggers fallback to manual offset mapping."""
         mock_tokenizer = MagicMock()
@@ -445,7 +445,7 @@ class TestOffsetMappingFallback:
         # Token index 2 maps to "Paris" (chars 7-12), so confidence = exp(-0.5)
         assert np.abs(confidence - np.exp(-0.5)) < 1e-6
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_fallback_none_output_ids_returns_nan(self, mock_get_tokenizer):
         """Test that fallback with None output_ids returns nan confidence."""
         mock_tokenizer = MagicMock()
@@ -463,7 +463,7 @@ class TestOffsetMappingFallback:
         assert answer == "Paris"
         assert np.isnan(confidence)
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_build_offset_mapping_special_tokens(self, mock_get_tokenizer):
         """Test that special tokens producing no text get (0, 0) offsets."""
         mock_tokenizer = MagicMock()
@@ -481,7 +481,7 @@ class TestOffsetMappingFallback:
         offsets = extractor._build_offset_mapping_from_ids(torch.tensor([999, 101]))
         assert offsets == [(0, 0), (0, 5)]
 
-    @patch("callm.extractors.get_tokenizer_for_model")
+    @patch("callm.extractors.base.get_tokenizer_for_model")
     def test_build_offset_mapping_whitespace(self, mock_get_tokenizer):
         """Test that whitespace between tokens is handled correctly."""
         mock_tokenizer = MagicMock()

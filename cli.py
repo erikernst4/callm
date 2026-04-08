@@ -1,7 +1,7 @@
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.trainer import Trainer
 from callm.models.evaluator import EvaluatorModule
-from callm.data.evaluator_data import EvaluatorDataModule
+from callm.data.triviaqa import EvaluatorDataModule
 from callm.utils import get_last_llm_outputs_path
 import os
 from lightning.pytorch.loggers import CSVLogger

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Quick test to verify data loading works correctly."""
 
-from callm.data.triviaQA import TriviaQADataModule
+from callm.data.triviaqa import TriviaQADataModule
 from callm.prompts import (
     CHAT_LABEL_PROB_PROMPT_ZERO_SHOT,
     VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT,

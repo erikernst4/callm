@@ -1,10 +1,10 @@
 from unittest.mock import patch
-from callm.data.untokenized_triviaQA import UntokenizedTriviaQADataModule
-from callm.data.untokenized_evaluator_data import UntokenizedEvaluatorDataModule
+from callm.data.triviaqa import UntokenizedTriviaQADataModule
+from callm.data.triviaqa import UntokenizedEvaluatorDataModule
 
 
 class TestUntokenizedTriviaQA:
-    @patch("callm.data.untokenized_triviaQA.load_dataset")
+    @patch("callm.data.triviaqa.untokenized_triviaqa.load_dataset")
     def test_setup_and_collate(self, mock_load):
         # Mock dataset
         mock_load.return_value = {
@@ -37,7 +37,7 @@ class TestUntokenizedTriviaQA:
 
 class TestUntokenizedEvaluator:
     @patch(
-        "callm.data.untokenized_evaluator_data.AnswersDataModule.load_llm_outputs_from_csv"
+        "callm.data.triviaqa.untokenized_evaluator_data.AnswersDataModule.load_llm_outputs_from_csv"
     )
     def test_setup_and_collate(self, mock_load_csv):
         # Mock LLM outputs

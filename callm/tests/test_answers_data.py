@@ -7,7 +7,7 @@ import tempfile
 from unittest.mock import Mock, patch, mock_open
 
 from callm.data.answers_data import AnswersDataModule
-from callm.data.is_true_data import IsTrueDataModule
+from callm.data.triviaqa import IsTrueDataModule
 from callm.prompts import CHAT_IS_TRUE_PROB_PROMPT
 
 

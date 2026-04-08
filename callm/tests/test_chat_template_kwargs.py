@@ -76,13 +76,15 @@ class TestTriviaQAChatTemplateKwargs:
         )
         return mock_dataset
 
-    @patch("callm.data.triviaQA.subsample_dataset", side_effect=lambda d, *a: d)
-    @patch("callm.data.triviaQA.load_dataset")
+    @patch(
+        "callm.data.triviaqa.triviaqa.subsample_dataset", side_effect=lambda d, *a: d
+    )
+    @patch("callm.data.triviaqa.triviaqa.load_dataset")
     def test_uses_continue_final_message_with_prefill(
         self, mock_load_dataset, mock_subsample
     ):
         """When prompt has assistant prefill, should use continue_final_message=True."""
-        from callm.data.triviaQA import TriviaQADataModule
+        from callm.data.triviaqa import TriviaQADataModule
 
         mock_load_dataset.return_value = {"validation": self._mock_dataset()}
 
@@ -107,13 +109,15 @@ class TestTriviaQAChatTemplateKwargs:
             assert kwargs["continue_final_message"] is True
             assert "add_generation_prompt" not in kwargs
 
-    @patch("callm.data.triviaQA.subsample_dataset", side_effect=lambda d, *a: d)
-    @patch("callm.data.triviaQA.load_dataset")
+    @patch(
+        "callm.data.triviaqa.triviaqa.subsample_dataset", side_effect=lambda d, *a: d
+    )
+    @patch("callm.data.triviaqa.triviaqa.load_dataset")
     def test_uses_add_generation_prompt_without_prefill(
         self, mock_load_dataset, mock_subsample
     ):
         """When prompt has no assistant prefill, should use add_generation_prompt=True."""
-        from callm.data.triviaQA import TriviaQADataModule
+        from callm.data.triviaqa import TriviaQADataModule
 
         mock_load_dataset.return_value = {"validation": self._mock_dataset()}
 
@@ -161,14 +165,17 @@ class TestIsTrueDataChatTemplateKwargs:
         f.close()
         return f.name
 
-    @patch("callm.data.is_true_data.subsample_dataset", side_effect=lambda d, *a: d)
+    @patch(
+        "callm.data.triviaqa.is_true_data.subsample_dataset",
+        side_effect=lambda d, *a: d,
+    )
     @patch("callm.data.answers_data.get_tokenizer_for_model")
     def test_uses_add_generation_prompt_for_default_prompt(
         self, mock_get_tokenizer, mock_subsample
     ):
         """CHAT_IS_TRUE_PROB_PROMPT has no assistant prefill, so should use add_generation_prompt."""
         import os
-        from callm.data.is_true_data import IsTrueDataModule
+        from callm.data.triviaqa import IsTrueDataModule
 
         mock_tokenizer = Mock()
         mock_tokenizer.apply_chat_template.return_value = {
@@ -197,14 +204,17 @@ class TestIsTrueDataChatTemplateKwargs:
         finally:
             os.unlink(csv_path)
 
-    @patch("callm.data.is_true_data.subsample_dataset", side_effect=lambda d, *a: d)
+    @patch(
+        "callm.data.triviaqa.is_true_data.subsample_dataset",
+        side_effect=lambda d, *a: d,
+    )
     @patch("callm.data.answers_data.get_tokenizer_for_model")
     def test_uses_continue_final_message_with_prefill(
         self, mock_get_tokenizer, mock_subsample
     ):
         """When using a prompt with assistant prefill, should use continue_final_message."""
         import os
-        from callm.data.is_true_data import IsTrueDataModule
+        from callm.data.triviaqa import IsTrueDataModule
 
         mock_tokenizer = Mock()
         mock_tokenizer.apply_chat_template.return_value = {

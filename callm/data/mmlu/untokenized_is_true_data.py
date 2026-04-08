@@ -1,20 +1,21 @@
+"""
+DataModule for IS_TRUE validation on MMLU answers without tokenization.
+
+Designed for GCP models that handle raw strings.
+"""
+
 from torch.utils.data import DataLoader
 from datasets import Dataset
 
 from callm.data.answers_data import AnswersDataModule
-from callm.utils import subsample_dataset, check_exact_match
-from callm.data.evaluator_data import SEMANTIC_EQUIVALENCE_PROMPT
+from callm.prompts.mmlu import GCP_CHAT_MMLU_IS_TRUE_PROMPT
+from callm.utils import subsample_dataset
 
 
-class UntokenizedEvaluatorDataModule(AnswersDataModule):
-    """DataModule for batched correctness evaluation using external APIs (e.g. GCP).
-
-    Skips tokenization entirely and supplies the raw evaluator string as 'input'.
-    """
+class UntokenizedMMLUIsTrueDataModule(AnswersDataModule):
+    """DataModule for Is True/False validation of MMLU LLM answers without tokenization."""
 
     def setup(self, stage: str = None):
-        # We purposely don't initialize internal self.tokenizer from the base class `self._setup_tokenizer()`
-
         # Load LLM outputs from CSV using base class method
         rows = self.load_llm_outputs_from_csv()
 
@@ -24,33 +25,23 @@ class UntokenizedEvaluatorDataModule(AnswersDataModule):
         confidences = [row["confidence"] for row in rows]
         raw_outputs = [row["raw_output"] for row in rows]
         original_indices = [row["index"] for row in rows]
+        choices_list = [row.get("choices", "") for row in rows]
 
-        # Create evaluation prompts
+        # Create IS_TRUE prompts
         prompts = []
-        exact_matches = []
-        for question, gold_answers, pred_answer in zip(
-            questions, gold_answers_list, pred_answers
+        for question, pred_answer, choices in zip(
+            questions, pred_answers, choices_list
         ):
-            # Check exact match first
-            # The pred_answer might not be lowercased yet, while gold answers usually are.
-            if check_exact_match(pred_answer, gold_answers):
-                exact_matches.append(True)
-                prompts.append("")  # Won't be used
-            else:
-                exact_matches.append(False)
-                prompt = SEMANTIC_EQUIVALENCE_PROMPT.render(
-                    question=question,
-                    pred_answer=pred_answer,
-                    gold_answers=gold_answers,
-                )
-                prompts.append(prompt)
+            prompt = GCP_CHAT_MMLU_IS_TRUE_PROMPT(
+                question=question, answer=pred_answer, choices=choices
+            )
+            prompts.append(prompt)
 
         self.dataset = Dataset.from_dict(
             {
                 "input": prompts,
-                "exact_match": exact_matches,
                 "question": questions,
-                "gold_answers": gold_answers_list,
+                "label": gold_answers_list,
                 "pred_answer": pred_answers,
                 "confidence": confidences,
                 "raw_output": raw_outputs,
@@ -61,15 +52,15 @@ class UntokenizedEvaluatorDataModule(AnswersDataModule):
         self.dataset = subsample_dataset(self.dataset, self.max_samples, self.seed)
 
     def _setup_tokenizer(self):
+        """Override to skip tokenizer setup."""
         pass
 
     def val_dataloader(self):
         def collate_fn(batch):
             return {
                 "input": [item["input"] for item in batch],
-                "exact_match": [item["exact_match"] for item in batch],
                 "question": [item["question"] for item in batch],
-                "gold_answers": [item["gold_answers"] for item in batch],
+                "label": [item["label"] for item in batch],
                 "pred_answer": [item["pred_answer"] for item in batch],
                 "confidence": [item["confidence"] for item in batch],
                 "raw_output": [item["raw_output"] for item in batch],

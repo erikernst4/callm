@@ -1,10 +1,10 @@
 from unittest.mock import patch
-from callm.data.untokenized_is_true_data import UntokenizedIsTrueDataModule
+from callm.data.triviaqa import UntokenizedIsTrueDataModule
 
 
 class TestUntokenizedIsTrueData:
     @patch(
-        "callm.data.untokenized_is_true_data.AnswersDataModule.load_llm_outputs_from_csv"
+        "callm.data.triviaqa.untokenized_is_true_data.AnswersDataModule.load_llm_outputs_from_csv"
     )
     def test_setup_and_collate(self, mock_load_csv):
         # Mock LLM outputs
