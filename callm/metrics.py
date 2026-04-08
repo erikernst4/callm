@@ -89,7 +89,7 @@ class CrossEntropy(Metric):
         return self.sum_ce / self.count
 
 
-class CCAG(Metric):
+class CnCAG(Metric):
     """
     CCAG (Confidence Cost Abstention Game) metric.
 
@@ -100,45 +100,23 @@ class CCAG(Metric):
 
     full_state_update = False
 
-    def __init__(self, cost_func=None, epsilon: float = 1e-7, **kwargs):
+    def __init__(self, n: int = 0, epsilon: float = 1e-7, **kwargs):
         super().__init__(**kwargs)
         self.epsilon = epsilon
-        if cost_func == "case1":
-            self.cost_fun = self._integrated_cost_case1_w_1
-        elif cost_func == "case3":
-            self.cost_fun = self._integrated_cost_case3
-        elif cost_func == "case2" or cost_func is None:
-            self.cost_fun = self._integrated_cost_case1_w_1_gamma
-        elif callable(cost_func):
-            self.cost_fun = cost_func
-        else:
-            raise ValueError(
-                "cost_func must be a callable or one of 'case1', 'case2', 'case3'"
+        if n == 0:
+            self.cost_fun = (
+                lambda q, correct_indicator: 1
+                - q
+                - (1 - correct_indicator) * torch.log(1 - q)
             )
+        elif n > 0:
+            self.cost_fun = lambda q, correct_indicator: (1 - q) ** (n + 1) + (
+                n + 1
+            ) / n * (1 - (1 - q) ** n) * (1 - correct_indicator)
+        else:
+            raise ValueError("n must be non-negative.")
         self.add_state("sum_cost", default=torch.tensor(0.0), dist_reduce_fx="sum")
         self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
-
-    def _default_integrated_cost(
-        self, q: torch.Tensor, correct_indicator: torch.Tensor
-    ) -> torch.Tensor:
-        return torch.log(2 - q) * (2 - correct_indicator) - torch.log(1 - q) * (
-            1 - correct_indicator
-        )
-
-    def _integrated_cost_case1_w_1_gamma(
-        self, q: torch.Tensor, correct_indicator: torch.Tensor
-    ) -> torch.Tensor:
-        return 1 - q - correct_indicator * torch.log(1 - q)
-
-    def _integrated_cost_case1_w_1(
-        self, q: torch.Tensor, correct_indicator: torch.Tensor
-    ) -> torch.Tensor:
-        return (1 - q) ** 2 + correct_indicator * 2 * q
-
-    def _integrated_cost_case3(
-        self, q: torch.Tensor, correct_indicator: torch.Tensor
-    ) -> torch.Tensor:
-        return 2 * ((1 - q) / 2 - q) ** 2 + correct_indicator * 2 / (2 - q) ** 2
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
         if torch.isnan(confidences).any() or torch.isnan(correctness).any():
@@ -153,6 +131,11 @@ class CCAG(Metric):
         if self.count == 0:
             return torch.tensor(float("nan"))
         return self.sum_cost / self.count
+
+
+class CCAG(CnCAG):
+    def __init__(self, *args, **kwargs):
+        super().__init__(n=0, *args, **kwargs)
 
 
 class GammaCCAG(Metric):

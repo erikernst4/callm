@@ -253,49 +253,48 @@ class TestCCAG:
     """Tests for CCAG metric."""
 
     def test_correct_high_confidence(self):
-        """When correct with high confidence, cost should be relatively high (penalizes uncertainty)."""
+        """When correct with high confidence, cost should be low."""
         confidences = torch.tensor([0.9])
         correctness = torch.tensor([True])
         metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
-        # Default cost_func = _integrated_cost_case1_w_1_gamma:
-        # cost = 1 - q - indicator * log(1 - q)
-        # indicator=1, q=0.9: 1 - 0.9 - 1*log(0.1) = 0.1 + 2.3026 ≈ 2.4026
-        expected = 1 - 0.9 - np.log(1 - 0.9)
+        # cost = 1 - q - (1 - indicator) * log(1 - q)
+        # indicator=1, q=0.9: 1 - 0.9 - 0 = 0.1
+        expected = 1 - 0.9
         assert abs(cost - expected) < 1e-4
 
     def test_correct_low_confidence(self):
-        """When correct with low confidence, cost should still be moderate."""
+        """When correct with low confidence, cost should be moderate."""
         confidences = torch.tensor([0.2])
         correctness = torch.tensor([True])
         metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
-        # indicator=1, q=0.2: 1 - 0.2 - 1*log(0.8) = 0.8 + 0.2231 ≈ 1.0231
-        expected = 1 - 0.2 - np.log(1 - 0.2)
+        # indicator=1, q=0.2: 1 - 0.2 - 0 = 0.8
+        expected = 1 - 0.2
         assert abs(cost - expected) < 1e-4
 
     def test_incorrect_high_confidence(self):
-        """When incorrect with high confidence, cost should be low (close to abstain cost)."""
+        """When incorrect with high confidence, cost should be high (heavy penalty)."""
         confidences = torch.tensor([0.9])
         correctness = torch.tensor([False])
         metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
-        # indicator=0, q=0.9: 1 - 0.9 - 0 = 0.1
-        expected = 1 - 0.9
+        # indicator=0, q=0.9: 1 - 0.9 - 1*log(0.1) ≈ 2.4026
+        expected = 1 - 0.9 - np.log(1 - 0.9)
         assert abs(cost - expected) < 1e-3
 
     def test_incorrect_low_confidence(self):
-        """When incorrect with low confidence, cost should be higher."""
+        """When incorrect with low confidence, cost should be moderate-high."""
         confidences = torch.tensor([0.2])
         correctness = torch.tensor([False])
         metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
-        # indicator=0, q=0.2: 1 - 0.2 - 0 = 0.8
-        expected = 1 - 0.2
+        # indicator=0, q=0.2: 1 - 0.2 - 1*log(0.8) ≈ 1.0231
+        expected = 1 - 0.2 - np.log(1 - 0.2)
         assert abs(cost - expected) < 1e-3
 
     def test_mixed_predictions(self):
@@ -305,9 +304,10 @@ class TestCCAG:
         metric = CCAG()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
-        # cost = 1 - q - indicator * log(1 - q)
-        cost_correct = 1 - 0.9 - np.log(1 - 0.9)  # ≈ 2.4026
-        cost_incorrect = 1 - 0.2  # = 0.8
+        # cost_correct_high = 1 - 0.9 = 0.1
+        # cost_incorrect_low = 1 - 0.2 - np.log(0.8) ≈ 1.0231
+        cost_correct = 1 - 0.9
+        cost_incorrect = 1 - 0.2 - np.log(1 - 0.2)
         expected = (cost_correct + cost_incorrect) / 2
         assert abs(cost - expected) < 1e-3
 
