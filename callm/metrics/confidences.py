@@ -29,7 +29,37 @@ class ExpectedCalibrationError(BinaryCalibrationError):
         super().update(confidences.float(), correctness.long())
 
 
-class AUCScore(BinaryAUROC):
+class ConfidenceErrorRate(Metric):
+    """
+    Error Rate for confidence predictions.
+
+    Error Rate = mean[ y != argmax(p) ]
+    """
+
+    full_state_update = False
+
+    def __init__(self, num_classes: int, **kwargs):
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.add_state("num_errors", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
+            raise ValueError("NaN values found in input tensors.")
+        if confidences.ndim() != 1 or correctness.ndim() != 1:
+            raise ValueError("Confidences must be 1D and correctness must be 1D.")
+        self.num_errors += (correctness == 0).sum()
+        self.count += confidences.size(0)
+
+    def compute(self) -> torch.Tensor:
+        if self.count == 0:
+            return torch.tensor(float("nan"))
+        error_rate = self.num_errors / self.count
+        return error_rate
+    
+
+class ConfidenceAUCScore(BinaryAUROC):
     """AUROC via torchmetrics BinaryAUROC."""
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
@@ -45,7 +75,7 @@ class AUCScore(BinaryAUROC):
             return torch.tensor(float("nan"))
 
 
-class BrierScore(MeanSquaredError):
+class ConfidenceBrierScore(MeanSquaredError):
     """Brier Score = MSE between confidence and correctness."""
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
@@ -89,12 +119,7 @@ class ConfidenceCrossEntropy(Metric):
         return self.sum_ce / self.count
 
 
-class ClassificationCrossEntropy(Metric):
-    ## TODO: implement multiclass cross entropy if needed
-    pass
-
-
-class CnCAG(Metric):
+class ConfidenceCnCAG(Metric):
     """
     CnCAG (Confidence Cost Abstention Game) metric.
 
@@ -141,7 +166,7 @@ class CnCAG(Metric):
         return self.sum_cost / self.count
     
 
-class GammaCCAG(Metric):
+class ConfidenceGammaCCAG(Metric):
     """
     Gamma-CnCAG (Confidence Cost Abstention Game) metric.
 
