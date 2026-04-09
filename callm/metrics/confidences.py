@@ -38,23 +38,22 @@ class ConfidenceErrorRate(Metric):
 
     full_state_update = False
 
-    def __init__(self, num_classes: int, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.num_classes = num_classes
         self.add_state("num_errors", default=torch.tensor(0), dist_reduce_fx="sum")
         self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
         if torch.isnan(confidences).any() or torch.isnan(correctness).any():
             raise ValueError("NaN values found in input tensors.")
-        if confidences.ndim() != 1 or correctness.ndim() != 1:
+        if confidences.ndim != 1 or correctness.ndim != 1:
             raise ValueError("Confidences must be 1D and correctness must be 1D.")
         self.num_errors += (correctness == 0).sum()
         self.count += confidences.size(0)
 
     def compute(self) -> torch.Tensor:
         if self.count == 0:
-            return torch.tensor(float("nan"))
+            raise ValueError("No samples to compute error rate.")
         error_rate = self.num_errors / self.count
         return error_rate
     
@@ -72,7 +71,7 @@ class ConfidenceAUCScore(BinaryAUROC):
             return super().compute()
         except (ValueError, IndexError):
             # Single class or empty — undefined
-            return torch.tensor(float("nan"))
+            raise ValueError("No samples to compute AUC score.")
 
 
 class ConfidenceBrierScore(MeanSquaredError):
@@ -115,25 +114,13 @@ class ConfidenceCrossEntropy(Metric):
 
     def compute(self) -> torch.Tensor:
         if self.count == 0:
-            return torch.tensor(float("nan"))
+            raise ValueError("No samples to compute cross entropy.")
         return self.sum_ce / self.count
 
 
 class ConfidenceCnCAG(Metric):
     """
     CnCAG (Confidence Cost Abstention Game) metric.
-
-    $$
-    \\begin{align}
-    C_n^*(y_k,\\mathbf{q}) = 
-        \\begin{cases}
-            (1-q_e)^{n+1} + \\frac{(n+1)}{n}(1-(1-q_e)^n) I(k \\neq\ e) & \\text{if } n \in \mathbb{N} \\
-            1-q_e - I(k \\neq e) \log(1-q_e) & \\text{if } n = 0
-        \end{cases}
-    \end{align}
-    $$
-
-    where q_e is the confidence and I is the indicator function.
     """
 
     full_state_update = False
@@ -162,7 +149,7 @@ class ConfidenceCnCAG(Metric):
 
     def compute(self) -> torch.Tensor:
         if self.count == 0:
-            return torch.tensor(float("nan"))
+            raise ValueError("No samples to compute CnCAG.")
         return self.sum_cost / self.count
     
 
@@ -208,13 +195,10 @@ class ConfidenceGammaCCAG(Metric):
 
     def compute(self) -> torch.Tensor:
         if not self.all_confidences:
-            return torch.tensor(float("nan"))
+            raise ValueError("No samples to compute Gamma-CCAG.")
 
         confidences = torch.cat(self.all_confidences)
         correctness = torch.cat(self.all_correctness)
-
-        if len(confidences) == 0:
-            return torch.tensor(float("nan"))
 
         # Score: estimated error probability
         s = 1.0 - confidences
@@ -233,4 +217,5 @@ class ConfidenceGammaCCAG(Metric):
 
         # Expected cost = mean over all samples
         total_cost = answer_costs.sum() + abstain_costs
+        
         return total_cost / len(confidences)
