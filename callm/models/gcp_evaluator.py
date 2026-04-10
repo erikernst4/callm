@@ -6,9 +6,9 @@ import shutil
 import glob
 from callm.metrics import (
     ExpectedCalibrationError,
-    BrierScore,
-    CrossEntropy,
-    AUCScore,
+    ConfidenceBrierScore,
+    ConfidenceCrossEntropy,
+    ConfidenceAUCScore,
     CCAG,
 )
 from callm.models.base import BaseLightningModule
@@ -274,9 +274,9 @@ class GCPEvaluatorModule(BaseLightningModule):
 
         metrics = {
             "val_ece": ExpectedCalibrationError(n_bins=10),
-            "val_brier_score": BrierScore(),
-            "val_cross_entropy": CrossEntropy(),
-            "val_auc": AUCScore(),
+            "val_brier_score": ConfidenceBrierScore(),
+            "val_cross_entropy": ConfidenceCrossEntropy(),
+            "val_auc": ConfidenceAUCScore(),
             "val_ccag": CCAG(),
         }
 

@@ -6,6 +6,7 @@ from .confidences import (
     ConfidenceCrossEntropy,
     ConfidenceCnCAG,
     ConfidenceGammaCCAG,
+    CCAG,
 )
 from .classification import (
     ClassificationErrorRate,
@@ -15,3 +16,20 @@ from .classification import (
     ClassificationCnCAG,
     ClassificationGammaCCAG,
 )
+
+__all__ = [
+    "ExpectedCalibrationError",
+    "ConfidenceErrorRate",
+    "ConfidenceAUCScore",
+    "ConfidenceBrierScore",
+    "ConfidenceCrossEntropy",
+    "ConfidenceCnCAG",
+    "ConfidenceGammaCCAG",
+    "CCAG",
+    "ClassificationErrorRate",
+    "ClassificationAUROC",
+    "ClassificationBrierScore",
+    "ClassificationCrossEntropy",
+    "ClassificationCnCAG",
+    "ClassificationGammaCCAG",
+]

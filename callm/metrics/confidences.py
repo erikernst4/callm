@@ -56,7 +56,7 @@ class ConfidenceErrorRate(Metric):
             raise ValueError("No samples to compute error rate.")
         error_rate = self.num_errors / self.count
         return error_rate
-    
+
 
 class ConfidenceAUCScore(BinaryAUROC):
     """AUROC via torchmetrics BinaryAUROC."""
@@ -130,9 +130,15 @@ class ConfidenceCnCAG(Metric):
         self.n = n
         self.epsilon = epsilon
         if n == 0:
-            self.cost_fun = lambda q, correct_indicator: 1 - q - (1 - correct_indicator) * torch.log(1 - q)
+            self.cost_fun = (
+                lambda q, correct_indicator: 1
+                - q
+                - (1 - correct_indicator) * torch.log(1 - q)
+            )
         elif n > 0:
-            self.cost_fun = lambda q, correct_indicator: (1 - q)**(n+1) + (n+1)/n * (1 - (1 - q)**n) * (1 - correct_indicator)
+            self.cost_fun = lambda q, correct_indicator: (1 - q) ** (n + 1) + (
+                n + 1
+            ) / n * (1 - (1 - q) ** n) * (1 - correct_indicator)
         else:
             raise ValueError("n must be non-negative.")
         self.add_state("sum_cost", default=torch.tensor(0.0), dist_reduce_fx="sum")
@@ -151,7 +157,12 @@ class ConfidenceCnCAG(Metric):
         if self.count == 0:
             raise ValueError("No samples to compute CnCAG.")
         return self.sum_cost / self.count
-    
+
+
+class CCAG(ConfidenceCnCAG):
+    def __init__(self, *args, **kwargs):
+        super().__init__(n=0, *args, **kwargs)
+
 
 class ConfidenceGammaCCAG(Metric):
     """
@@ -203,7 +214,7 @@ class ConfidenceGammaCCAG(Metric):
         # Score: estimated error probability
         s = 1.0 - confidences
 
-        # Decision: abstain if s > threshold, answer otherwise
+        # Decision: abstain if s < γ, answer otherwise
         abstain_mask = s < self.gamma
         answer_mask = ~abstain_mask
 
@@ -211,11 +222,11 @@ class ConfidenceGammaCCAG(Metric):
         base_cost = 1.0 - correctness  # 0 if correct, 1 if incorrect
         answer_costs = base_cost[answer_mask]
 
-        # Cost when abstaining: γ
+        # Cost when abstaining: γ per sample
         n_abstain = abstain_mask.sum()
         abstain_costs = self.gamma * n_abstain.float()
 
         # Expected cost = mean over all samples
         total_cost = answer_costs.sum() + abstain_costs
-        
+
         return total_cost / len(confidences)

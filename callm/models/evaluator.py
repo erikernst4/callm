@@ -15,9 +15,9 @@ import glob
 from callm.utils import initialize_model, get_tokenizer_for_model
 from callm.metrics import (
     ExpectedCalibrationError,
-    BrierScore,
-    CrossEntropy,
-    AUCScore,
+    ConfidenceBrierScore,
+    ConfidenceCrossEntropy,
+    ConfidenceAUCScore,
     CCAG,
 )
 from callm.models.base import BaseLightningModule
@@ -332,9 +332,9 @@ class EvaluatorModule(BaseLightningModule):
         # Calculate metrics using torchmetrics classes
         metrics = {
             "val_ece": ExpectedCalibrationError(n_bins=10),
-            "val_brier_score": BrierScore(),
-            "val_cross_entropy": CrossEntropy(),
-            "val_auc": AUCScore(),
+            "val_brier_score": ConfidenceBrierScore(),
+            "val_cross_entropy": ConfidenceCrossEntropy(),
+            "val_auc": ConfidenceAUCScore(),
             "val_ccag": CCAG(),
         }
 
