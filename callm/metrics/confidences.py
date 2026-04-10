@@ -29,7 +29,36 @@ class ExpectedCalibrationError(BinaryCalibrationError):
         super().update(confidences.float(), correctness.long())
 
 
-class AUCScore(BinaryAUROC):
+class ConfidenceErrorRate(Metric):
+    """
+    Error Rate for confidence predictions.
+
+    Error Rate = mean[ y != argmax(p) ]
+    """
+
+    full_state_update = False
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.add_state("num_errors", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
+            raise ValueError("NaN values found in input tensors.")
+        if confidences.ndim != 1 or correctness.ndim != 1:
+            raise ValueError("Confidences must be 1D and correctness must be 1D.")
+        self.num_errors += (correctness == 0).sum()
+        self.count += confidences.size(0)
+
+    def compute(self) -> torch.Tensor:
+        if self.count == 0:
+            raise ValueError("No samples to compute error rate.")
+        error_rate = self.num_errors / self.count
+        return error_rate
+
+
+class ConfidenceAUCScore(BinaryAUROC):
     """AUROC via torchmetrics BinaryAUROC."""
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
@@ -42,10 +71,10 @@ class AUCScore(BinaryAUROC):
             return super().compute()
         except (ValueError, IndexError):
             # Single class or empty — undefined
-            return torch.tensor(float("nan"))
+            raise ValueError("No samples to compute AUC score.")
 
 
-class BrierScore(MeanSquaredError):
+class ConfidenceBrierScore(MeanSquaredError):
     """Brier Score = MSE between confidence and correctness."""
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
@@ -59,7 +88,7 @@ class BrierScore(MeanSquaredError):
 # ──────────────────────────────────────────────────────
 
 
-class CrossEntropy(Metric):
+class ConfidenceCrossEntropy(Metric):
     """
     Binary Cross Entropy between confidence and correctness.
 
@@ -85,23 +114,20 @@ class CrossEntropy(Metric):
 
     def compute(self) -> torch.Tensor:
         if self.count == 0:
-            return torch.tensor(float("nan"))
+            raise ValueError("No samples to compute cross entropy.")
         return self.sum_ce / self.count
 
 
-class CnCAG(Metric):
+class ConfidenceCnCAG(Metric):
     """
-    CCAG (Confidence Cost Abstention Game) metric.
-
-    cost = log(2 - q_m) · (2 - 𝟙) − log(1 - q_m) · (1 - 𝟙)
-
-    where q_m is the confidence and 𝟙 is 1 when correct, 0 otherwise.
+    CnCAG (Confidence Cost Abstention Game) metric.
     """
 
     full_state_update = False
 
     def __init__(self, n: int = 0, epsilon: float = 1e-7, **kwargs):
         super().__init__(**kwargs)
+        self.n = n
         self.epsilon = epsilon
         if n == 0:
             self.cost_fun = (
@@ -129,34 +155,29 @@ class CnCAG(Metric):
 
     def compute(self) -> torch.Tensor:
         if self.count == 0:
-            return torch.tensor(float("nan"))
+            raise ValueError("No samples to compute CnCAG.")
         return self.sum_cost / self.count
 
 
-class CCAG(CnCAG):
+class CCAG(ConfidenceCnCAG):
     def __init__(self, *args, **kwargs):
         super().__init__(n=0, *args, **kwargs)
 
 
-class GammaCCAG(Metric):
+class ConfidenceGammaCCAG(Metric):
     """
-    Gamma-CCAG (Confidence Cost Abstention Game) metric.
+    Gamma-CnCAG (Confidence Cost Abstention Game) metric.
 
     Evaluates the expected cost of a selective prediction system that can
     abstain based on confidence scores. At a given gamma, the cost is:
 
-        C_γ(y_k, d_j) = a(γ) · C̃(y_k, d_j)   if d_j ≠ d_r  (answer)
-                       = b(γ)                    if d_j = d_r  (abstain)
+        C_γ(y_k, d_j)  = I(k ≠ j)   if d_j ≠ d_r  (answer)
+                       = γ          if d_j = d_r  (abstain)
 
-    The decision rule abstains when s(q) > b(γ)/a(γ), where s = 1 - confidence.
-    The base cost C̃ is 0-1 loss (1 if incorrect, 0 if correct).
+    The decision rule abstains when s(q) < γ, where s = 1 - confidence.
 
     Parameters
     ----------
-    a_func : callable
-        Function gamma -> a(gamma). Scales the base cost when answering.
-    b_func : callable
-        Function gamma -> b(gamma). Fixed cost when abstaining.
     gamma : float
         The operating point gamma ∈ (0, 1).
     epsilon : float
@@ -167,15 +188,11 @@ class GammaCCAG(Metric):
 
     def __init__(
         self,
-        a_func=None,
-        b_func=None,
         gamma: float = 0.5,
         epsilon: float = 1e-7,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.a_func = a_func if a_func is not None else (lambda g: 1.0)
-        self.b_func = b_func if b_func is not None else (lambda g: g)
         self.gamma = gamma
         self.epsilon = epsilon
         self.add_state("all_confidences", default=[], dist_reduce_fx="cat")
@@ -189,33 +206,27 @@ class GammaCCAG(Metric):
 
     def compute(self) -> torch.Tensor:
         if not self.all_confidences:
-            return torch.tensor(float("nan"))
+            raise ValueError("No samples to compute Gamma-CCAG.")
 
         confidences = torch.cat(self.all_confidences)
         correctness = torch.cat(self.all_correctness)
 
-        if len(confidences) == 0:
-            return torch.tensor(float("nan"))
-
-        a_val = self.a_func(self.gamma)
-        b_val = self.b_func(self.gamma)
-        threshold = b_val / a_val
-
         # Score: estimated error probability
         s = 1.0 - confidences
 
-        # Decision: abstain if s > threshold, answer otherwise
-        abstain_mask = s > threshold
+        # Decision: abstain if s < γ, answer otherwise
+        abstain_mask = s < self.gamma
         answer_mask = ~abstain_mask
 
-        # Cost when answering: a(γ) * C̃  where C̃ = 1 - correctness (0-1 loss)
+        # Cost when answering: C̃  where C̃ = 1 - correctness (0-1 loss)
         base_cost = 1.0 - correctness  # 0 if correct, 1 if incorrect
-        answer_costs = a_val * base_cost[answer_mask]
+        answer_costs = base_cost[answer_mask]
 
-        # Cost when abstaining: b(γ)
+        # Cost when abstaining: γ per sample
         n_abstain = abstain_mask.sum()
-        abstain_costs = b_val * n_abstain.float()
+        abstain_costs = self.gamma * n_abstain.float()
 
         # Expected cost = mean over all samples
         total_cost = answer_costs.sum() + abstain_costs
+
         return total_cost / len(confidences)

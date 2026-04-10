@@ -209,6 +209,13 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# VS Code
+.vscode/
+
 
 # Lightning logs
 lightning_logs/
+
+# Data
+scores/
+outputs/
