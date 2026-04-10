@@ -308,3 +308,24 @@ class ClassificationGammaCCAG(Metric):
         total_cost = answer_costs.sum() + abstain_costs
         
         return total_cost / len(confidences)
+
+
+class AURCp(Metric):
+    ## TODO: implement AURCp (notation from Zhou et al., 2025, eq 10) from the paper of (Frank et al. 2023, eq 27) for multi-class classification
+    pass
+
+class AURCa(Metric):
+    ## TODO: implement AURCa from the paper of (Zhou et al., 2025, eq 11) for multi-class classification
+    pass
+
+class EAURC(Metric):
+    ## TODO: implement EAURC for multi-class classification (ver paper de Geifman et al., 2018)
+    pass
+
+class AUPR(Metric):
+    ## TODO: implement AUPR for multi-class classification (paper Hendrycks and Gimpel, 2017)
+    pass
+
+class FPRat95TPR(Metric):
+    ## TODO: implement FPR at 95% TPR for multi-class classification (paper Dadalto et al., 2024)
+    pass
