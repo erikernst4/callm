@@ -42,6 +42,14 @@ class ClassificationErrorRate(Metric):
             prior_er = (labels != prior_pred).float().mean()
             er = er / prior_er
         return er
+    
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+            metric = cls(normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute()
+        return shortcut_function
 
 
 class ClassificationCrossEntropy(Metric):
@@ -83,6 +91,14 @@ class ClassificationCrossEntropy(Metric):
             prior_ce = F.cross_entropy(torch.log(priors), labels.long(), reduction="mean")
             ce = ce / prior_ce
         return ce
+    
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+            metric = cls(normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute()
+        return shortcut_function
 
 
 class ClassificationBrierScore(Metric):
@@ -122,10 +138,18 @@ class ClassificationBrierScore(Metric):
             prior_brier = ((priors - one_hot_labels) ** 2).sum() / logits.numel()
             brier = brier / prior_brier
         return brier
+
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+            metric = cls(normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute()
+        return shortcut_function
     
 
-class ClassificationAUROC(Metric):
-    """Multiclass AUROC metric."""
+class ClassificationAUC(Metric):
+    """Multiclass AUC metric."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -148,6 +172,15 @@ class ClassificationAUROC(Metric):
         auroc = AUROC(task="multiclass", num_classes=probs.size(1))
         auroc.update(probs, labels.long())
         return auroc.compute()
+    
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+            metric = cls()
+            metric.update(logits, labels)
+            return metric.compute()
+        return shortcut_function
+    
 
 class ClassificationECE(Metric):
     """Multiclass Expected Calibration Error (ECE) metric."""
@@ -174,11 +207,19 @@ class ClassificationECE(Metric):
         ece = MulticlassCalibrationError(num_classes=probs.size(1), n_bins=self.n_bins, norm="l1")
         ece.update(probs, labels.long())
         return ece.compute()
+    
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor, n_bins: int = 10) -> torch.Tensor:
+            metric = cls(n_bins=n_bins)
+            metric.update(logits, labels)
+            return metric.compute()
+        return shortcut_function
         
 
-class ClassificationCnCAG(Metric):
+class ClassificationnCCAS(Metric):
     """
-    CnCAG (Confidence Cost Abstention Game) metric.
+    n-CCAS (Confidence Cost Abstention Game) metric.
     """
 
     full_state_update = False
@@ -221,11 +262,19 @@ class ClassificationCnCAG(Metric):
             prior_cost = self.cost_fun(logqe_prior, prior_correct_indicator).sum() / labels.size(0)
             cost = cost / prior_cost
         return cost
+    
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor, n: int = 0) -> torch.Tensor:
+            metric = cls(n=n, normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute()
+        return shortcut_function
 
 
-class ClassificationGammaCCAG(Metric):
+class ClassificationGammaCCAS(Metric):
     """
-    Gamma-CnCAG (Confidence Cost Abstention Game) metric.
+    Gamma-CCAS (Confidence Cost Abstention Game) metric.
 
     Evaluates the expected cost of a selective prediction system that can
     abstain based on confidence scores. At a given gamma, the cost is:
@@ -308,6 +357,14 @@ class ClassificationGammaCCAG(Metric):
         total_cost = answer_costs.sum() + abstain_costs
         
         return total_cost / len(confidences)
+    
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor, gamma: float = 0.5) -> torch.Tensor:
+            metric = cls(gamma=gamma, normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute()
+        return shortcut_function
 
 
 class AURCp(Metric):

@@ -4,107 +4,136 @@ from .confidences import (
     ExpectedCalibrationError,
     ConfidenceAUCScore,
     ConfidenceBrierScore,
-    ConfidenceCnCAG,
+    ConfidencenCCAS,
     ConfidenceCrossEntropy,
     ConfidenceErrorRate,
-    ConfidenceGammaCCAG,
+    ConfidencegammaCCAS,
 )
 from .classification import (
     ClassificationErrorRate,
-    ClassificationAUROC,
+    ClassificationAUC,
     ClassificationBrierScore,
     ClassificationCrossEntropy,
     ClassificationECE,
-    ClassificationCnCAG,
-    ClassificationGammaCCAG,
+    ClassificationnCCAS,
+    ClassificationGammaCCAS,
 )
 
-CONFIDENCE_METRICS = OrderedDict([
-    ("ece", {
-        "full_name": "Expected Calibration Error",
-        "function": ExpectedCalibrationError,
-        "higher_is_better": False,
-        "display": "ECE",
+METRICS = OrderedDict([
+    ## CONFIDENCE METRICS
+    ("conf_auc", {
+        "full_name": "Confidence AUC Score",
+        "function": ConfidenceAUCScore.create_shortcut_function(),
+        "higher_is_better": True,
+        "display": "AUC",
     }),
-    ("brier", {
+    ("conf_ece", {
+        "full_name": "Expected Calibration Error",
+        "function": ExpectedCalibrationError.create_shortcut_function(),
+        "higher_is_better": False,
+        "display": None,
+    }),
+    ("conf_brier", {
         "full_name": "Confidence Brier Score",
-        "function": ConfidenceBrierScore,
+        "function": ConfidenceBrierScore.create_shortcut_function(),
         "higher_is_better": False,
         "display": "BS$^*$",
     }),
-    ("cross_entropy", {
+    ("conf_cross_entropy", {
         "full_name": "Confidence Cross-Entropy",
-        "function": ConfidenceCrossEntropy,
+        "function": ConfidenceCrossEntropy.create_shortcut_function(),
         "higher_is_better": False,
         "display": "CE$^*$",
     }),
-    ("auc", {
-        "full_name": "Confidence AUC Score",
-        "function": ConfidenceAUCScore,
-        "higher_is_better": True,
-        "display": "AUC",
-    }),
-    ("error_rate", {
+    ("conf_error_rate", {
         "full_name": "Confidence Error Rate",
-        "function": ConfidenceErrorRate,
+        "function": ConfidenceErrorRate.create_shortcut_function(),
         "higher_is_better": False,
         "display": "ER$^*$",
     }),
-    ("cncag", {
-        "full_name": "Confidence CnCAG",
-        "function": ConfidenceCnCAG,
+    ("conf_n-ccas", {
+        "full_name": "Confidence n-CCAS",
+        "function": ConfidencenCCAS.create_shortcut_function(),
         "higher_is_better": False,
-        "display": "CnCAG(n={n})$^*$",
+        "display": None,
     }),
-    ("gamma_ccag", {
-        "full_name": "Confidence GammaCCAG",
-        "function": ConfidenceGammaCCAG,
+    ("conf_gamma-ccas", {
+        "full_name": "Confidence γ-CCAS",
+        "function": ConfidencegammaCCAS.create_shortcut_function(),
         "higher_is_better": False,
-        "display": "γ-CCAG(γ={gamma})$^*$",
+        "display": None,
     }),
-])
-
-CLASSIFICATION_METRICS = OrderedDict([
-    ("error_rate", {
+    ## CLASSIFICATION METRICS
+    ("cls_error_rate", {
         "full_name": "Classification Error Rate",
-        "function": ClassificationErrorRate,
+        "function": ClassificationErrorRate.create_shortcut_function(normalize=False),
         "higher_is_better": False,
         "display": "ER",
     }),
-    ("auroc", {
-        "full_name": "Classification AUROC",
-        "function": ClassificationAUROC,
+    ("cls_ner", {
+        "full_name": "Classification Normalized Error Rate",
+        "function": ClassificationErrorRate.create_shortcut_function(normalize=True),
+        "higher_is_better": False,
+        "display": "NER",
+    }),
+    ("cls_auc", {
+        "full_name": "Classification AUC",
+        "function": ClassificationAUC.create_shortcut_function(),
         "higher_is_better": True,
         "display": "AUC",
     }),
-    ("brier", {
+    ("cls_brier", {
         "full_name": "Classification Brier Score",
-        "function": ClassificationBrierScore,
+        "function": ClassificationBrierScore.create_shortcut_function(normalize=False),
         "higher_is_better": False,
         "display": "BS",
     }),
-    ("cross_entropy", {
+    ("cls_nbs", {
+        "full_name": "Classification Normalized Brier Score",
+        "function": ClassificationBrierScore.create_shortcut_function(normalize=True),
+        "higher_is_better": False,
+        "display": "NBS",
+    }),
+    ("cls_cross_entropy", {
         "full_name": "Classification Cross-Entropy",
-        "function": ClassificationCrossEntropy,
+        "function": ClassificationCrossEntropy.create_shortcut_function(normalize=False),
         "higher_is_better": False,
         "display": "CE",
     }),
-    ("ece", {
+    ("cls_nce", {
+        "full_name": "Classification Normalized Cross-Entropy",
+        "function": ClassificationCrossEntropy.create_shortcut_function(normalize=True),
+        "higher_is_better": False,
+        "display": "NCE",
+    }),
+    ("cls_ece", {
         "full_name": "Classification ECE",
-        "function": ClassificationECE,
+        "function": ClassificationECE.create_shortcut_function(),
         "higher_is_better": False,
-        "display": "ECE",
+        "display": None,
     }),
-    ("cncag", {
-        "full_name": "Classification CnCAG",
-        "function": ClassificationCnCAG,
+    ("cls_n-ccas", {
+        "full_name": "Classification n-CCAS",
+        "function": ClassificationnCCAS.create_shortcut_function(normalize=False),
         "higher_is_better": False,
-        "display": "CnCAG(n={n})",
+        "display": None,
     }),
-    ("gamma_ccag", {
-        "full_name": "Classification GammaCCAG",
-        "function": ClassificationGammaCCAG,
+    ("cls_norm_n-ccas", {
+        "full_name": "Classification Normalized n-CCAS",
+        "function": ClassificationnCCAS.create_shortcut_function(normalize=True),
         "higher_is_better": False,
-        "display": "γ-CCAG(γ={gamma})",
+        "display": None,
+    }),
+    ("cls_gamma-ccas", {
+        "full_name": "Classification γ-CCAS",
+        "function": ClassificationGammaCCAS.create_shortcut_function(normalize=False),
+        "higher_is_better": False,
+        "display": None,
+    }),
+    ("cls_norm_gamma-ccas", {
+        "full_name": "Classification Normalized γ-CCAS",
+        "function": ClassificationGammaCCAS.create_shortcut_function(normalize=True),
+        "higher_is_better": False,
+        "display": None,
     }),
 ])

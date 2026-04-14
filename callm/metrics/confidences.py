@@ -2,7 +2,7 @@
 Calibration metrics for evaluating confidence predictions.
 
 Uses torchmetrics built-ins where available (ECE, AUROC, Brier/MSE) and
-provides custom implementations for Cross Entropy, CCAG, and Gamma-CCAG.
+provides custom implementations for Cross Entropy, CCAS, and Gamma-CCAS.
 """
 
 import torch
@@ -27,6 +27,14 @@ class ExpectedCalibrationError(BinaryCalibrationError):
         if torch.isnan(confidences).any() or torch.isnan(correctness).any():
             raise ValueError("NaN values found in input tensors.")
         super().update(confidences.float(), correctness.long())
+
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, nbins: int = 10) -> torch.Tensor:
+            metric = cls(n_bins=nbins)
+            metric.update(confidences, correctness)
+            return metric.compute()
+        return shortcut_function
 
 
 class ConfidenceErrorRate(Metric):
@@ -56,6 +64,14 @@ class ConfidenceErrorRate(Metric):
             raise ValueError("No samples to compute error rate.")
         error_rate = self.num_errors / self.count
         return error_rate
+    
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+            metric = cls()
+            metric.update(confidences, correctness)
+            return metric.compute()
+        return shortcut_function
 
 
 class ConfidenceAUCScore(BinaryAUROC):
@@ -72,6 +88,14 @@ class ConfidenceAUCScore(BinaryAUROC):
         except (ValueError, IndexError):
             # Single class or empty — undefined
             raise ValueError("No samples to compute AUC score.")
+        
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+            metric = cls()
+            metric.update(confidences, correctness)
+            return metric.compute()
+        return shortcut_function
 
 
 class ConfidenceBrierScore(MeanSquaredError):
@@ -81,6 +105,14 @@ class ConfidenceBrierScore(MeanSquaredError):
         if torch.isnan(confidences).any() or torch.isnan(correctness).any():
             raise ValueError("NaN values found in input tensors.")
         super().update(confidences.float(), correctness.float())
+
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+            metric = cls()
+            metric.update(confidences, correctness)
+            return metric.compute()
+        return shortcut_function
 
 
 # ──────────────────────────────────────────────────────
@@ -116,11 +148,19 @@ class ConfidenceCrossEntropy(Metric):
         if self.count == 0:
             raise ValueError("No samples to compute cross entropy.")
         return self.sum_ce / self.count
+    
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+            metric = cls()
+            metric.update(confidences, correctness)
+            return metric.compute()
+        return shortcut_function
 
 
-class ConfidenceCnCAG(Metric):
+class ConfidencenCCAS(Metric):
     """
-    CnCAG (Confidence Cost Abstention Game) metric.
+    nCCAS (Confidence Cost Abstention Game) metric.
     """
 
     full_state_update = False
@@ -155,18 +195,21 @@ class ConfidenceCnCAG(Metric):
 
     def compute(self) -> torch.Tensor:
         if self.count == 0:
-            raise ValueError("No samples to compute CnCAG.")
+            raise ValueError("No samples to compute nCCAS.")
         return self.sum_cost / self.count
+    
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, n: int = 0) -> torch.Tensor:
+            metric = cls(n=n)
+            metric.update(confidences, correctness)
+            return metric.compute()
+        return shortcut_function
 
 
-class CCAG(ConfidenceCnCAG):
-    def __init__(self, *args, **kwargs):
-        super().__init__(n=0, *args, **kwargs)
-
-
-class ConfidenceGammaCCAG(Metric):
+class ConfidencegammaCCAS(Metric):
     """
-    Gamma-CnCAG (Confidence Cost Abstention Game) metric.
+    Gamma-nCCAS (Confidence Cost Abstention Game) metric.
 
     Evaluates the expected cost of a selective prediction system that can
     abstain based on confidence scores. At a given gamma, the cost is:
@@ -206,7 +249,7 @@ class ConfidenceGammaCCAG(Metric):
 
     def compute(self) -> torch.Tensor:
         if not self.all_confidences:
-            raise ValueError("No samples to compute Gamma-CCAG.")
+            raise ValueError("No samples to compute Gamma-CCAS.")
 
         confidences = torch.cat(self.all_confidences)
         correctness = torch.cat(self.all_correctness)
@@ -230,3 +273,11 @@ class ConfidenceGammaCCAG(Metric):
         total_cost = answer_costs.sum() + abstain_costs
 
         return total_cost / len(confidences)
+    
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, gamma: float = 0.5) -> torch.Tensor:
+            metric = cls(gamma=gamma)
+            metric.update(confidences, correctness)
+            return metric.compute()
+        return shortcut_function
