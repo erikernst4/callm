@@ -13,7 +13,7 @@ def get_metric_from_id(id_name):
             "full_name": f"Confidence n={n}-CCAS",
             "function": partial(METRICS["conf_n-ccas"]["function"], n=n),
             "higher_is_better": METRICS["conf_n-ccas"]["higher_is_better"],
-            "display": f"n={n}-CCAS$^*$",
+            "display": f"CCAS$^*$ (n={n})",
         }
     elif "conf_gamma-ccas" in id_name:
         gamma = float(id_name.split("_gamma=")[-1])
@@ -21,7 +21,7 @@ def get_metric_from_id(id_name):
             "full_name": f"Confidence γ={gamma}-CCAS",
             "function": partial(METRICS["conf_gamma-ccas"]["function"], gamma=gamma),
             "higher_is_better": METRICS["conf_gamma-ccas"]["higher_is_better"],
-            "display": f"γ={gamma}-CCAS$^*$",
+            "display": f"CCAS$^*$ (γ={gamma})",
         }
     elif "conf_ece" in id_name:
         if "nbins=" not in id_name:
@@ -40,7 +40,7 @@ def get_metric_from_id(id_name):
             "full_name": f"Classification n={n}-CCAS",
             "function": partial(METRICS["cls_n-ccas"]["function"], n=n),
             "higher_is_better": METRICS["cls_n-ccas"]["higher_is_better"],
-            "display": f"n={n}-CCAS",
+            "display": f"CCAS (n={n})",
         }
     elif "cls_norm_n-ccas" in id_name:
         n = int(id_name.split("_n=")[-1])
@@ -48,7 +48,7 @@ def get_metric_from_id(id_name):
             "full_name": f"Classification Normalized n={n}-CCAS",
             "function": partial(METRICS["cls_norm_n-ccas"]["function"], n=n),
             "higher_is_better": METRICS["cls_norm_n-ccas"]["higher_is_better"],
-            "display": f"n={n}-NCCAS",
+            "display": f"NCCAS (n={n})",
         }
     elif "cls_gamma-ccas" in id_name:
         gamma = float(id_name.split("_gamma=")[-1])
@@ -56,7 +56,7 @@ def get_metric_from_id(id_name):
             "full_name": f"Classification γ={gamma}-CCAS",
             "function": partial(METRICS["cls_gamma-ccas"]["function"], gamma=gamma),
             "higher_is_better": METRICS["cls_gamma-ccas"]["higher_is_better"],
-            "display": f"γ={gamma}-CCAS",
+            "display": f"CCAS (γ={gamma})",
         }
     elif "cls_norm_gamma-ccas" in id_name:
         gamma = float(id_name.split("_gamma=")[-1])
@@ -64,7 +64,7 @@ def get_metric_from_id(id_name):
             "full_name": f"Classification Normalized γ={gamma}-CCAS",
             "function": partial(METRICS["cls_norm_gamma-ccas"]["function"], gamma=gamma),
             "higher_is_better": METRICS["cls_norm_gamma-ccas"]["higher_is_better"],
-            "display": f"γ={gamma}-NCCAS",
+            "display": f"NCCAS (γ={gamma})",
         }
     elif "cls_ece" in id_name:
         if "nbins=" not in id_name:

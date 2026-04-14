@@ -210,8 +210,8 @@ class ClassificationECE(Metric):
     
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor, n_bins: int = 10) -> torch.Tensor:
-            metric = cls(n_bins=n_bins)
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor, nbins: int = 10) -> torch.Tensor:
+            metric = cls(n_bins=nbins)
             metric.update(logits, labels)
             return metric.compute()
         return shortcut_function
