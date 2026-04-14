@@ -1,6 +1,8 @@
 from collections import OrderedDict
 
 from .confidences import (
+    FPR95,
+    ConfidenceAURC,
     ExpectedCalibrationError,
     ConfidenceAUCScore,
     ConfidenceBrierScore,
@@ -10,11 +12,13 @@ from .confidences import (
     ConfidencegammaCCAS,
 )
 from .classification import (
+    ClassificationAURC,
     ClassificationErrorRate,
     ClassificationAUC,
     ClassificationBrierScore,
     ClassificationCrossEntropy,
     ClassificationECE,
+    ClassificationFPR95,
     ClassificationnCCAS,
     ClassificationGammaCCAS,
 )
@@ -62,6 +66,18 @@ METRICS = OrderedDict([
         "function": ConfidencegammaCCAS.create_shortcut_function(),
         "higher_is_better": False,
         "display": None,
+    }),
+    ("conf_fpr95", {
+        "full_name": "Confidence FPR95",
+        "function": FPR95.create_shortcut_function(),
+        "higher_is_better": False,
+        "display": "FPR95$^*$",
+    }),
+    ("conf_aurc", {
+        "full_name": "Confidence AURC",
+        "function": ConfidenceAURC.create_shortcut_function(),
+        "higher_is_better": False,
+        "display": "AURC$^*$",
     }),
     ## CLASSIFICATION METRICS
     ("cls_error_rate", {
@@ -136,4 +152,16 @@ METRICS = OrderedDict([
         "higher_is_better": False,
         "display": None,
     }),
+    ("cls_aurc", {
+        "full_name": "Classification AURC",
+        "function": ClassificationAURC.create_shortcut_function(),
+        "higher_is_better": False,
+        "display": "AURC",
+    }),
+    ("cls_fpr95", {
+        "full_name": "Classification FPR95",
+        "function": ClassificationFPR95.create_shortcut_function(),
+        "higher_is_better": False,
+        "display": "FPR95$^*$",
+    })
 ])

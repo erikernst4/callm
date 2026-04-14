@@ -19,6 +19,7 @@ TABLE_METRICS = [
     "cls_nbs",
     "cls_nce",
     "cls_auc",
+    "cls_aurc",
     "cls_ece_nbins=10",
     "cls_norm_n-ccas_n=0",
     "cls_norm_n-ccas_n=1",

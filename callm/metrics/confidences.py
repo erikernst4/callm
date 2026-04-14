@@ -9,6 +9,7 @@ import torch
 from torchmetrics import Metric, MeanSquaredError
 from torchmetrics.classification import BinaryCalibrationError, BinaryAUROC
 import torch.nn.functional as F
+from torch_uncertainty.metrics.classification import AURC as _AURC, FPRx as _FPRx
 
 
 # ──────────────────────────────────────────────────────
@@ -278,6 +279,39 @@ class ConfidencegammaCCAS(Metric):
     def create_shortcut_function(cls):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, gamma: float = 0.5) -> torch.Tensor:
             metric = cls(gamma=gamma)
+            metric.update(confidences, correctness)
+            return metric.compute()
+        return shortcut_function
+
+
+class ConfidenceAURC(_AURC):
+
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        # Concat (conf, 1-conf)
+        probs = torch.cat([1 - confidences.view(-1, 1), confidences.view(-1, 1)], dim=1)
+        return super().update(probs, correctness.long())
+
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+            metric = cls()
+            metric.update(confidences, correctness)
+            return metric.compute()
+        return shortcut_function
+
+
+class FPR95(_FPRx):
+
+    def __init__(self, **kwargs):
+        super().__init__(recall_level=0.95, pos_label=1,**kwargs)
+
+    def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
+        return super().update(confidences, correctness.long())
+
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+            metric = cls()
             metric.update(confidences, correctness)
             return metric.compute()
         return shortcut_function

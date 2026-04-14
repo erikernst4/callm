@@ -56,6 +56,10 @@ TABLE_METRICS = [
     "conf_brier",
     "conf_cross_entropy",
     "conf_auc",
+    "conf_aurc",
+    "conf_n-ccas_n=0",
+    "conf_n-ccas_n=1",
+    "conf_n-ccas_n=128",
 ]
 
 
@@ -298,7 +302,6 @@ def main():
     table_metrics = []
     for m in args.table_metrics:
         metric_info = get_metric_from_id(m)
-        print(metric_info)
         table_metrics.append({
             "id": m,
             "display": metric_info["display"],

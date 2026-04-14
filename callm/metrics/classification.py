@@ -5,6 +5,7 @@ import torch
 from torchmetrics import Metric
 import torch.nn.functional as F
 from torchmetrics.classification import AUROC, MulticlassCalibrationError
+from torch_uncertainty.metrics.classification import AURC as _AURC, FPRx as _FPRx
 
 class ClassificationErrorRate(Metric):
     """
@@ -367,22 +368,35 @@ class ClassificationGammaCCAS(Metric):
         return shortcut_function
 
 
-class AURCp(Metric):
-    ## TODO: implement AURCp (notation from Zhou et al., 2025, eq 10) from the paper of (Frank et al. 2023, eq 27) for multi-class classification
-    pass
+class ClassificationAURC(_AURC):
 
-class AURCa(Metric):
-    ## TODO: implement AURCa from the paper of (Zhou et al., 2025, eq 11) for multi-class classification
-    pass
+    def update(self, logits: torch.Tensor, labels: torch.Tensor) -> None:
+        probs = torch.softmax(logits, dim=1)
+        return super().update(probs, labels)
 
-class EAURC(Metric):
-    ## TODO: implement EAURC for multi-class classification (ver paper de Geifman et al., 2018)
-    pass
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+            metric = cls()
+            metric.update(logits, labels)
+            return metric.compute()
+        return shortcut_function
 
-class AUPR(Metric):
-    ## TODO: implement AUPR for multi-class classification (paper Hendrycks and Gimpel, 2017)
-    pass
 
-class FPRat95TPR(Metric):
-    ## TODO: implement FPR at 95% TPR for multi-class classification (paper Dadalto et al., 2024)
-    pass
+class ClassificationFPR95(_FPRx):
+
+    def __init__(self, **kwargs):
+        super().__init__(recall_level=0.95, pos_label=1,**kwargs)
+
+    def update(self, logits: torch.Tensor, labels: torch.Tensor) -> None:
+        confidences = None
+        pos_labels = None
+        return super().update(confidences, pos_labels)
+
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+            metric = cls()
+            metric.update(logits, labels)
+            return metric.compute()
+        return shortcut_function
