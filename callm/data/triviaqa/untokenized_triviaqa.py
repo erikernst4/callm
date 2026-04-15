@@ -6,6 +6,8 @@ from callm.prompts import VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT, Prompt
 
 
 class UntokenizedTriviaQADataModule(LightningDataModule):
+    requires_semantic_equivalence = True
+
     def __init__(
         self,
         batch_size: int = 32,

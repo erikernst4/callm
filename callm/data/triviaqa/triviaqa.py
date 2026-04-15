@@ -6,6 +6,8 @@ from callm.prompts import CHAT_LABEL_PROB_PROMPT_ZERO_SHOT, ChatPrompt, Prompt
 
 
 class TriviaQADataModule(LightningDataModule):
+    requires_semantic_equivalence = True
+
     def __init__(
         self,
         batch_size: int = 32,

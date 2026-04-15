@@ -1,8 +1,16 @@
 import os
 import csv
 import torch
+import numpy as np
 from callm.extractors import BaseExtractor
 from callm.models.base import BaseLightningModule
+from callm.metrics import (
+    ExpectedCalibrationError,
+    ConfidenceBrierScore,
+    ConfidenceCrossEntropy,
+    ConfidenceAUCScore,
+    CCAG,
+)
 
 from google import genai
 from google.genai import types
@@ -88,13 +96,18 @@ class GCPLLM(BaseLightningModule):
         inputs = batch["input"]
         questions = batch["question"]
         gold_answers = (
-            batch["label"]
-            if "label" in batch
-            else [None for _ in range(len(questions))]
+            batch["gold_answers"]
+            if "gold_answers" in batch
+            else (
+                batch["label"]
+                if "label" in batch
+                else [None for _ in range(len(questions))]
+            )
         )
+        choices = batch.get("choices", [None for _ in range(len(questions))])
 
-        for i, (prompt_text, question, gold_answer_list) in enumerate(
-            zip(inputs, questions, gold_answers)
+        for i, (prompt_text, question, gold_answer_list, choice) in enumerate(
+            zip(inputs, questions, gold_answers, choices)
         ):
             contents, system_instruction = self._build_contents(prompt_text)
 
@@ -119,6 +132,8 @@ class GCPLLM(BaseLightningModule):
                 # For compatibility with standard huggingface LLM extraction
                 "output_ids": None,  # GCP abstract away tokens for standard interactions
             }
+            if choice is not None:
+                out["choices"] = choice
             try:
                 resp = self.client.models.generate_content(
                     model=self.model_name, contents=contents, config=config
@@ -174,6 +189,8 @@ class GCPLLM(BaseLightningModule):
     def on_validation_epoch_end(self):
         """
         Decode outputs, extract answers/confidence, and save to CSV.
+        If the datamodule does not require semantic equivalence checking,
+        compute correctness and calibration metrics directly.
         """
         if self.outputs and (
             self.flushed_output_files or self.flush_outputs_every_n_steps > 0
@@ -209,15 +226,21 @@ class GCPLLM(BaseLightningModule):
         try:
             with open(outputs_file, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(
+                has_choices = any("choices" in out for out in self.outputs)
+                headers = [
+                    "question",
+                    "gold_answers",
+                ]
+                if has_choices:
+                    headers.append("choices")
+                headers.extend(
                     [
-                        "question",
-                        "gold_answers",
                         "pred_answer",
                         "confidence",
                         "raw_output",
                     ]
                 )
+                writer.writerow(headers)
 
                 for out in self.outputs:
                     gold_str = (
@@ -232,18 +255,105 @@ class GCPLLM(BaseLightningModule):
                         )
                         else "nan"
                     )
-                    writer.writerow(
+
+                    row = [out["question"], gold_str]
+                    if has_choices:
+                        row.append(out.get("choices", ""))
+                    row.extend(
                         [
-                            out["question"],
-                            gold_str,
                             out["pred_answer"],
                             conf_str,
                             short_output(out["raw_output"]),
                         ]
                     )
+                    writer.writerow(row)
             print(f"\nGCP LLM outputs saved to {outputs_file}")
         except Exception as e:
             print(f"Failed to save GCP LLM outputs: {e}")
 
+        # If the datamodule does not require semantic equivalence,
+        # compute correctness and metrics directly
+        datamodule = self.trainer.datamodule
+        if not getattr(datamodule, "requires_semantic_equivalence", False):
+            self._calculate_metrics_direct()
+
         # Clear outputs for next epoch
         self.outputs = []
+
+    def _calculate_metrics_direct(self):
+        """
+        Compute correctness by exact string match and calculate
+        calibration metrics. Used when semantic equivalence checking
+        is not required (e.g. MMLU multiple-choice).
+        """
+        # Determine correctness by exact match
+        for out in self.outputs:
+            pred = (out["pred_answer"] or "").strip().upper()
+            gold = out["gold_answers"]
+            if isinstance(gold, list):
+                out["correct"] = any(pred == g.strip().upper() for g in gold)
+            else:
+                out["correct"] = pred == (gold or "").strip().upper()
+
+        all_confidences = []
+        all_correctness = []
+        for out in self.outputs:
+            try:
+                conf = float(out["confidence"])
+            except (ValueError, TypeError):
+                conf = float("nan")
+            all_confidences.append(conf)
+            all_correctness.append(out["correct"])
+
+        all_confidences = np.array(all_confidences)
+        all_correctness = np.array(all_correctness)
+
+        # Log accuracy regardless of confidence validity
+        accuracy = float(all_correctness.mean()) if len(all_correctness) > 0 else 0.0
+        self.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
+
+        metrics_results = {"val_accuracy": accuracy}
+
+        # Filter invalid confidences for calibration metrics
+        valid_indices = ~np.isnan(all_confidences)
+        n_invalid = len(all_confidences) - np.sum(valid_indices)
+
+        if n_invalid > 0:
+            print(
+                f"Warning: {n_invalid} samples have invalid confidence (NaN). "
+                "Calibration metrics will be computed on valid samples only."
+            )
+
+        if np.sum(valid_indices) > 0:
+            confidences = torch.tensor(
+                all_confidences[valid_indices], dtype=torch.float32
+            )
+            correctness = torch.tensor(
+                all_correctness[valid_indices], dtype=torch.float32
+            )
+
+            metrics = {
+                "val_ece": ExpectedCalibrationError(n_bins=10),
+                "val_brier_score": ConfidenceBrierScore(),
+                "val_cross_entropy": ConfidenceCrossEntropy(),
+                "val_auc": ConfidenceAUCScore(),
+                "val_ccag": CCAG(),
+            }
+
+            for name, metric in metrics.items():
+                metric.update(confidences, correctness)
+                value = float(metric.compute())
+                self.log(name, value, prog_bar=True, sync_dist=True)
+                metrics_results[name] = value
+
+        # Save metrics to CSV in the log directory
+        log_dir = self.trainer.log_dir or os.getcwd()
+        metrics_file = os.path.join(log_dir, "metrics.csv")
+        try:
+            with open(metrics_file, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(list(metrics_results.keys()))
+                writer.writerow(list(metrics_results.values()))
+            print(f"Metrics saved to {metrics_file}")
+        except Exception as e:
+            print(f"Failed to save metrics: {e}")
