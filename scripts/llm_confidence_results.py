@@ -324,17 +324,17 @@ def main():
 
         # Compute table metrics and update results
         table_results[llm][method].update({
-            m["id"]: m["function"](confidences, correctness).item() for m in table_metrics
+            m["id"]: m["function"](confidences, correctness) for m in table_metrics
         })
 
         # Compute Gamma-CCAS metrics and update results
         gamma_results[llm][method].update({
-            f"conf_gamma-ccas_gamma={g}": get_metric_from_id(f"conf_gamma-ccas_gamma={g}")["function"](confidences, correctness).item() for g in args.gammas
+            f"conf_gamma-ccas_gamma={g}": get_metric_from_id(f"conf_gamma-ccas_gamma={g}")["function"](confidences, correctness) for g in args.gammas
         })
 
         # Compute n-CCAS metrics and update results
         n_results[llm][method].update({
-            f"conf_n-ccas_n={n}": get_metric_from_id(f"conf_n-ccas_n={n}")["function"](confidences, correctness).item() for n in args.ns
+            f"conf_n-ccas_n={n}": get_metric_from_id(f"conf_n-ccas_n={n}")["function"](confidences, correctness) for n in args.ns
         })
 
     generate_table(table_results, table_metrics, out_dir / "confidence_results")

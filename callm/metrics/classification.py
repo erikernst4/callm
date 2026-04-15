@@ -60,7 +60,7 @@ class ClassificationErrorRate(Metric):
         def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
             metric = cls(normalize=normalize)
             metric.update(logits, labels)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -110,7 +110,7 @@ class ClassificationCrossEntropy(Metric):
         def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
             metric = cls(normalize=normalize)
             metric.update(logits, labels)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -168,7 +168,7 @@ class ClassificationBrierScore(Metric):
         def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
             metric = cls(normalize=normalize)
             metric.update(logits, labels)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
     
 
@@ -202,7 +202,7 @@ class ClassificationAUC(Metric):
         def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
             metric = cls()
             metric.update(logits, labels)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
     
 
@@ -237,7 +237,7 @@ class ClassificationECE(Metric):
         def shortcut_function(logits: torch.Tensor, labels: torch.Tensor, nbins: int = 10) -> torch.Tensor:
             metric = cls(n_bins=nbins)
             metric.update(logits, labels)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
         
 
@@ -303,7 +303,7 @@ class ClassificationnCCAS(Metric):
         def shortcut_function(logits: torch.Tensor, labels: torch.Tensor, n: int = 0) -> torch.Tensor:
             metric = cls(n=n, normalize=normalize)
             metric.update(logits, labels)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -382,16 +382,15 @@ class ClassificationGammaCCAS(Metric):
         abstain_mask = s < self.gamma
         answer_mask = ~abstain_mask
 
-        # Cost when answering: C̃  where C̃ = 1 - correctness (0-1 loss)
-        base_cost = 1.0 - correctness  # 0 if correct, 1 if incorrect
-        answer_costs = base_cost[answer_mask]
+        # Create vector of cost
+        total_cost = torch.zeros_like(confidences)
 
         # Cost when abstaining: γ
-        abstain_costs = self.gamma * abstain_mask.float()
+        total_cost[abstain_mask] = self.gamma
 
-        # Expected cost = mean over all samples
-        total_cost = answer_costs + abstain_costs
-        
+        # Cost when answering: C̃  where C̃ = 1 - correctness (0-1 loss)
+        total_cost[answer_mask] = 1.0 - correctness[answer_mask]  # 0 if correct, 1 if incorrect
+
         return self._reduce(total_cost)
     
     def _reduce(self, tensor: torch.Tensor) -> torch.Tensor:
@@ -409,7 +408,7 @@ class ClassificationGammaCCAS(Metric):
         def shortcut_function(logits: torch.Tensor, labels: torch.Tensor, gamma: float = 0.5) -> torch.Tensor:
             metric = cls(gamma=gamma, normalize=normalize)
             metric.update(logits, labels)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -424,7 +423,7 @@ class ClassificationAURC(_AURC):
         def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
             metric = cls()
             metric.update(logits, labels)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -443,5 +442,5 @@ class ClassificationFPR95(_FPRx):
         def shortcut_function(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
             metric = cls()
             metric.update(logits, labels)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function

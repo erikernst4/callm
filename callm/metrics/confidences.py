@@ -34,7 +34,7 @@ class ExpectedCalibrationError(BinaryCalibrationError):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, nbins: int = 10) -> torch.Tensor:
             metric = cls(n_bins=nbins)
             metric.update(confidences, correctness)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -71,7 +71,7 @@ class ConfidenceErrorRate(Metric):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -95,7 +95,7 @@ class ConfidenceAUCScore(BinaryAUROC):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -112,7 +112,7 @@ class ConfidenceBrierScore(MeanSquaredError):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -155,7 +155,7 @@ class ConfidenceCrossEntropy(Metric):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -204,7 +204,7 @@ class ConfidencenCCAS(Metric):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, n: int = 0) -> torch.Tensor:
             metric = cls(n=n)
             metric.update(confidences, correctness)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -280,7 +280,7 @@ class ConfidencegammaCCAS(Metric):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, gamma: float = 0.5) -> torch.Tensor:
             metric = cls(gamma=gamma)
             metric.update(confidences, correctness)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -296,7 +296,7 @@ class ConfidenceAURC(_AURC):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
 
 
@@ -313,5 +313,5 @@ class FPR95(_FPRx):
         def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
-            return metric.compute()
+            return metric.compute().item()
         return shortcut_function
