@@ -1,5 +1,5 @@
 import pytest
-from callm.prompts.triviaqa import Prompt, ChatPrompt
+from callm.prompts.base import Prompt, ChatPrompt
 
 
 def test_prompt_raises_on_none_values():
@@ -32,3 +32,21 @@ def test_prompt_raises_on_missing_fields_with_strict_undefined():
     # Missing 'choices' entirely
     with pytest.raises(Exception):  # May be jinja2.exceptions.UndefinedError
         prompt(question="What is 2+2?")
+
+
+def test_jsonargparse_serialization():
+    import jsonargparse
+
+    prompt = Prompt("Question: {{ question }}")
+    parser = jsonargparse.ArgumentParser()
+    parser.add_subclass_arguments(Prompt, "prompt")
+    cfg = parser.parse_object({"prompt": prompt})
+    dumped = parser.dump(cfg)
+    assert dumped
+
+    chat_prompt = ChatPrompt(user="Question: {{ question }}")
+    parser_chat = jsonargparse.ArgumentParser()
+    parser_chat.add_subclass_arguments(Prompt, "prompt")
+    cfg_chat = parser_chat.parse_object({"prompt": chat_prompt})
+    dumped_chat = parser_chat.dump(cfg_chat)
+    assert dumped_chat

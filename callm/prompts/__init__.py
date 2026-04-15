@@ -5,10 +5,10 @@ TriviaQA prompts (and the base Prompt/ChatPrompt classes) live in
 ``callm.prompts.triviaqa``; MMLU prompts live in ``callm.prompts.mmlu``.
 """
 
+from callm.prompts.base import Prompt, ChatPrompt  # noqa: F401
+
 # Base classes + TriviaQA prompts
 from callm.prompts.triviaqa import (  # noqa: F401
-    Prompt,
-    ChatPrompt,
     LABEL_PROB_PROMPT_ZERO_SHOT,
     LABEL_PROB_PROMPT_ONE_SHOT,
     VERBALIZED_ONE_SENTENCE_TOP_1_PROMPT,

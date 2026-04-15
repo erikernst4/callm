@@ -9,8 +9,9 @@ from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset
 from callm.utils import get_tokenizer_for_model, subsample_dataset
-from callm.prompts.triviaqa import ChatPrompt, Prompt
-from callm.prompts.mmlu import (
+from callm.prompts import (
+    ChatPrompt,
+    Prompt,
     CHAT_MMLU_LABEL_PROB_PROMPT,
     format_choices,
     answer_index_to_letter,

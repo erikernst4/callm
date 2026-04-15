@@ -8,8 +8,8 @@ from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset
 from callm.utils import subsample_dataset
-from callm.prompts.triviaqa import Prompt
-from callm.prompts.mmlu import (
+from callm.prompts import (
+    Prompt,
     GCP_CHAT_MMLU_LABEL_PROB_PROMPT,
     format_choices,
     answer_index_to_letter,

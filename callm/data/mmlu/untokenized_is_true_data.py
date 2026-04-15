@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from datasets import Dataset
 
 from callm.data.answers_data import AnswersDataModule
-from callm.prompts.mmlu import GCP_CHAT_MMLU_IS_TRUE_PROMPT
+from callm.prompts import GCP_CHAT_MMLU_IS_TRUE_PROMPT
 from callm.utils import subsample_dataset
 
 

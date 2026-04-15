@@ -10,8 +10,7 @@ from datasets import Dataset
 import torch
 
 from callm.data.answers_data import AnswersDataModule
-from callm.prompts.mmlu import CHAT_MMLU_IS_TRUE_PROMPT
-from callm.prompts.triviaqa import ChatPrompt
+from callm.prompts import CHAT_MMLU_IS_TRUE_PROMPT, ChatPrompt
 from callm.utils import subsample_dataset
 
 

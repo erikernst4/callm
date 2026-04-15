@@ -6,7 +6,7 @@ Prompts accept `question` (str) and `choices` (str, pre-formatted as
 is also required.
 """
 
-from callm.prompts.triviaqa import ChatPrompt
+from callm.prompts.base import ChatPrompt
 
 
 # ─── Label Probability (Sequence Posterior) ───────────────────────────
