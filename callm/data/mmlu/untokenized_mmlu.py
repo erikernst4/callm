@@ -57,7 +57,12 @@ class UntokenizedMMLUDataModule(LightningDataModule):
         ]
 
         self.mmlu_val = Dataset.from_dict(
-            {"input": input_texts, "question": questions, "label": answers}
+            {
+                "input": input_texts,
+                "question": questions,
+                "label": answers,
+                "choices": formatted_choices,
+            }
         ).with_format("torch")
 
     def train_dataloader(self):
@@ -66,11 +71,14 @@ class UntokenizedMMLUDataModule(LightningDataModule):
     @staticmethod
     def collate_fn(batch):
         """Collate function that prepares batch for forward pass."""
-        return {
+        res = {
             "input": [item["input"] for item in batch],
             "question": [item["question"] for item in batch],
             "label": [item["label"] for item in batch],
         }
+        if "choices" in batch[0]:
+            res["choices"] = [item["choices"] for item in batch]
+        return res
 
     def val_dataloader(self):
         return DataLoader(

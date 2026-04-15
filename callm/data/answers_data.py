@@ -137,18 +137,19 @@ class AnswersDataModule(LightningDataModule):
                         f"Warning: Skipping malformed row {i} in {self.llm_outputs_path}. "
                     )
 
-                rows.append(
-                    {
-                        "question": row["question"],
-                        "gold_answers": [
-                            g.strip().lower() for g in row["gold_answers"].split("|")
-                        ],
-                        "pred_answer": row["pred_answer"],
-                        "confidence": row["confidence"],
-                        "raw_output": row.get("raw_output", ""),
-                        "index": i,
-                    }
-                )
+                parsed_row = {
+                    "question": row["question"],
+                    "gold_answers": [
+                        g.strip().lower() for g in row["gold_answers"].split("|")
+                    ],
+                    "pred_answer": row["pred_answer"],
+                    "confidence": row["confidence"],
+                    "raw_output": row.get("raw_output", ""),
+                    "index": i,
+                }
+                if "choices" in row:
+                    parsed_row["choices"] = row["choices"]
+                rows.append(parsed_row)
 
         print(f"\nLoaded {len(rows)} rows from CSV file: {self.llm_outputs_path}")
         return rows

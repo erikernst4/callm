@@ -171,6 +171,24 @@ class TestAnswersDataModule:
         assert rows[0]["question"] == "Q1"
         assert rows[1]["question"] == "Q3"
 
+    def test_load_llm_outputs_from_csv_with_choices(self):
+        """Test CSV loading with choices column."""
+        csv_content = (
+            "question,gold_answers,pred_answer,confidence,raw_output,choices\n"
+            "Q1,A1,A1,0.9,raw1,Choice A|Choice B\n"
+            "Q2,B1,B1,0.8,raw2,\n"
+        )
+
+        with patch("builtins.open", mock_open(read_data=csv_content)):
+            dm = AnswersDataModule(llm_outputs_path="dummy.csv")
+            rows = dm.load_llm_outputs_from_csv()
+
+        assert len(rows) == 2
+        assert "choices" in rows[0]
+        assert rows[0]["choices"] == "Choice A|Choice B"
+        assert "choices" in rows[1]
+        assert rows[1]["choices"] == ""
+
 
 class TestIsTrueDataModule:
     """Tests for IsTrueDataModule."""

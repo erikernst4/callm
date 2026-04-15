@@ -25,7 +25,7 @@ class UntokenizedMMLUIsTrueDataModule(AnswersDataModule):
         confidences = [row["confidence"] for row in rows]
         raw_outputs = [row["raw_output"] for row in rows]
         original_indices = [row["index"] for row in rows]
-        choices_list = [row.get("choices", "") for row in rows]
+        choices_list = [row.get("choices", None) for row in rows]
 
         # Create IS_TRUE prompts
         prompts = []

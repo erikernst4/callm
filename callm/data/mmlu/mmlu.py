@@ -122,7 +122,12 @@ class MMLUDataModule(LightningDataModule):
             data.append(tokens)
 
         self.mmlu_val = Dataset.from_dict(
-            {"data": data, "question": questions, "label": answers}
+            {
+                "data": data,
+                "question": questions,
+                "label": answers,
+                "choices": formatted_choices,
+            }
         ).with_format("torch")
 
     def train_dataloader(self):
@@ -141,12 +146,15 @@ class MMLUDataModule(LightningDataModule):
             [item["data"]["attention_mask"].squeeze(0) for item in batch]
         )
 
-        return {
+        res = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "question": [item["question"] for item in batch],
             "label": [item["label"] for item in batch],
         }
+        if "choices" in batch[0]:
+            res["choices"] = [item["choices"] for item in batch]
+        return res
 
     def val_dataloader(self):
         return DataLoader(

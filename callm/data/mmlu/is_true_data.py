@@ -47,7 +47,7 @@ class MMLUIsTrueDataModule(AnswersDataModule):
         # For MMLU IsTrue, we need the choices to include in the prompt.
         # If choices are stored in the CSV, use them. Otherwise, the
         # question text should already include the formatted choices.
-        choices_list = [row.get("choices", "") for row in rows]
+        choices_list = [row.get("choices", None) for row in rows]
 
         # Create IS_TRUE prompts
         prompts = []
