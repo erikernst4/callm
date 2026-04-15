@@ -1,13 +1,16 @@
-from jinja2 import Template
+from jinja2 import Template, StrictUndefined
 
 
 class Prompt:
     """A prompt for a language model. This is a wrapper around a Jinja2 template in order to make it serializable for jsonargparse."""
 
     def __init__(self, template: str):
-        self.template = Template(template)
+        self.template = Template(template, undefined=StrictUndefined)
 
     def __call__(self, **kwargs):
+        for key, value in kwargs.items():
+            if value is None:
+                raise ValueError(f"Prompt argument '{key}' cannot be None.")
         return self.template.render(**kwargs)
 
 
