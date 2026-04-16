@@ -50,6 +50,27 @@ def load_scores(scores_dir: Path):
     labels = torch.from_numpy(np.load(scores_dir / f"targets.npy")).long()
     return logits, labels
 
+def compute_sample_metric(logits, labels, metric, logpriors=None):
+    if metric in CCAS_METRICS:
+        metrics_dict = CCAS_METRICS
+    elif metric in METRICS:        
+        metrics_dict = METRICS
+    else:
+        raise ValueError(f"Unknown metric: {metric}")
+
+    # Compute x metric without reduction                
+    metric_obj = metrics_dict[metric]["cls"](reduction="none", **metrics_dict[metric]["args"])
+    metric_obj.update(logits, labels)
+    results = metric_obj.compute().float().numpy()
+    
+    if logpriors is not None:
+        # Compute x metric of dummy model to normalize
+        metric_dummy_obj = metrics_dict[metric]["cls"](reduction="mean", **metrics_dict[metric]["args"])
+        metric_dummy_obj.update(logpriors, labels)
+        dummy_result = metric_dummy_obj.compute().float().item()
+        results = results / dummy_result
+    
+    return results
 
 def plot_scatter(ccas_metrics, metrics, logs_dir, output_dir):
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -63,27 +84,8 @@ def plot_scatter(ccas_metrics, metrics, logs_dir, output_dir):
         fig, ax = plt.subplots(len(ccas_metrics), len(metrics), figsize=(5 * len(metrics), 4 * len(ccas_metrics)), sharex=True, sharey=True)
         for i, y_metric in enumerate(ccas_metrics):
             for j, x_metric in enumerate(metrics):
-
-                # Compute x metric without reduction                
-                x_metric_obj = METRICS[x_metric]["cls"](reduction="none", **METRICS[x_metric]["args"])
-                x_metric_obj.update(logits, labels)
-                x_results = x_metric_obj.compute().float().numpy()
-                # Compute x metric of dummy model to normalize
-                x_metric_dummy_obj = METRICS[x_metric]["cls"](reduction="mean", **METRICS[x_metric]["args"])
-                x_metric_dummy_obj.update(logpriors, labels)
-                x_dummy_result = x_metric_dummy_obj.compute().float().item()
-                x_results = x_results / x_dummy_result
-                
-                # Compute y metric without reduction
-                y_metric_obj = CCAS_METRICS[y_metric]["cls"](reduction="none", **CCAS_METRICS[y_metric]["args"])
-                y_metric_obj.update(logits, labels)
-                y_results = y_metric_obj.compute().float().numpy()
-                # Compute y metric of dummy model to normalize
-                y_metric_dummy_obj = CCAS_METRICS[y_metric]["cls"](reduction="mean", **CCAS_METRICS[y_metric]["args"])
-                y_metric_dummy_obj.update(logpriors, labels)
-                y_dummy_result = y_metric_dummy_obj.compute().float().item()
-                y_results = y_results / y_dummy_result
-
+                x_results = compute_sample_metric(logits, labels, x_metric, logpriors)
+                y_results = compute_sample_metric(logits, labels, y_metric, logpriors)
                 corrcoef = np.corrcoef(x_results, y_results)[0, 1]
                 ax[i, j].scatter(x_results, y_results, rasterized=True, alpha=0.5)
                 ax[i, j].set_title(f"{DATASETS[dataset]['dataset']} - {DATASETS[dataset]['model']} (r={corrcoef:.2f})")
