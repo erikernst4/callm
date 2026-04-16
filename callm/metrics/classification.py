@@ -255,7 +255,7 @@ class ClassificationnCCAS(Metric):
         self.reduction = reduction
         self.epsilon = epsilon
         if n == 0:
-            self.cost_fun = lambda logq_e, correct_indicator: 1 - torch.exp(logq_e) - (1 - correct_indicator) * logq_e
+            self.cost_fun = lambda logq_e, correct_indicator: 1 - torch.exp(logq_e) - (1 - correct_indicator) * torch.log(1 - torch.exp(logq_e))
         elif n > 0:
             self.cost_fun = lambda logq_e, correct_indicator: (1 - torch.exp(logq_e))**(n+1) + (n+1)/n * (1 - (1 - torch.exp(logq_e))**n) * (1 - correct_indicator)
         else:
