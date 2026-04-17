@@ -1,5 +1,3 @@
-
-
 from functools import partial
 from .constants import METRICS
 
@@ -71,7 +69,9 @@ def get_metric_from_id(id_name):
         gamma = float(id_name.split("_gamma=")[-1])
         return {
             "full_name": f"Classification Normalized γ={gamma}-CCAS",
-            "function": partial(METRICS["cls_norm_gamma-ccas"]["function"], gamma=gamma),
+            "function": partial(
+                METRICS["cls_norm_gamma-ccas"]["function"], gamma=gamma
+            ),
             "obj": METRICS["cls_norm_gamma-ccas"]["cls"](gamma=gamma),
             "higher_is_better": METRICS["cls_norm_gamma-ccas"]["higher_is_better"],
             "display": f"NCCAS (γ={gamma})",
