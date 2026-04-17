@@ -9,7 +9,7 @@ from callm.metrics import (
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,
     ConfidenceAUCScore,
-    CCAG,
+    CCAS,
 )
 from callm.models.base import BaseLightningModule
 
@@ -277,7 +277,7 @@ class GCPEvaluatorModule(BaseLightningModule):
             "val_brier_score": ConfidenceBrierScore(),
             "val_cross_entropy": ConfidenceCrossEntropy(),
             "val_auc": ConfidenceAUCScore(),
-            "val_ccag": CCAG(),
+            "val_ccas": CCAS(),
         }
 
         for name, metric in metrics.items():

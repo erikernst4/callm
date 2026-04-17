@@ -4,18 +4,20 @@ from .confidences import (
     ConfidenceAUCScore,
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,
-    ConfidenceCnCAG,
-    ConfidenceGammaCCAG,
-    CCAG,
+    ConfidenceNCCAS,
+    ConfidenceGammaCCAS,
+    CCAS,
 )
 from .classification import (
     ClassificationErrorRate,
-    ClassificationAUROC,
+    ClassificationAUC,
     ClassificationBrierScore,
     ClassificationCrossEntropy,
-    ClassificationCnCAG,
-    ClassificationGammaCCAG,
+    ClassificationNCCAS,
+    ClassificationGammaCCAS,
 )
+
+from .utils import get_metric_from_id
 
 __all__ = [
     "ExpectedCalibrationError",
@@ -23,13 +25,14 @@ __all__ = [
     "ConfidenceAUCScore",
     "ConfidenceBrierScore",
     "ConfidenceCrossEntropy",
-    "ConfidenceCnCAG",
-    "ConfidenceGammaCCAG",
-    "CCAG",
+    "ConfidenceNCCAS",
+    "ConfidenceGammaCCAS",
+    "CCAS",
     "ClassificationErrorRate",
-    "ClassificationAUROC",
+    "ClassificationAUC",
     "ClassificationBrierScore",
     "ClassificationCrossEntropy",
-    "ClassificationCnCAG",
-    "ClassificationGammaCCAG",
+    "ClassificationNCCAS",
+    "ClassificationGammaCCAS",
+    "get_metric_from_id",
 ]

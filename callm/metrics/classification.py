@@ -1,10 +1,9 @@
-
-
-
 import torch
 from torchmetrics import Metric
 import torch.nn.functional as F
 from torchmetrics.classification import AUROC, MulticlassCalibrationError
+from torch_uncertainty.metrics.classification import AURC as _AURC, FPRx as _FPRx
+
 
 class ClassificationErrorRate(Metric):
     """
@@ -15,9 +14,10 @@ class ClassificationErrorRate(Metric):
 
     full_state_update = False
 
-    def __init__(self, normalize: bool = True, **kwargs):
+    def __init__(self, normalize: bool = True, reduction: str = "mean", **kwargs):
         super().__init__(**kwargs)
         self.normalize = normalize
+        self.reduction = reduction
         self.add_state("all_logits", default=[], dist_reduce_fx="cat")
         self.add_state("all_labels", default=[], dist_reduce_fx="cat")
 
@@ -35,13 +35,36 @@ class ClassificationErrorRate(Metric):
         logits = torch.cat(self.all_logits)
         labels = torch.cat(self.all_labels)
         preds = torch.argmax(logits, dim=1)
-        er = (preds != labels).float().mean()
+        er = self._reduce((preds != labels).float())
         if self.normalize:
-            prior = torch.bincount(labels.long(), minlength=logits.size(1)).float() / labels.size(0)
+            prior = torch.bincount(
+                labels.long(), minlength=logits.size(1)
+            ).float() / labels.size(0)
             prior_pred = prior.argmax()
-            prior_er = (labels != prior_pred).float().mean()
+            prior_er = self._reduce((labels != prior_pred).float())
             er = er / prior_er
         return er
+
+    def _reduce(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.reduction == "mean":
+            return tensor.mean()
+        elif self.reduction == "sum":
+            return tensor.sum()
+        elif self.reduction == "none":
+            return tensor
+        else:
+            raise ValueError(f"Invalid reduction: {self.reduction}")
+
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor
+        ) -> torch.Tensor:
+            metric = cls(normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function
 
 
 class ClassificationCrossEntropy(Metric):
@@ -56,10 +79,13 @@ class ClassificationCrossEntropy(Metric):
 
     full_state_update = False
 
-    def __init__(self, normalize=True, epsilon: float = 1e-7, **kwargs):
+    def __init__(
+        self, normalize=True, epsilon: float = 1e-7, reduction: str = "mean", **kwargs
+    ):
         super().__init__(**kwargs)
         self.epsilon = epsilon
         self.normalize = normalize
+        self.reduction = reduction
         self.add_state("all_logits", default=[], dist_reduce_fx="cat")
         self.add_state("all_labels", default=[], dist_reduce_fx="cat")
 
@@ -76,13 +102,28 @@ class ClassificationCrossEntropy(Metric):
             raise ValueError("No data to compute metric.")
         logits = torch.cat(self.all_logits)
         labels = torch.cat(self.all_labels)
-        ce = F.cross_entropy(logits, labels.long(), reduction="mean")
+        ce = F.cross_entropy(logits, labels.long(), reduction=self.reduction)
         if self.normalize:
-            priors = torch.bincount(labels.long(), minlength=logits.size(1)).float() / labels.size(0)
+            priors = torch.bincount(
+                labels.long(), minlength=logits.size(1)
+            ).float() / labels.size(0)
             priors = priors.unsqueeze(0).expand(logits.size(0), -1)
-            prior_ce = F.cross_entropy(torch.log(priors), labels.long(), reduction="mean")
+            prior_ce = F.cross_entropy(
+                torch.log(priors), labels.long(), reduction=self.reduction
+            )
             ce = ce / prior_ce
         return ce
+
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor
+        ) -> torch.Tensor:
+            metric = cls(normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function
 
 
 class ClassificationBrierScore(Metric):
@@ -94,9 +135,10 @@ class ClassificationBrierScore(Metric):
 
     full_state_update = False
 
-    def __init__(self, normalize: bool = True, **kwargs):
+    def __init__(self, normalize: bool = True, reduction: str = "mean", **kwargs):
         super().__init__(**kwargs)
         self.normalize = normalize
+        self.reduction = reduction
         self.add_state("all_logits", default=[], dist_reduce_fx="cat")
         self.add_state("all_labels", default=[], dist_reduce_fx="cat")
 
@@ -115,17 +157,40 @@ class ClassificationBrierScore(Metric):
         labels = torch.cat(self.all_labels)
         probs = F.softmax(logits, dim=1)
         one_hot_labels = F.one_hot(labels, num_classes=logits.size(1)).float()
-        brier = ((probs - one_hot_labels) ** 2).sum() / logits.numel()
+        brier = self._reduce(((probs - one_hot_labels) ** 2).mean(dim=1))
         if self.normalize:
-            priors = torch.bincount(labels, minlength=logits.size(1)).float() / labels.size(0)
+            priors = torch.bincount(
+                labels, minlength=logits.size(1)
+            ).float() / labels.size(0)
             priors = priors.unsqueeze(0).expand(logits.size(0), -1)
-            prior_brier = ((priors - one_hot_labels) ** 2).sum() / logits.numel()
+            prior_brier = self._reduce(((priors - one_hot_labels) ** 2).mean(dim=1))
             brier = brier / prior_brier
         return brier
-    
 
-class ClassificationAUROC(Metric):
-    """Multiclass AUROC metric."""
+    def _reduce(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.reduction == "mean":
+            return tensor.mean()
+        elif self.reduction == "sum":
+            return tensor.sum()
+        elif self.reduction == "none":
+            return tensor
+        else:
+            raise ValueError(f"Invalid reduction: {self.reduction}")
+
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor
+        ) -> torch.Tensor:
+            metric = cls(normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function
+
+
+class ClassificationAUC(Metric):
+    """Multiclass AUC metric."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -149,6 +214,18 @@ class ClassificationAUROC(Metric):
         auroc.update(probs, labels.long())
         return auroc.compute()
 
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor
+        ) -> torch.Tensor:
+            metric = cls()
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function
+
+
 class ClassificationECE(Metric):
     """Multiclass Expected Calibration Error (ECE) metric."""
 
@@ -171,27 +248,56 @@ class ClassificationECE(Metric):
             raise ValueError("No data to compute metric.")
         probs = torch.softmax(torch.cat(self.all_logits), dim=1)
         labels = torch.cat(self.all_labels)
-        ece = MulticlassCalibrationError(num_classes=probs.size(1), n_bins=self.n_bins, norm="l1")
+        ece = MulticlassCalibrationError(
+            num_classes=probs.size(1), n_bins=self.n_bins, norm="l1"
+        )
         ece.update(probs, labels.long())
         return ece.compute()
-        
 
-class ClassificationCnCAG(Metric):
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor, nbins: int = 10
+        ) -> torch.Tensor:
+            metric = cls(n_bins=nbins)
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function
+
+
+class ClassificationNCCAS(Metric):
     """
-    CnCAG (Confidence Cost Abstention Game) metric.
+    n-CCAS (Confidence Cost Abstention Game) metric.
     """
 
     full_state_update = False
 
-    def __init__(self, n: int = 0, normalize: bool = True, epsilon: float = 1e-7, **kwargs):
+    def __init__(
+        self,
+        n: int = 0,
+        normalize: bool = True,
+        reduction: str = "mean",
+        epsilon: float = 1e-7,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.n = n
         self.normalize = normalize
+        self.reduction = reduction
         self.epsilon = epsilon
         if n == 0:
-            self.cost_fun = lambda logq_e, correct_indicator: 1 - torch.exp(logq_e) - (1 - correct_indicator) * logq_e
+            self.cost_fun = (
+                lambda logq_e, correct_indicator: 1
+                - torch.exp(logq_e)
+                - (1 - correct_indicator) * torch.log(1 - torch.exp(logq_e))
+            )
         elif n > 0:
-            self.cost_fun = lambda logq_e, correct_indicator: (1 - torch.exp(logq_e))**(n+1) + (n+1)/n * (1 - (1 - torch.exp(logq_e))**n) * (1 - correct_indicator)
+            self.cost_fun = lambda logq_e, correct_indicator: (
+                1 - torch.exp(logq_e)
+            ) ** (n + 1) + (n + 1) / n * (1 - (1 - torch.exp(logq_e)) ** n) * (
+                1 - correct_indicator
+            )
         else:
             raise ValueError("n must be non-negative.")
         self.add_state("all_logits", default=[], dist_reduce_fx="cat")
@@ -212,20 +318,45 @@ class ClassificationCnCAG(Metric):
         labels = torch.cat(self.all_labels)
         logq_e, indices = torch.max(logprobs, dim=1)
         indicator = (indices == labels).float()
-        cost = self.cost_fun(logq_e, indicator).sum() / labels.size(0)
+        cost = self._reduce(self.cost_fun(logq_e, indicator))
         if self.normalize:
-            priors = torch.bincount(labels.long(), minlength=logprobs.size(1)) / labels.size(0)
+            priors = torch.bincount(
+                labels.long(), minlength=logprobs.size(1)
+            ) / labels.size(0)
             logqe_prior, indices = torch.max(torch.log(priors + self.epsilon), dim=0)
             logqe_prior = logqe_prior.expand(labels.size(0))
             prior_correct_indicator = (indices == labels).float()
-            prior_cost = self.cost_fun(logqe_prior, prior_correct_indicator).sum() / labels.size(0)
+            prior_cost = self._reduce(
+                self.cost_fun(logqe_prior, prior_correct_indicator)
+            )
             cost = cost / prior_cost
         return cost
 
+    def _reduce(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.reduction == "mean":
+            return tensor.mean()
+        elif self.reduction == "sum":
+            return tensor.sum()
+        elif self.reduction == "none":
+            return tensor
+        else:
+            raise ValueError(f"Invalid reduction: {self.reduction}")
 
-class ClassificationGammaCCAG(Metric):
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor, n: int = 0
+        ) -> torch.Tensor:
+            metric = cls(n=n, normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function
+
+
+class ClassificationGammaCCAS(Metric):
     """
-    Gamma-CnCAG (Confidence Cost Abstention Game) metric.
+    Gamma-CCAS (Confidence Cost Abstention Game) metric.
 
     Evaluates the expected cost of a selective prediction system that can
     abstain based on confidence scores. At a given gamma, the cost is:
@@ -249,12 +380,14 @@ class ClassificationGammaCCAG(Metric):
         self,
         gamma: float = 0.5,
         normalize: bool = True,
+        reduction: str = "mean",
         epsilon: float = 1e-7,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.gamma = gamma
         self.normalize = normalize
+        self.reduction = reduction
         self.epsilon = epsilon
         self.add_state("all_logits", default=[], dist_reduce_fx="cat")
         self.add_state("all_labels", default=[], dist_reduce_fx="cat")
@@ -278,17 +411,20 @@ class ClassificationGammaCCAG(Metric):
 
         cost = self._compute_cost(confidences, correctness)
         if self.normalize:
-            prior = torch.bincount(labels.long(), minlength=logits.size(1)).float() / labels.size(0)
+            prior = torch.bincount(
+                labels.long(), minlength=logits.size(1)
+            ).float() / labels.size(0)
             prior_max, prior_argmax = prior.max(dim=0)
             prior_confidences = torch.ones(labels.size(0)) * prior_max
             prior_correctness = (prior_argmax == labels).float()
             prior_cost = self._compute_cost(prior_confidences, prior_correctness)
             cost = cost / prior_cost
-    
-        return cost
-            
-    def _compute_cost(self, confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
 
+        return cost
+
+    def _compute_cost(
+        self, confidences: torch.Tensor, correctness: torch.Tensor
+    ) -> torch.Tensor:
         # Score: estimated error probability
         s = 1.0 - confidences
 
@@ -296,15 +432,74 @@ class ClassificationGammaCCAG(Metric):
         abstain_mask = s < self.gamma
         answer_mask = ~abstain_mask
 
-        # Cost when answering: C̃  where C̃ = 1 - correctness (0-1 loss)
-        base_cost = 1.0 - correctness  # 0 if correct, 1 if incorrect
-        answer_costs = base_cost[answer_mask]
+        # Create vector of cost
+        total_cost = torch.zeros_like(confidences)
 
         # Cost when abstaining: γ
-        n_abstain = abstain_mask.sum()
-        abstain_costs = self.gamma * n_abstain.float()
+        total_cost[abstain_mask] = self.gamma
 
-        # Expected cost = mean over all samples
-        total_cost = answer_costs.sum() + abstain_costs
-        
-        return total_cost / len(confidences)
+        # Cost when answering: C̃  where C̃ = 1 - correctness (0-1 loss)
+        total_cost[answer_mask] = (
+            1.0 - correctness[answer_mask]
+        )  # 0 if correct, 1 if incorrect
+
+        return self._reduce(total_cost)
+
+    def _reduce(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.reduction == "mean":
+            return tensor.mean()
+        elif self.reduction == "sum":
+            return tensor.sum()
+        elif self.reduction == "none":
+            return tensor
+        else:
+            raise ValueError(f"Invalid reduction: {self.reduction}")
+
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor, gamma: float = 0.5
+        ) -> torch.Tensor:
+            metric = cls(gamma=gamma, normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function
+
+
+class ClassificationAURC(_AURC):
+    def update(self, logits: torch.Tensor, labels: torch.Tensor) -> None:
+        probs = torch.softmax(logits, dim=1)
+        return super().update(probs, labels)
+
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor
+        ) -> torch.Tensor:
+            metric = cls()
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function
+
+
+class ClassificationFPR95(_FPRx):
+    def __init__(self, **kwargs):
+        super().__init__(recall_level=0.95, pos_label=1, **kwargs)
+
+    def update(self, logits: torch.Tensor, labels: torch.Tensor) -> None:
+        confidences = None
+        pos_labels = None
+        return super().update(confidences, pos_labels)
+
+    @classmethod
+    def create_shortcut_function(cls):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor
+        ) -> torch.Tensor:
+            metric = cls()
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function

@@ -7,8 +7,8 @@ from callm.metrics import (
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,
     ConfidenceAUCScore,
-    CCAG,
-    ConfidenceGammaCCAG,
+    CCAS,
+    ConfidenceGammaCCAS,
 )
 
 
@@ -253,14 +253,14 @@ class TestConfidenceAUCScore:
         assert auc == 0.0
 
 
-class TestCCAG:
-    """Tests for CCAG metric."""
+class TestCCAS:
+    """Tests for CCAS metric."""
 
     def test_correct_high_confidence(self):
         """When correct with high confidence, cost should be low."""
         confidences = torch.tensor([0.9])
         correctness = torch.tensor([True])
-        metric = CCAG()
+        metric = CCAS()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # cost = 1 - q - (1 - indicator) * log(1 - q)
@@ -272,7 +272,7 @@ class TestCCAG:
         """When correct with low confidence, cost should be moderate."""
         confidences = torch.tensor([0.2])
         correctness = torch.tensor([True])
-        metric = CCAG()
+        metric = CCAS()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # indicator=1, q=0.2: 1 - 0.2 - 0 = 0.8
@@ -283,7 +283,7 @@ class TestCCAG:
         """When incorrect with high confidence, cost should be high (heavy penalty)."""
         confidences = torch.tensor([0.9])
         correctness = torch.tensor([False])
-        metric = CCAG()
+        metric = CCAS()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # indicator=0, q=0.9: 1 - 0.9 - 1*log(0.1) ≈ 2.4026
@@ -294,7 +294,7 @@ class TestCCAG:
         """When incorrect with low confidence, cost should be moderate-high."""
         confidences = torch.tensor([0.2])
         correctness = torch.tensor([False])
-        metric = CCAG()
+        metric = CCAS()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # indicator=0, q=0.2: 1 - 0.2 - 1*log(0.8) ≈ 1.0231
@@ -305,7 +305,7 @@ class TestCCAG:
         """Test with a mix of correct and incorrect predictions."""
         confidences = torch.tensor([0.9, 0.2])
         correctness = torch.tensor([True, False])
-        metric = CCAG()
+        metric = CCAS()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # cost_correct_high = 1 - 0.9 = 0.1
@@ -319,13 +319,13 @@ class TestCCAG:
         """Test with no data raises ValueError."""
         import pytest
 
-        metric = CCAG()
-        with pytest.raises(ValueError, match="No samples to compute CnCAG."):
+        metric = CCAS()
+        with pytest.raises(ValueError, match="No samples to compute nCCAS."):
             metric.compute()
 
     def test_nan_input_raises_error(self):
         """Test that passing NaN values raises ValueError."""
-        metric = CCAG()
+        metric = CCAS()
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
         import pytest
@@ -338,11 +338,11 @@ class TestCCAG:
         confidences = torch.tensor([0.9, 0.2, 0.5, 0.7])
         correctness = torch.tensor([True, False, True, False])
 
-        metric1 = CCAG()
+        metric1 = CCAS()
         metric1.update(confidences, correctness)
         cost1 = metric1.compute().item()
 
-        metric2 = CCAG()
+        metric2 = CCAS()
         metric2.update(confidences[:2], correctness[:2])
         metric2.update(confidences[2:], correctness[2:])
         cost2 = metric2.compute().item()
@@ -353,7 +353,7 @@ class TestCCAG:
         """Test that confidence near 1.0 doesn't cause errors."""
         confidences = torch.tensor([0.9999])
         correctness = torch.tensor([False])
-        metric = CCAG()
+        metric = CCAS()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         assert np.isfinite(cost)
@@ -362,20 +362,20 @@ class TestCCAG:
         """Test that confidence near 0.0 doesn't cause errors."""
         confidences = torch.tensor([0.0001])
         correctness = torch.tensor([True])
-        metric = CCAG()
+        metric = CCAS()
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         assert np.isfinite(cost)
 
 
-class TestGammaCCAG:
-    """Tests for Gamma-CCAG metric."""
+class TestGammaCCAS:
+    """Tests for Gamma-CCAS metric."""
 
     def test_high_confidence_abstains(self):
         """High confidence (s < gamma) triggers abstain, cost = gamma."""
         confidences = torch.tensor([0.9])
         correctness = torch.tensor([True])
-        metric = ConfidenceGammaCCAG(gamma=0.5)
+        metric = ConfidenceGammaCCAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = 0.1 < 0.5 → abstain → cost = 0.5
@@ -385,7 +385,7 @@ class TestGammaCCAG:
         """Low confidence (s >= gamma) triggers answer, correct → cost = 0."""
         confidences = torch.tensor([0.3])
         correctness = torch.tensor([True])
-        metric = ConfidenceGammaCCAG(gamma=0.5)
+        metric = ConfidenceGammaCCAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = 0.7 >= 0.5 → answer, correct → cost = 0
@@ -395,7 +395,7 @@ class TestGammaCCAG:
         """Low confidence (s >= gamma) triggers answer, incorrect → cost = 1."""
         confidences = torch.tensor([0.3])
         correctness = torch.tensor([False])
-        metric = ConfidenceGammaCCAG(gamma=0.5)
+        metric = ConfidenceGammaCCAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = 0.7 >= 0.5 → answer, incorrect → cost = 1
@@ -405,7 +405,7 @@ class TestGammaCCAG:
         """Mix of high-confidence (abstain) and low-confidence (answer) samples."""
         confidences = torch.tensor([0.9, 0.3, 0.8])
         correctness = torch.tensor([True, False, False])
-        metric = ConfidenceGammaCCAG(gamma=0.5)
+        metric = ConfidenceGammaCCAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = [0.1, 0.7, 0.2]
@@ -420,7 +420,7 @@ class TestGammaCCAG:
         """All high-confidence → all abstain → cost = gamma."""
         confidences = torch.tensor([0.99, 0.95, 0.98])
         correctness = torch.tensor([True, False, True])
-        metric = ConfidenceGammaCCAG(gamma=0.5)
+        metric = ConfidenceGammaCCAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = [0.01, 0.05, 0.02], all < 0.5 → all abstain → cost = 0.5
@@ -430,7 +430,7 @@ class TestGammaCCAG:
         """All low-confidence → all answer → cost depends on correctness."""
         confidences = torch.tensor([0.1, 0.2, 0.3])
         correctness = torch.tensor([True, True, False])
-        metric = ConfidenceGammaCCAG(gamma=0.5)
+        metric = ConfidenceGammaCCAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = [0.9, 0.8, 0.7], all >= 0.5 → all answer
@@ -445,7 +445,7 @@ class TestGammaCCAG:
 
         costs = []
         for gamma in [0.15, 0.45, 0.85]:
-            metric = ConfidenceGammaCCAG(gamma=gamma)
+            metric = ConfidenceGammaCCAS(gamma=gamma)
             metric.update(confidences, correctness)
             costs.append(metric.compute().item())
 
@@ -454,7 +454,7 @@ class TestGammaCCAG:
 
     def test_nan_input_raises_error(self):
         """Test that NaN inputs raise ValueError."""
-        metric = ConfidenceGammaCCAG(gamma=0.5)
+        metric = ConfidenceGammaCCAS(gamma=0.5)
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
         import pytest
@@ -466,8 +466,8 @@ class TestGammaCCAG:
         """Test with no data raises ValueError."""
         import pytest
 
-        metric = ConfidenceGammaCCAG(gamma=0.5)
-        with pytest.raises(ValueError, match="No samples to compute Gamma-CCAG."):
+        metric = ConfidenceGammaCCAS(gamma=0.5)
+        with pytest.raises(ValueError, match="No samples to compute Gamma-CCAS."):
             metric.compute()
 
     def test_incremental_update(self):
@@ -475,11 +475,11 @@ class TestGammaCCAG:
         confidences = torch.tensor([0.9, 0.5, 0.3, 0.8])
         correctness = torch.tensor([True, False, True, False])
 
-        m1 = ConfidenceGammaCCAG(gamma=0.5)
+        m1 = ConfidenceGammaCCAS(gamma=0.5)
         m1.update(confidences, correctness)
         c1 = m1.compute().item()
 
-        m2 = ConfidenceGammaCCAG(gamma=0.5)
+        m2 = ConfidenceGammaCCAS(gamma=0.5)
         m2.update(confidences[:2], correctness[:2])
         m2.update(confidences[2:], correctness[2:])
         c2 = m2.compute().item()
@@ -490,7 +490,7 @@ class TestGammaCCAG:
         """Cost should always be non-negative."""
         torch.manual_seed(42)
         for gamma in [0.05, 0.1, 0.5, 0.9, 0.95]:
-            metric = ConfidenceGammaCCAG(gamma=gamma)
+            metric = ConfidenceGammaCCAS(gamma=gamma)
             metric.update(torch.rand(50), (torch.rand(50) > 0.5).float())
             cost = metric.compute().item()
             assert cost >= 0, f"Negative cost at gamma={gamma}"
@@ -511,8 +511,8 @@ class TestIntegration:
             "brier": ConfidenceBrierScore(),
             "ce": ConfidenceCrossEntropy(),
             "auc": ConfidenceAUCScore(),
-            "cc": CCAG(),
-            "gamma_ccag": ConfidenceGammaCCAG(gamma=0.5),
+            "cc": CCAS(),
+            "gamma_ccaS": ConfidenceGammaCCAS(gamma=0.5),
         }
 
         for metric in metrics.values():
@@ -523,7 +523,7 @@ class TestIntegration:
         ce = metrics["ce"].compute().item()
         auc = metrics["auc"].compute().item()
         cc = metrics["cc"].compute().item()
-        gc = metrics["gamma_ccag"].compute().item()
+        gc = metrics["gamma_ccaS"].compute().item()
 
         # All should be in valid ranges
         assert 0 <= ece <= 1

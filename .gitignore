@@ -219,3 +219,4 @@ lightning_logs/
 # Data
 scores/
 outputs/
+data/

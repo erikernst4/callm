@@ -22,6 +22,7 @@ dependencies = [
     "ipykernel>=7.2.0",
     "accelerate>=1.13.0",
     "mistral-common>=1.10.0",
+    "torch-uncertainty>=0.11.0",
 ]
 
 [build-system]
