@@ -31,10 +31,13 @@ class ExpectedCalibrationError(BinaryCalibrationError):
 
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, nbins: int = 10) -> torch.Tensor:
+        def shortcut_function(
+            confidences: torch.Tensor, correctness: torch.Tensor, nbins: int = 10
+        ) -> torch.Tensor:
             metric = cls(n_bins=nbins)
             metric.update(confidences, correctness)
             return metric.compute().item()
+
         return shortcut_function
 
 
@@ -65,13 +68,16 @@ class ConfidenceErrorRate(Metric):
             raise ValueError("No samples to compute error rate.")
         error_rate = self.num_errors / self.count
         return error_rate
-    
+
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+        def shortcut_function(
+            confidences: torch.Tensor, correctness: torch.Tensor
+        ) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
             return metric.compute().item()
+
         return shortcut_function
 
 
@@ -89,13 +95,16 @@ class ConfidenceAUCScore(BinaryAUROC):
         except (ValueError, IndexError):
             # Single class or empty — undefined
             raise ValueError("No samples to compute AUC score.")
-        
+
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+        def shortcut_function(
+            confidences: torch.Tensor, correctness: torch.Tensor
+        ) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
             return metric.compute().item()
+
         return shortcut_function
 
 
@@ -109,10 +118,13 @@ class ConfidenceBrierScore(MeanSquaredError):
 
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+        def shortcut_function(
+            confidences: torch.Tensor, correctness: torch.Tensor
+        ) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
             return metric.compute().item()
+
         return shortcut_function
 
 
@@ -149,17 +161,20 @@ class ConfidenceCrossEntropy(Metric):
         if self.count == 0:
             raise ValueError("No samples to compute cross entropy.")
         return self.sum_ce / self.count
-    
+
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+        def shortcut_function(
+            confidences: torch.Tensor, correctness: torch.Tensor
+        ) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
             return metric.compute().item()
+
         return shortcut_function
 
 
-class ConfidencenCCAS(Metric):
+class ConfidenceNCCAS(Metric):
     """
     nCCAS (Confidence Cost Abstention Game) metric.
     """
@@ -198,17 +213,20 @@ class ConfidencenCCAS(Metric):
         if self.count == 0:
             raise ValueError("No samples to compute nCCAS.")
         return self.sum_cost / self.count
-    
+
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, n: int = 0) -> torch.Tensor:
+        def shortcut_function(
+            confidences: torch.Tensor, correctness: torch.Tensor, n: int = 0
+        ) -> torch.Tensor:
             metric = cls(n=n)
             metric.update(confidences, correctness)
             return metric.compute().item()
+
         return shortcut_function
 
 
-class ConfidencegammaCCAS(Metric):
+class ConfidenceGammaCCAS(Metric):
     """
     Gamma-nCCAS (Confidence Cost Abstention Game) metric.
 
@@ -274,18 +292,25 @@ class ConfidencegammaCCAS(Metric):
         total_cost = answer_costs.sum() + abstain_costs
 
         return total_cost / len(confidences)
-    
+
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor, gamma: float = 0.5) -> torch.Tensor:
+        def shortcut_function(
+            confidences: torch.Tensor, correctness: torch.Tensor, gamma: float = 0.5
+        ) -> torch.Tensor:
             metric = cls(gamma=gamma)
             metric.update(confidences, correctness)
             return metric.compute().item()
+
         return shortcut_function
 
 
-class ConfidenceAURC(_AURC):
+class CCAS(ConfidenceNCCAS):
+    def __init__(self, *args, **kwargs):
+        super().__init__(n=0, *args, **kwargs)
 
+
+class ConfidenceAURC(_AURC):
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
         # Concat (conf, 1-conf)
         probs = torch.cat([1 - confidences.view(-1, 1), confidences.view(-1, 1)], dim=1)
@@ -293,25 +318,30 @@ class ConfidenceAURC(_AURC):
 
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+        def shortcut_function(
+            confidences: torch.Tensor, correctness: torch.Tensor
+        ) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
             return metric.compute().item()
+
         return shortcut_function
 
 
 class FPR95(_FPRx):
-
     def __init__(self, **kwargs):
-        super().__init__(recall_level=0.95, pos_label=1,**kwargs)
+        super().__init__(recall_level=0.95, pos_label=1, **kwargs)
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
         return super().update(confidences, correctness.long())
 
     @classmethod
     def create_shortcut_function(cls):
-        def shortcut_function(confidences: torch.Tensor, correctness: torch.Tensor) -> torch.Tensor:
+        def shortcut_function(
+            confidences: torch.Tensor, correctness: torch.Tensor
+        ) -> torch.Tensor:
             metric = cls()
             metric.update(confidences, correctness)
             return metric.compute().item()
+
         return shortcut_function
