@@ -125,13 +125,13 @@ def load_csv_data(csv_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
             is_correct = row.get("Correct", "").strip().lower() == "yes"
             if np.isnan(conf):
                 nan_founds += 1
-                continue
             confidences.append(conf)
             correctness.append(float(is_correct))
 
     if nan_founds > 0:
         print(
-            f"Warning: Found {nan_founds} rows with invalid confidence values in {csv_path}",
+            f"Warning: Found {nan_founds} rows with invalid confidence values in {csv_path}. "
+            "Using fallback confidence of 0.5 for these samples.",
             file=sys.stderr,
         )
 

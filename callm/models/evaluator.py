@@ -314,22 +314,20 @@ class EvaluatorModule(BaseLightningModule):
         all_confidences = np.array(all_confidences)
         all_correctness = np.array(all_correctness)
 
-        # Filter invalid confidences
-        valid_indices = ~np.isnan(all_confidences)
-        n_invalid = len(all_confidences) - np.sum(valid_indices)
-
+        n_invalid = np.isnan(all_confidences).sum()
         if n_invalid > 0:
-            raise ValueError(
-                f"{n_invalid} samples have invalid confidence (NaN). "
-                "Metrics cannot be computed with NaN values."
+            print(
+                f"\nWarning: {n_invalid} samples have invalid confidence (NaN). "
+                "Using fallback confidence of 0.5 for these samples."
             )
 
-        confidences = torch.tensor(all_confidences[valid_indices], dtype=torch.float32)
-        correctness = torch.tensor(all_correctness[valid_indices], dtype=torch.float32)
+        confidences = torch.tensor(all_confidences, dtype=torch.float32)
+        correctness = torch.tensor(all_correctness, dtype=torch.float32)
 
         accuracy = float(correctness.mean()) if len(correctness) > 0 else 0.0
 
         # Calculate metrics using torchmetrics classes
+        # NaN confidences are handled internally by the metrics (fallback to 0.5)
         metrics = {
             "val_ece": ExpectedCalibrationError(n_bins=10),
             "val_brier_score": ConfidenceBrierScore(),

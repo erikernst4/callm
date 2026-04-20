@@ -43,14 +43,23 @@ class TestExpectedCalibrationError:
         ece = metric.compute().item()
         assert np.isnan(ece)
 
-    def test_nan_input_raises_error(self):
-        """Test that passing NaN values raises ValueError."""
+    def test_nan_confidence_uses_fallback(self):
+        """Test that NaN confidences are replaced with 0.5 fallback."""
         metric = ExpectedCalibrationError()
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
+        metric.update(confidences, correctness)
+        ece = metric.compute().item()
+        assert np.isfinite(ece)
+
+    def test_nan_correctness_raises_error(self):
+        """Test that NaN correctness still raises ValueError."""
+        metric = ExpectedCalibrationError()
+        confidences = torch.tensor([0.5, 0.5])
+        correctness = torch.tensor([float("nan"), 0.0])
         import pytest
 
-        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+        with pytest.raises(ValueError, match="NaN values found in correctness tensor."):
             metric.update(confidences, correctness)
 
     def test_single_bin(self):
@@ -116,14 +125,23 @@ class TestConfidenceBrierScore:
         bs = metric.compute().item()
         assert np.isnan(bs)
 
-    def test_nan_input_raises_error(self):
-        """Test that passing NaN values raises ValueError."""
+    def test_nan_confidence_uses_fallback(self):
+        """Test that NaN confidences are replaced with 0.5 fallback."""
         metric = ConfidenceBrierScore()
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
+        metric.update(confidences, correctness)
+        bs = metric.compute().item()
+        assert np.isfinite(bs)
+
+    def test_nan_correctness_raises_error(self):
+        """Test that NaN correctness still raises ValueError."""
+        metric = ConfidenceBrierScore()
+        confidences = torch.tensor([0.5, 0.5])
+        correctness = torch.tensor([float("nan"), 0.0])
         import pytest
 
-        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+        with pytest.raises(ValueError, match="NaN values found in correctness tensor."):
             metric.update(confidences, correctness)
 
     def test_incremental_update(self):
@@ -173,14 +191,23 @@ class TestConfidenceCrossEntropy:
         with pytest.raises(ValueError, match="No samples to compute cross entropy."):
             metric.compute()
 
-    def test_nan_input_raises_error(self):
-        """Test that passing NaN values raises ValueError."""
+    def test_nan_confidence_uses_fallback(self):
+        """Test that NaN confidences are replaced with 0.5 fallback."""
         metric = ConfidenceCrossEntropy()
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
+        metric.update(confidences, correctness)
+        ce = metric.compute().item()
+        assert np.isfinite(ce)
+
+    def test_nan_correctness_raises_error(self):
+        """Test that NaN correctness still raises ValueError."""
+        metric = ConfidenceCrossEntropy()
+        confidences = torch.tensor([0.5, 0.5])
+        correctness = torch.tensor([float("nan"), 0.0])
         import pytest
 
-        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+        with pytest.raises(ValueError, match="NaN values found in correctness tensor."):
             metric.update(confidences, correctness)
 
     def test_clipping(self):
@@ -233,14 +260,23 @@ class TestConfidenceAUCScore:
         with pytest.raises(ValueError, match="No samples to compute AUC score."):
             metric.compute()
 
-    def test_nan_input_raises_error(self):
-        """Test that passing NaN values raises ValueError."""
+    def test_nan_confidence_uses_fallback(self):
+        """Test that NaN confidences are replaced with 0.5 fallback."""
         metric = ConfidenceAUCScore()
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
+        metric.update(confidences, correctness)
+        auc = metric.compute().item()
+        assert np.isfinite(auc)
+
+    def test_nan_correctness_raises_error(self):
+        """Test that NaN correctness still raises ValueError."""
+        metric = ConfidenceAUCScore()
+        confidences = torch.tensor([0.5, 0.5])
+        correctness = torch.tensor([float("nan"), 0.0])
         import pytest
 
-        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+        with pytest.raises(ValueError, match="NaN values found in correctness tensor."):
             metric.update(confidences, correctness)
 
     def test_single_class(self):
@@ -323,14 +359,23 @@ class TestCCAS:
         with pytest.raises(ValueError, match="No samples to compute nCCAS."):
             metric.compute()
 
-    def test_nan_input_raises_error(self):
-        """Test that passing NaN values raises ValueError."""
+    def test_nan_confidence_uses_fallback(self):
+        """Test that NaN confidences are replaced with 0.5 fallback."""
         metric = CCAS()
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        assert np.isfinite(cost)
+
+    def test_nan_correctness_raises_error(self):
+        """Test that NaN correctness still raises ValueError."""
+        metric = CCAS()
+        confidences = torch.tensor([0.5, 0.5])
+        correctness = torch.tensor([float("nan"), 0.0])
         import pytest
 
-        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+        with pytest.raises(ValueError, match="NaN values found in correctness tensor."):
             metric.update(confidences, correctness)
 
     def test_incremental_update(self):
@@ -452,14 +497,23 @@ class TestGammaCCAS:
         # Different gammas cross different confidence boundaries
         assert not all(abs(c - costs[0]) < 1e-6 for c in costs[1:])
 
-    def test_nan_input_raises_error(self):
-        """Test that NaN inputs raise ValueError."""
+    def test_nan_confidence_uses_fallback(self):
+        """Test that NaN confidences are replaced with 0.5 fallback."""
         metric = ConfidenceGammaCCAS(gamma=0.5)
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
+        metric.update(confidences, correctness)
+        cost = metric.compute().item()
+        assert np.isfinite(cost)
+
+    def test_nan_correctness_raises_error(self):
+        """Test that NaN correctness still raises ValueError."""
+        metric = ConfidenceGammaCCAS(gamma=0.5)
+        confidences = torch.tensor([0.5, 0.5])
+        correctness = torch.tensor([float("nan"), 0.0])
         import pytest
 
-        with pytest.raises(ValueError, match="NaN values found in input tensors."):
+        with pytest.raises(ValueError, match="NaN values found in correctness tensor."):
             metric.update(confidences, correctness)
 
     def test_empty_input(self):

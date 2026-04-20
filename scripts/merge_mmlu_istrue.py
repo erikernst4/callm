@@ -2,7 +2,6 @@ import sys
 import pandas as pd
 from pathlib import Path
 import torch
-import numpy as np
 import csv
 
 # Add project root to path
@@ -18,10 +17,8 @@ from callm.metrics import (
 
 
 def compute_metrics(confidences, correctness):
-    # filter NaNs
-    valid_indices = ~np.isnan(confidences)
-    conf_t = torch.tensor(confidences[valid_indices], dtype=torch.float32)
-    corr_t = torch.tensor(correctness[valid_indices], dtype=torch.float32)
+    conf_t = torch.tensor(confidences, dtype=torch.float32)
+    corr_t = torch.tensor(correctness, dtype=torch.float32)
 
     accuracy = float(corr_t.mean()) if len(corr_t) > 0 else 0.0
 

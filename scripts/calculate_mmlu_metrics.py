@@ -63,24 +63,21 @@ def compute_metrics(rows):
     results["n_samples"] = len(all_correct)
     results["accuracy"] = float(all_correct.mean()) if len(all_correct) > 0 else 0.0
 
-    # Check for valid confidences
-    valid_indices = ~np.isnan(all_confidences)
-    n_valid = int(np.sum(valid_indices))
-    n_invalid = len(all_confidences) - n_valid
-    results["n_valid_confidences"] = n_valid
+    # Check for NaN confidences (will be handled as 0.5 fallback by metrics)
+    n_invalid = int(np.isnan(all_confidences).sum())
     results["n_nan_confidences"] = n_invalid
 
     if n_invalid > 0:
         print(
             f"  Warning: {n_invalid}/{len(all_confidences)} samples have NaN confidence. "
-            "Calibration metrics will be computed on valid samples only."
+            "Using fallback confidence of 0.5 for these samples."
         )
 
-    if n_valid == 0:
+    if len(all_correct) == 0:
         return results
 
-    confidences = torch.tensor(all_confidences[valid_indices], dtype=torch.float32)
-    correctness = torch.tensor(all_correct[valid_indices], dtype=torch.float32)
+    confidences = torch.tensor(all_confidences, dtype=torch.float32)
+    correctness = torch.tensor(all_correct, dtype=torch.float32)
 
     metric_classes = {
         "ece": ExpectedCalibrationError(n_bins=10),

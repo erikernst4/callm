@@ -25,8 +25,11 @@ class ExpectedCalibrationError(BinaryCalibrationError):
         super().__init__(n_bins=n_bins, norm="l1", **kwargs)
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
-        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
-            raise ValueError("NaN values found in input tensors.")
+        if torch.isnan(correctness).any():
+            raise ValueError("NaN values found in correctness tensor.")
+        confidences = torch.where(
+            torch.isnan(confidences), torch.tensor(0.5), confidences
+        )
         super().update(confidences.float(), correctness.long())
 
     @classmethod
@@ -56,8 +59,11 @@ class ConfidenceErrorRate(Metric):
         self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
-        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
-            raise ValueError("NaN values found in input tensors.")
+        if torch.isnan(correctness).any():
+            raise ValueError("NaN values found in correctness tensor.")
+        confidences = torch.where(
+            torch.isnan(confidences), torch.tensor(0.5), confidences
+        )
         if confidences.ndim != 1 or correctness.ndim != 1:
             raise ValueError("Confidences must be 1D and correctness must be 1D.")
         self.num_errors += (correctness == 0).sum()
@@ -85,8 +91,11 @@ class ConfidenceAUCScore(BinaryAUROC):
     """AUROC via torchmetrics BinaryAUROC."""
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
-        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
-            raise ValueError("NaN values found in input tensors.")
+        if torch.isnan(correctness).any():
+            raise ValueError("NaN values found in correctness tensor.")
+        confidences = torch.where(
+            torch.isnan(confidences), torch.tensor(0.5), confidences
+        )
         super().update(confidences.float(), correctness.long())
 
     def compute(self) -> torch.Tensor:
@@ -112,8 +121,11 @@ class ConfidenceBrierScore(MeanSquaredError):
     """Brier Score = MSE between confidence and correctness."""
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
-        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
-            raise ValueError("NaN values found in input tensors.")
+        if torch.isnan(correctness).any():
+            raise ValueError("NaN values found in correctness tensor.")
+        confidences = torch.where(
+            torch.isnan(confidences), torch.tensor(0.5), confidences
+        )
         super().update(confidences.float(), correctness.float())
 
     @classmethod
@@ -149,8 +161,11 @@ class ConfidenceCrossEntropy(Metric):
         self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
-        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
-            raise ValueError("NaN values found in input tensors.")
+        if torch.isnan(correctness).any():
+            raise ValueError("NaN values found in correctness tensor.")
+        confidences = torch.where(
+            torch.isnan(confidences), torch.tensor(0.5), confidences
+        )
         conf = confidences.float().clamp(self.epsilon, 1 - self.epsilon)
         corr = correctness.float()
         ce = F.binary_cross_entropy(conf, corr, reduction="sum")
@@ -201,8 +216,11 @@ class ConfidenceNCCAS(Metric):
         self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
-        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
-            raise ValueError("NaN values found in input tensors.")
+        if torch.isnan(correctness).any():
+            raise ValueError("NaN values found in correctness tensor.")
+        confidences = torch.where(
+            torch.isnan(confidences), torch.tensor(0.5), confidences
+        )
         q = confidences.float().clamp(self.epsilon, 1 - self.epsilon)
         indicator = correctness.float()
         cost = self.cost_fun(q, indicator)
@@ -261,8 +279,11 @@ class ConfidenceGammaCCAS(Metric):
         self.add_state("all_correctness", default=[], dist_reduce_fx="cat")
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
-        if torch.isnan(confidences).any() or torch.isnan(correctness).any():
-            raise ValueError("NaN values found in input tensors.")
+        if torch.isnan(correctness).any():
+            raise ValueError("NaN values found in correctness tensor.")
+        confidences = torch.where(
+            torch.isnan(confidences), torch.tensor(0.5), confidences
+        )
         self.all_confidences.append(confidences.float())
         self.all_correctness.append(correctness.float())
 

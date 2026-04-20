@@ -113,10 +113,9 @@ def parse_experiment_dir(dir_name: str) -> tuple[str, str] | None:
     return method_display, llm_display
 
 
-def load_csv_data(csv_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def load_csv_data(csv_path: Path) -> tuple[np.ndarray, np.ndarray]:
     confidences = []
     correctness = []
-    all_correctness = []
 
     with open(csv_path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -138,21 +137,18 @@ def load_csv_data(csv_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
                 gold = str(row.get("gold_answers", "")).strip().lower()
                 is_correct = pred == gold
 
-            all_correctness.append(float(is_correct))
-            if not np.isnan(conf):
-                confidences.append(conf)
-                correctness.append(float(is_correct))
+            confidences.append(conf)
+            correctness.append(float(is_correct))
 
-    return np.array(confidences), np.array(correctness), np.array(all_correctness)
+    return np.array(confidences), np.array(correctness)
 
 
 def compute_standard_metrics(
-    confidences: np.ndarray, correctness: np.ndarray, all_correctness: np.ndarray
+    confidences: np.ndarray, correctness: np.ndarray
 ) -> dict[str, float]:
     conf_t = torch.tensor(confidences, dtype=torch.float32)
     corr_t = torch.tensor(correctness, dtype=torch.float32)
-    all_corr_t = torch.tensor(all_correctness, dtype=torch.float32)
-    accuracy = float(all_corr_t.mean()) if len(all_corr_t) > 0 else 0.0
+    accuracy = float(corr_t.mean()) if len(corr_t) > 0 else 0.0
 
     ece = ExpectedCalibrationError(n_bins=10)
     bs = BrierScore()
@@ -160,6 +156,7 @@ def compute_standard_metrics(
     auc = AUCScore()
     ccas = CCAS()
 
+    # NaN confidences are handled internally by the metrics (fallback to 0.5)
     for metric in [ece, bs, ce, auc, ccas]:
         metric.update(conf_t, corr_t)
 
@@ -418,13 +415,11 @@ def main():
         if not csv_path:
             continue
 
-        confidences, correctness, all_correctness = load_csv_data(csv_path)
+        confidences, correctness = load_csv_data(csv_path)
         if len(confidences) == 0:
             continue
 
-        std_metrics = compute_standard_metrics(
-            confidences, correctness, all_correctness
-        )
+        std_metrics = compute_standard_metrics(confidences, correctness)
         g_metrics = compute_gamma_ccas_metrics(confidences, correctness, args.gammas)
         CCAS_metrics = compute_CCAS_metrics(confidences, correctness, args.ns)
 

@@ -10,7 +10,7 @@ from callm.metrics import (
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,
     ConfidenceAUCScore,
-    CCAG,
+    CCAS,
 )
 
 
@@ -301,43 +301,36 @@ class LLM(BaseLightningModule):
         all_confidences = np.array(all_confidences)
         all_correctness = np.array(all_correctness)
 
-        # Log accuracy regardless of confidence validity
+        # Log accuracy on all samples
         accuracy = float(all_correctness.mean()) if len(all_correctness) > 0 else 0.0
         self.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
 
         metrics_results = {"val_accuracy": accuracy}
 
-        # Filter invalid confidences for calibration metrics
-        valid_indices = ~np.isnan(all_confidences)
-        n_invalid = len(all_confidences) - np.sum(valid_indices)
-
+        n_invalid = np.isnan(all_confidences).sum()
         if n_invalid > 0:
             print(
                 f"Warning: {n_invalid} samples have invalid confidence (NaN). "
-                "Calibration metrics will be computed on valid samples only."
+                "Using fallback confidence of 0.5 for these samples."
             )
 
-        if np.sum(valid_indices) > 0:
-            confidences = torch.tensor(
-                all_confidences[valid_indices], dtype=torch.float32
-            )
-            correctness = torch.tensor(
-                all_correctness[valid_indices], dtype=torch.float32
-            )
+        confidences = torch.tensor(all_confidences, dtype=torch.float32)
+        correctness = torch.tensor(all_correctness, dtype=torch.float32)
 
-            metrics = {
-                "val_ece": ExpectedCalibrationError(n_bins=10),
-                "val_brier_score": ConfidenceBrierScore(),
-                "val_cross_entropy": ConfidenceCrossEntropy(),
-                "val_auc": ConfidenceAUCScore(),
-                "val_ccag": CCAG(),
-            }
+        # NaN confidences are handled internally by the metrics (fallback to 0.5)
+        metrics = {
+            "val_ece": ExpectedCalibrationError(n_bins=10),
+            "val_brier_score": ConfidenceBrierScore(),
+            "val_cross_entropy": ConfidenceCrossEntropy(),
+            "val_auc": ConfidenceAUCScore(),
+            "val_ccas": CCAS(),
+        }
 
-            for name, metric in metrics.items():
-                metric.update(confidences, correctness)
-                value = float(metric.compute())
-                self.log(name, value, prog_bar=True, sync_dist=True)
-                metrics_results[name] = value
+        for name, metric in metrics.items():
+            metric.update(confidences, correctness)
+            value = float(metric.compute())
+            self.log(name, value, prog_bar=True, sync_dist=True)
+            metrics_results[name] = value
 
         # Save metrics to CSV in the log directory
         log_dir = self.trainer.log_dir or os.getcwd()
