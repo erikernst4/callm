@@ -1,6 +1,6 @@
 # callm — Confidence Calibration for LLMs
 
-A framework for evaluating **confidence calibration** of large language models, built on [PyTorch Lightning](https://lightning.ai/).
+A framework for evaluating confidence augmented systems, built on [PyTorch Lightning](https://lightning.ai/).
 Supports both local HuggingFace models and GCP Vertex AI (Gemini) backends across multiple benchmarks.
 
 ## Supported Benchmarks
