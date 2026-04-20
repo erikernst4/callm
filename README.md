@@ -1,58 +1,164 @@
-# Confidence Calibration for LLMs
+# callm — Confidence Calibration for LLMs
 
-This project reproduces results from paper 2023.emnlp-main.330, implementing confidence calibration metrics (ECE, AUC, BS, CE) on TriviaQA validation set.
+A framework for evaluating **confidence calibration** of large language models, built on [PyTorch Lightning](https://lightning.ai/).
+Supports both local HuggingFace models and GCP Vertex AI (Gemini) backends across multiple benchmarks.
 
-## Setup
+## Supported Benchmarks
 
-1. Install dependencies:
+| Benchmark | Task type | Semantic‑equivalence evaluation needed? |
+|---|---|---|
+| **TriviaQA** | Open‑ended QA | Yes — uses an evaluator LLM |
+| **MMLU** | Multiple‑choice | No — exact match on answer letter |
+
+## Calibration Metrics
+
+| Metric | Description |
+|---|---|
+| **ECE** | Expected Calibration Error (L1, 10 bins) |
+| **AUC** | Area Under the ROC Curve |
+| **BS** | Brier Score (MSE between confidence and correctness) |
+| **CE** | Binary Cross‑Entropy |
+| **CCAS** | Cost of Confidence Augmented Systems |
+| **nCCAS** | Parameterised CCAS family (n = 0, 1, 2, …) |
+| **γ‑CCAS** | Gamma‑CCAS — selective prediction at operating point γ |
+| **AURC** | Area Under the Risk‑Coverage curve |
+| **FPR@95** | False Positive Rate at 95% recall |
+| **Error Rate** | Overall prediction error rate |
+
+## Quick Start
+
+### 1. Install dependencies
+
 ```bash
 uv sync
 ```
 
-2. Create `.env` file (optional, only needed for Llama models):
+### 2. Configure environment (optional)
+
 ```bash
 cp .env.example .env
-# Edit .env and add your HuggingFace token
 ```
 
-## Running Tests
+Then edit `.env`:
 
-### Unit Tests
+```env
+HF_TOKEN=your_huggingface_token_here               # needed for gated models (e.g. Llama, Mistral)
+GOOGLE_APPLICATION_CREDENTIALS=path/to/creds.json   # needed for GCP / Gemini models
+```
+
+### 3. Run unit tests
+
 ```bash
 uv run pytest callm/tests/ -v
 ```
 
-### Integration Test (10 samples)
+## Usage
+
+The CLI is built on top of `LightningCLI` and exposes three subcommands:
+
+### `validate` — Run LLM inference and extract answers + confidences
+
 ```bash
-uv run python test_integration.py
+# TriviaQA with a local HuggingFace model (default config)
+uv run python main.py validate \
+  --model.init_args.model_name=google/flan-t5-small \
+  --data.init_args.batch_size=8
+
+# MMLU with a local model
+uv run python main.py validate \
+  -c configs/config_mmlu_base_validation.yaml \
+  --model.init_args.model_name=mistralai/Ministral-3-8B-Instruct-2512
+
+# TriviaQA with a GCP Gemini model
+uv run python main.py validate \
+  -c configs/config_gcp_validation.yaml
 ```
 
-### Full Validation
+Outputs are saved to `lightning_logs/<run>/llm_outputs.csv`.
+
+### `evaluation` — Evaluate correctness of LLM outputs via a judge model
+
+For benchmarks that require semantic-equivalence checking (TriviaQA):
+
 ```bash
-uv run python main.py validate --model.model_name=flan-t5-small --data.batch_size=8
+uv run python main.py evaluation \
+  --llm_outputs_path=lightning_logs/<run>/llm_outputs.csv
+
+# Or recalculate metrics from an existing evaluation CSV:
+uv run python main.py evaluation \
+  --use_existing_csv \
+  --llm_outputs_path=lightning_logs/<run>/llm_outputs.csv
 ```
 
-## Metrics
+### `evaluate_csv` — Compute metrics from a saved evaluation CSV
 
-The system computes the following calibration metrics:
-- **ECE** (Expected Calibration Error): Measures calibration quality
-- **AUC** (Area Under Curve): Measures ranking ability
-- **BS** (Brier Score): Measures prediction accuracy
-- **CE** (Cross Entropy): Measures log-likelihood
-
-## Architecture
-
-- `callm/models/llm.py`: Main LLM model with validation logic
-- `callm/extractors.py`: Answer and confidence extraction from LLM outputs
-- `callm/evaluator.py`: LLM-based correctness evaluator
-- `callm/metrics.py`: Calibration metrics implementation
-- `callm/data/triviaQA.py`: TriviaQA dataset loading and preprocessing
-- `callm/prompts.py`: Prompt templates
+```bash
+uv run python main.py evaluate_csv \
+  --csv_path=lightning_logs/<run>_evaluation/version_0/evaluation_results.csv
+```
 
 ## Configuration
 
-Models are cached to `~/.cache/huggingface` by default. Configure via `.env`:
+All runs are configured via YAML. Pre-built configs live in `configs/`:
+
+| Config | Backend | Benchmark |
+|---|---|---|
+| `config_base_validation.yaml` | HuggingFace | TriviaQA |
+| `config_gcp_validation.yaml` | GCP (Gemini) | TriviaQA |
+| `config_base_evaluation.yaml` | HuggingFace | TriviaQA (evaluator) |
+| `config_gcp_evaluation.yaml` | GCP (Gemini) | TriviaQA (evaluator) |
+| `config_mmlu_base_validation.yaml` | HuggingFace | MMLU |
+| `config_mmlu_gcp_validation.yaml` | GCP (Gemini) | MMLU |
+
+Any config value can be overridden from the CLI — see the [LightningCLI docs](https://lightning.ai/docs/pytorch/stable/cli/lightning_cli.html).
+
+## Project Structure
+
 ```
-CACHE_PATH=/your/custom/path
-HF_TOKEN=your_token_here
+callm/
+├── models/
+│   ├── base.py              # Shared Lightning module base
+│   ├── llm.py               # HuggingFace LLM (local GPU)
+│   ├── gcp_llm.py           # GCP Vertex AI / Gemini LLM
+│   ├── evaluator.py         # Semantic-equivalence evaluator (HF)
+│   └── gcp_evaluator.py     # Semantic-equivalence evaluator (GCP)
+├── data/
+│   ├── triviaqa/            # TriviaQA data modules
+│   ├── mmlu/                # MMLU data modules
+│   ├── answers_data.py      # Shared answer-loading utilities
+│   └── classification.py    # Classification data module
+├── extractors/
+│   ├── base.py              # Base + posterior extractors
+│   ├── triviaqa.py          # TriviaQA verbalized-confidence extractor
+│   └── mmlu.py              # MMLU answer/confidence extractors
+├── prompts/
+│   ├── base.py              # Prompt / ChatPrompt base classes
+│   ├── triviaqa.py          # TriviaQA prompt templates
+│   └── mmlu.py              # MMLU prompt templates
+├── metrics/
+│   ├── confidences.py       # Calibration metrics (ECE, AUC, BS, CE, CCAS, …)
+│   ├── classification.py    # Classification-specific metric variants
+│   ├── constants.py         # Metric constants and registry
+│   └── utils.py             # Metric lookup helpers
+├── tests/                   # Unit & integration tests
+├── config.py                # Shared config utilities
+└── utils.py                 # Model loading & tokenizer helpers
+configs/                     # YAML run configurations
+scripts/                     # Analysis & paper-figure scripts
+cli.py                       # CalibrationCLI (extends LightningCLI)
+main.py                      # Entrypoint
 ```
+
+## Confidence Extraction Methods
+
+| Extractor | How confidence is obtained |
+|---|---|
+| **SequencePosteriorExtractor** | Product of token log‑probabilities of the generated answer |
+| **IsTruePosteriorExtractor** | Log‑prob of the "True" token after an "Is this true?" follow‑up |
+| **VerbalizedConfidenceExtractor** | Parsed from the model's own verbalized confidence value |
+
+MMLU variants (`MMLUSequencePosteriorExtractor`, `MMLUVerbalizedExtractor`, etc.) adapt these strategies to multiple‑choice format.
+
+## License
+
+See [LICENSE](LICENSE).
