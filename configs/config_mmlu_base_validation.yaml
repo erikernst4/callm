@@ -1,0 +1,73 @@
+# lightning.pytorch==2.5.5
+seed_everything: true
+trainer:
+  evaluate_correctness: false
+  evaluator_model_name: Qwen/Qwen3.5-9B
+  evaluator_batch_size: 1
+  accelerator: "gpu"
+  strategy: auto
+  devices: [1]
+  num_nodes: 1
+  precision: null
+  logger: null
+  callbacks: null
+  fast_dev_run: false
+  max_epochs: null
+  min_epochs: null
+  max_steps: -1
+  min_steps: null
+  max_time: null
+  limit_train_batches: null
+  limit_val_batches: null
+  limit_test_batches: null
+  limit_predict_batches: null
+  overfit_batches: 0.0
+  val_check_interval: null
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: null
+  log_every_n_steps: null
+  enable_checkpointing: null
+  enable_progress_bar: null
+  enable_model_summary: null
+  accumulate_grad_batches: 1
+  gradient_clip_val: null
+  gradient_clip_algorithm: null
+  deterministic: true
+  benchmark: null
+  inference_mode: true
+  use_distributed_sampler: true
+  profiler: null
+  detect_anomaly: false
+  barebones: false
+  plugins: null
+  sync_batchnorm: false
+  reload_dataloaders_every_n_epochs: 0
+  default_root_dir: null
+  model_registry: null
+model:
+  class_path: callm.models.LLM
+  init_args:
+    model_name: mistralai/Ministral-3-8B-Instruct-2512
+    hf_token: null
+    train: false
+    return_logits: true
+    extractor:
+      class_path: callm.extractors.MMLUVerbalizedExtractor
+      # init_args:
+      #   model_name: ${model.init_args.model_name}
+    save_outputs: false
+    flush_outputs_every_n_steps: 1000
+    max_new_tokens: 200
+data:
+  class_path: callm.data.MMLUDataModule
+  init_args:
+    batch_size: 1
+    model_name: ${model.init_args.model_name}
+    prompt: callm.prompts.CHAT_MMLU_VERBALIZED_PROMPT
+    max_samples: 1000
+    seed: 42
+    num_workers: 24
+    disable_thinking: false
+    # llm_outputs_path: /home/eernst/callm/lightning_logs/mmlu/label_prob_Qwen3.5-9B/llm_outputs.csv
+lr_scheduler: null
+ckpt_path: null
