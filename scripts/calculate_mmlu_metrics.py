@@ -142,7 +142,7 @@ def main():
             print(f"  Brier:    {results['brier_score']:.4f}")
             print(f"  CE:       {results['cross_entropy']:.4f}")
             print(f"  AUC:      {results['auc']:.4f}")
-            print(f"  CCAS:     {results['ccaS']:.4f}")
+            print(f"  ECUAS:    {results['ccas']:.4f}")
 
         # Save metrics.csv in the experiment directory
         exp_dir = os.path.dirname(csv_path)
@@ -155,7 +155,7 @@ def main():
                     "val_brier_score": results["brier_score"],
                     "val_cross_entropy": results["cross_entropy"],
                     "val_auc": results["auc"],
-                    "val_ccas": results["ccaS"],
+                    "val_ccas": results["ccas"],
                 }
             )
         try:
@@ -172,7 +172,7 @@ def main():
     # Print summary table
     print("=" * 90)
     print(
-        f"{'Experiment':<50} {'Acc':>7} {'ECE':>7} {'Brier':>7} {'CE':>7} {'AUC':>7} {'CCAS':>7}"
+        f"{'Experiment':<50} {'Acc':>7} {'ECE':>7} {'Brier':>7} {'CE':>7} {'AUC':>7} {'ECUAS':>7}"
     )
     print("-" * 90)
     for r in all_results:
@@ -181,9 +181,9 @@ def main():
         brier_str = f"{r['brier_score']:.4f}" if "brier_score" in r else "N/A"
         ce_str = f"{r['cross_entropy']:.4f}" if "cross_entropy" in r else "N/A"
         auc_str = f"{r['auc']:.4f}" if "auc" in r else "N/A"
-        ccaS_str = f"{r['ccaS']:.4f}" if "ccaS" in r else "N/A"
+        ccas_str = f"{r['ccas']:.4f}" if "ccas" in r else "N/A"
         print(
-            f"{r['experiment']:<50} {acc_str:>7} {ece_str:>7} {brier_str:>7} {ce_str:>7} {auc_str:>7} {ccaS_str:>7}"
+            f"{r['experiment']:<50} {acc_str:>7} {ece_str:>7} {brier_str:>7} {ce_str:>7} {auc_str:>7} {ccas_str:>7}"
         )
     print("=" * 90)
 

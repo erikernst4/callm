@@ -19,8 +19,8 @@ Supports both local HuggingFace models and GCP Vertex AI (Gemini) backends acros
 | **BS** | Brier Score (MSE between confidence and correctness) |
 | **CE** | Binary Cross‑Entropy |
 | **CCAS** | Cost of Confidence Augmented Systems |
-| **nCCAS** | Parameterised CCAS family (n = 0, 1, 2, …) |
-| **γ‑CCAS** | Gamma‑CCAS — selective prediction at operating point γ |
+| **ECUAS** | Expected Cost for Uncertainty-Augmented Systems (parameterised by n = 0, 1, 2, …) |
+| **γ‑ECUAS** | Gamma‑ECUAS — selective prediction at operating point γ |
 | **AURC** | Area Under the Risk‑Coverage curve |
 | **FPR@95** | False Positive Rate at 95% recall |
 | **Error Rate** | Overall prediction error rate |
@@ -136,7 +136,7 @@ callm/
 │   ├── triviaqa.py          # TriviaQA prompt templates
 │   └── mmlu.py              # MMLU prompt templates
 ├── metrics/
-│   ├── confidences.py       # Calibration metrics (ECE, AUC, BS, CE, CCAS, …)
+│   ├── confidences.py       # Calibration metrics (ECE, AUC, BS, CE, ECUAS, …)
 │   ├── classification.py    # Classification-specific metric variants
 │   ├── constants.py         # Metric constants and registry
 │   └── utils.py             # Metric lookup helpers

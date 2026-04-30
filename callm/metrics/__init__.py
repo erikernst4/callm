@@ -4,16 +4,17 @@ from .confidences import (
     ConfidenceAUCScore,
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,
-    ConfidenceNCCAS,
+    ConfidenceECUAS,
     ConfidenceGammaCCAS,
     CCAS,
+    ConfidenceAURC,
 )
 from .classification import (
     ClassificationErrorRate,
     ClassificationAUC,
     ClassificationBrierScore,
     ClassificationCrossEntropy,
-    ClassificationNCCAS,
+    ClassificationECUAS,
     ClassificationGammaCCAS,
 )
 
@@ -25,14 +26,15 @@ __all__ = [
     "ConfidenceAUCScore",
     "ConfidenceBrierScore",
     "ConfidenceCrossEntropy",
-    "ConfidenceNCCAS",
+    "ConfidenceECUAS",
     "ConfidenceGammaCCAS",
     "CCAS",
     "ClassificationErrorRate",
     "ClassificationAUC",
     "ClassificationBrierScore",
     "ClassificationCrossEntropy",
-    "ClassificationNCCAS",
+    "ClassificationECUAS",
     "ClassificationGammaCCAS",
     "get_metric_from_id",
+    "ConfidenceAURC",
 ]

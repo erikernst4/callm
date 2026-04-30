@@ -54,7 +54,7 @@ def get_metric_from_id(id_name):
             "function": partial(METRICS["cls_norm_n-ccas"]["function"], n=n),
             "obj": METRICS["cls_norm_n-ccas"]["cls"](n=n),
             "higher_is_better": METRICS["cls_norm_n-ccas"]["higher_is_better"],
-            "display": f"NCCAS (n={n})",
+            "display": f"ECUAS (n={n})",
         }
     elif "cls_gamma-ccas" in id_name:
         gamma = float(id_name.split("_gamma=")[-1])
@@ -74,7 +74,7 @@ def get_metric_from_id(id_name):
             ),
             "obj": METRICS["cls_norm_gamma-ccas"]["cls"](gamma=gamma),
             "higher_is_better": METRICS["cls_norm_gamma-ccas"]["higher_is_better"],
-            "display": f"NCCAS (γ={gamma})",
+            "display": f"ECUAS (γ={gamma})",
         }
     elif "cls_ece" in id_name:
         if "nbins=" not in id_name:

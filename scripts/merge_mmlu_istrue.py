@@ -39,7 +39,7 @@ def compute_metrics(confidences, correctness):
 
 
 def main():
-    mmlu_dir = Path("/home/eernst/callm/lightning_logs/mmlu")
+    mmlu_dir = Path("/home/eernst/callm/lightning_logs/paper_results/mmlu")
 
     for exp_dir in mmlu_dir.iterdir():
         if not exp_dir.is_dir() or not exp_dir.name.startswith("is_true_"):
@@ -68,6 +68,10 @@ def main():
 
         df_base = pd.read_csv(base_csv)
         df_is_true = pd.read_csv(is_true_csv)
+
+        # Standardize columns to lower case
+        df_base.columns = [c.lower() for c in df_base.columns]
+        df_is_true.columns = [c.lower() for c in df_is_true.columns]
 
         # Assume same row indices
         if len(df_base) != len(df_is_true):

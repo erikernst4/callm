@@ -4,7 +4,7 @@ Generate LaTeX tables with calibration metrics and CCAS line plots from paper re
 Produces:
   1. Standard metrics table: Acc, AUROC, ECE, BS, CE, CCAS (table_standard.tex)
   2. CCAS Line Plots: One plot per LLM showing CCAS variants vs. Gamma
-  3. nCCAS Line Plots: One plot per LLM showing nCCAS vs n.
+  3. ECUAS Line Plots: One plot per LLM showing ECUAS vs n.
 
 Usage:
     python generate_paper_table.py [--gammas 0.05 0.1 0.2 0.5 0.8 0.9 0.95] [--ns 0 1 2 4 8 16 32 64 128] [--output-dir .]
@@ -302,9 +302,9 @@ def generate_gamma_ccas_plots(results: dict, gammas: list[float], output_dir: Pa
             ]
             ax.plot(gammas, y_vals, marker="o", linestyle="-", label=method)
 
-            ax.set_title(f"γ-CCAS vs γ for {llm}")
+            ax.set_title(f"γ-ECUAS vs γ for {llm}")
             ax.set_xlabel("γ (Gamma)")
-            ax.set_ylabel("γ-CCAS")
+            ax.set_ylabel("γ-ECUAS")
             ax.grid(True)
             ax.legend()
 
@@ -317,7 +317,7 @@ def generate_gamma_ccas_plots(results: dict, gammas: list[float], output_dir: Pa
         plt.close()
 
 
-def generate_n_ccas_plots(results: dict, ns: list[int], output_dir: Path):
+def generate_ecuas_plots(results: dict, ns: list[int], output_dir: Path):
     plots_dir = output_dir / "plots"
     plots_dir.mkdir(exist_ok=True)
 
@@ -338,16 +338,16 @@ def generate_n_ccas_plots(results: dict, ns: list[int], output_dir: Path):
 
             plt.plot(ns, y_vals, marker="o", label=method)
 
-        plt.title(f"nCCAS vs n for {llm}")
+        plt.title(f"ECUAS vs n for {llm}")
         plt.xlabel("n")
         plt.xscale("symlog", linthresh=1.0)
         plt.xticks(ns, labels=[str(n) for n in ns])
-        plt.ylabel("nCCAS")
+        plt.ylabel("ECUAS")
         plt.legend()
         plt.grid(True)
 
         out_path = (
-            plots_dir / f"{llm.replace(' ', '_').replace('.', '_')}_n-ccas_plots.pdf"
+            plots_dir / f"{llm.replace(' ', '_').replace('.', '_')}_ecuas_plots.pdf"
         )
         plt.savefig(out_path, bbox_inches="tight")
         plt.close()
@@ -424,7 +424,7 @@ def main():
             }
         )
 
-        # Compute n-CCAS metrics and update results
+        # Compute ECUAS metrics and update results
         n_results[llm][method].update(
             {
                 f"conf_n-ccas_n={n}": get_metric_from_id(f"conf_n-ccas_n={n}")[
@@ -436,7 +436,7 @@ def main():
 
     generate_table(table_results, table_metrics, out_dir / "confidence_results")
     generate_gamma_ccas_plots(gamma_results, args.gammas, out_dir)
-    generate_n_ccas_plots(n_results, args.ns, out_dir)
+    generate_ecuas_plots(n_results, args.ns, out_dir)
     print(f"Generated results in {out_dir}")
 
 

@@ -2,7 +2,7 @@
 Calibration metrics for evaluating confidence predictions.
 
 Uses torchmetrics built-ins where available (ECE, AUROC, Brier/MSE) and
-provides custom implementations for Cross Entropy, CCAS, and Gamma-CCAS.
+provides custom implementations for Cross Entropy, ECUAS, and Gamma-ECUAS.
 """
 
 import torch
@@ -189,9 +189,9 @@ class ConfidenceCrossEntropy(Metric):
         return shortcut_function
 
 
-class ConfidenceNCCAS(Metric):
+class ConfidenceECUAS(Metric):
     """
-    nCCAS (Confidence Cost Abstention Game) metric.
+    ECUAS (Expected Cost for Uncertainty-Augmented Systems) metric.
     """
 
     full_state_update = False
@@ -201,18 +201,16 @@ class ConfidenceNCCAS(Metric):
         self.n = n
         self.epsilon = epsilon
         if n == 0:
-            self.cost_fun = (
-                lambda q, correct_indicator: torch.where(
-                    condition=correct_indicator.bool(),
-                    input=1 - q,
-                    other=1 - q - torch.log(1 - q),
-                )
+            self.cost_fun = lambda q, correct_indicator: torch.where(
+                condition=correct_indicator.bool(),
+                input=1 - q,
+                other=1 - q - torch.log(1 - q),
             )
         elif n > 0:
             self.cost_fun = lambda q, correct_indicator: torch.where(
                 condition=correct_indicator.bool(),
                 input=(1 - q) ** (n + 1),
-                other=(1 - q) ** (n + 1) + (n + 1) / n * (1 - (1 - q) ** n)
+                other=(1 - q) ** (n + 1) + (n + 1) / n * (1 - (1 - q) ** n),
             )
         # if n == 0:
         #     self.cost_fun = (
@@ -243,7 +241,7 @@ class ConfidenceNCCAS(Metric):
 
     def compute(self) -> torch.Tensor:
         if self.count == 0:
-            raise ValueError("No samples to compute nCCAS.")
+            raise ValueError("No samples to compute ECUAS.")
         return self.sum_cost / self.count
 
     @classmethod
@@ -260,7 +258,7 @@ class ConfidenceNCCAS(Metric):
 
 class ConfidenceGammaCCAS(Metric):
     """
-    Gamma-nCCAS (Confidence Cost Abstention Game) metric.
+    Gamma-ECUAS (Expected Cost for Uncertainty-Augmented Systems) metric.
 
     Evaluates the expected cost of a selective prediction system that can
     abstain based on confidence scores. At a given gamma, the cost is:
@@ -340,7 +338,7 @@ class ConfidenceGammaCCAS(Metric):
         return shortcut_function
 
 
-class CCAS(ConfidenceNCCAS):
+class CCAS(ConfidenceECUAS):
     def __init__(self, *args, **kwargs):
         super().__init__(n=0, *args, **kwargs)
 

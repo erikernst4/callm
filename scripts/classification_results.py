@@ -29,10 +29,11 @@ TABLE_METRICS = [
 def generate_results_table(
     logs_dir: Path, table_metrics: list[str], output_filename: Path, seed: int = 42
 ) -> str:
-    
-    if (output_filename.with_suffix(".csv").exists()) and (
-        output_filename.with_suffix(".pdf").exists()
-    ) and (output_filename.with_suffix(".tex").exists()):
+    if (
+        (output_filename.with_suffix(".csv").exists())
+        and (output_filename.with_suffix(".pdf").exists())
+        and (output_filename.with_suffix(".tex").exists())
+    ):
         print(f"Results already exist at {output_filename}, skipping generation.")
         df = pd.read_csv(output_filename.with_suffix(".csv"), index_col=False)
         df = df.set_index(["dataset", "model", "proc"])
@@ -46,7 +47,9 @@ def generate_results_table(
 
         # Calibrate and add metric value for calibrated scores
         logpost_raw = torch.log_softmax(logits, dim=1)
-        calibrated_logprobs = calibration_with_crossval(logpost_raw, labels, seed=seed, calparams={'bias':True})
+        calibrated_logprobs = calibration_with_crossval(
+            logpost_raw, labels, seed=seed, calparams={"bias": True}
+        )
         calibrated_logprobs = torch.from_numpy(calibrated_logprobs).float()
 
         for metric in table_metrics:
@@ -85,8 +88,14 @@ def generate_results_table(
         .reset_index()
         .set_index("dataset_model")
     )
-    df = df.loc[DATASETS.keys()].reset_index(drop=True).set_index(["dataset", "model", "proc"])
-    df = df.groupby(level=['dataset', 'model'], sort=False, group_keys=False).apply(lambda g: g.sort_index(level='proc', ascending=False))
+    df = (
+        df.loc[DATASETS.keys()]
+        .reset_index(drop=True)
+        .set_index(["dataset", "model", "proc"])
+    )
+    df = df.groupby(level=["dataset", "model"], sort=False, group_keys=False).apply(
+        lambda g: g.sort_index(level="proc", ascending=False)
+    )
     df = df.loc[
         :, [unique_metrics[metric] for metric in table_metrics]
     ]  # Ensure columns are in the same order as table_metrics
@@ -94,8 +103,8 @@ def generate_results_table(
     df.reset_index().to_csv(output_filename.with_suffix(".csv"), index=False)
     return df
 
-def generate_latex(df: pd.DataFrame, output_filename: Path):
 
+def generate_latex(df: pd.DataFrame, output_filename: Path):
     latex_doc = df.to_latex(
         float_format="%.3f",
         multirow=True,
@@ -156,8 +165,6 @@ def generate_latex(df: pd.DataFrame, output_filename: Path):
             generated_pdf, output_filename.with_suffix(".pdf")
         )  # Move generated PDF to desired location
 
-    
-
 
 def load_scores(scores_dir: Path):
     logits = torch.from_numpy(np.load(scores_dir / "scores.npy")).float()
@@ -165,7 +172,7 @@ def load_scores(scores_dir: Path):
     return logits, labels
 
 
-def plot_nccas(
+def plot_ecuas(
     logs_dir: Path, output_path: Path, ns: list[int], normalize: bool = True
 ):
     fig, ax = plt.subplots(1, 1, figsize=(10, 5))
@@ -186,7 +193,7 @@ def plot_nccas(
         )
 
     ax.set_xlabel("n")
-    title = "n-NCCAS" if normalize else "n-CCAS"
+    title = "ECUAS" if normalize else "n-ECUAS"
     ax.set_ylabel(title)
     ax.set_title(title)
     ax.set_xticks(ns)
@@ -223,8 +230,8 @@ def plot_gamma_ccas(
         )
 
     ax.set_xlabel("γ")
-    ax.set_ylabel("γ-CCAS")
-    ax.set_title("γ-CCAS vs γ")
+    ax.set_ylabel("γ-ECUAS")
+    ax.set_title("γ-ECUAS vs γ")
     ax.grid()
     # set legend outside the plot
     ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
@@ -300,8 +307,8 @@ def main(gammas, ns, temperatures, table_metrics, logs_dir, output_dir, seed, ns
         logs_dir, table_metrics, output_dir / "classification_results", seed=seed
     )
     generate_latex(df, output_dir / "classification_results")
-    plot_nccas(
-        logs_dir, output_dir / "classification_nccas_plot.pdf", ns=ns, normalize=False
+    plot_ecuas(
+        logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False
     )
     plot_gamma_ccas(
         logs_dir,
@@ -328,14 +335,14 @@ if __name__ == "__main__":
         type=float,
         nargs="+",
         default=[0.0, 0.05, 0.1, 0.2, 0.5, 0.8, 0.9, 0.95, 1.0],
-        help="List of gamma values for γ-CCAS computation",
+        help="List of gamma values for γ-ECUAS computation",
     )
     parser.add_argument(
         "--ns",
         type=int,
         nargs="+",
         default=[0, 1, 2, 4, 8, 16, 32, 64, 128],
-        help="List of n values for n-CCAS computation",
+        help="List of n values for n-ECUAS computation",
     )
     parser.add_argument(
         "--temps",

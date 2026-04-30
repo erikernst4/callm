@@ -356,7 +356,7 @@ class TestCCAS:
         import pytest
 
         metric = CCAS()
-        with pytest.raises(ValueError, match="No samples to compute nCCAS."):
+        with pytest.raises(ValueError, match="No samples to compute ECUAS."):
             metric.compute()
 
     def test_nan_confidence_uses_fallback(self):
