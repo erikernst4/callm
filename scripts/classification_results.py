@@ -130,7 +130,7 @@ def load_scores(scores_dir: Path):
     return logits, labels
 
 
-def plot_nccas(
+def plot_ecuas(
     logs_dir: Path, output_path: Path, ns: list[int], normalize: bool = True
 ):
     fig, ax = plt.subplots(1, 1, figsize=(10, 5))
@@ -151,7 +151,7 @@ def plot_nccas(
         )
 
     ax.set_xlabel("n")
-    title = "n-NCCAS" if normalize else "n-CCAS"
+    title = "ECUAS" if normalize else "n-ECUAS"
     ax.set_ylabel(title)
     ax.set_title(title)
     ax.set_xticks(ns)
@@ -188,8 +188,8 @@ def plot_gamma_ccas(
         )
 
     ax.set_xlabel("γ")
-    ax.set_ylabel("γ-CCAS")
-    ax.set_title("γ-CCAS vs γ")
+    ax.set_ylabel("γ-ECUAS")
+    ax.set_title("γ-ECUAS vs γ")
     ax.grid()
     # set legend outside the plot
     ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
@@ -203,8 +203,8 @@ def main(gammas, ns, table_metrics, logs_dir, output_dir):
     generate_results_table(
         logs_dir, table_metrics, output_dir / "classification_results"
     )
-    plot_nccas(
-        logs_dir, output_dir / "classification_nccas_plot.pdf", ns=ns, normalize=False
+    plot_ecuas(
+        logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False
     )
     plot_gamma_ccas(
         logs_dir,
@@ -225,14 +225,14 @@ if __name__ == "__main__":
         type=float,
         nargs="+",
         default=[0.0, 0.05, 0.1, 0.2, 0.5, 0.8, 0.9, 0.95, 1.0],
-        help="List of gamma values for γ-CCAS computation",
+        help="List of gamma values for γ-ECUAS computation",
     )
     parser.add_argument(
         "--ns",
         type=int,
         nargs="+",
         default=[0, 1, 2, 4, 8, 16, 32, 64, 128],
-        help="List of n values for n-CCAS computation",
+        help="List of n values for n-ECUAS computation",
     )
     parser.add_argument(
         "--table-metrics",

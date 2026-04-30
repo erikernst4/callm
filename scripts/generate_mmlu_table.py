@@ -1,10 +1,10 @@
 """
-Generate LaTeX tables with calibration metrics and CCAS line plots from MMLU results.
+Generate LaTeX tables with calibration metrics and ECUAS line plots from MMLU results.
 
 Produces:
-  1. Standard metrics table: Acc, AUROC, ECE, BS, CE, CCAS (table_standard.tex)
-  2. CCAS Line Plots: One plot per LLM showing CCAS variants vs. Gamma
-  3. CCAS Line Plots: One plot per LLM showing CCAS vs n.
+  1. Standard metrics table: Acc, AUROC, ECE, BS, CE, ECUAS (table_standard.tex)
+  2. Gamma-ECUAS Line Plots: One plot per LLM showing γ-ECUAS variants vs. Gamma
+  3. ECUAS Line Plots: One plot per LLM showing ECUAS vs n.
 
 Usage:
     python generate_mmlu_table.py [--gammas 0.05 0.1 0.2 0.5 0.8 0.9 0.95] [--ns 0 1 2 4 8 16 32 64 128] [--output-dir .]
@@ -32,7 +32,8 @@ from callm.metrics import (
     ConfidenceCrossEntropy as CrossEntropy,
     ConfidenceAUCScore as AUCScore,
     ConfidenceGammaCCAS as GammaCCAS,
-    ConfidenceNCCAS as CCAS,
+    ConfidenceECUAS as CCAS,
+    ConfidenceAURC as AURC,
 )
 
 # ── Directory → (Method, LLM) mapping ──────────────────────────────────
@@ -154,10 +155,12 @@ def compute_standard_metrics(
     bs = BrierScore()
     ce = CrossEntropy()
     auc = AUCScore()
-    ccas = CCAS()
+    aurc = AURC()
+    ccas_0 = CCAS(n=0)
+    ccas_1 = CCAS(n=1)
 
     # NaN confidences are handled internally by the metrics (fallback to 0.5)
-    for metric in [ece, bs, ce, auc, ccas]:
+    for metric in [ece, bs, ce, auc, aurc, ccas_0, ccas_1]:
         metric.update(conf_t, corr_t)
 
     return {
@@ -166,11 +169,13 @@ def compute_standard_metrics(
         "ECE": ece.compute().item(),
         "BS": bs.compute().item(),
         "CE": ce.compute().item(),
-        "CCAS": ccas.compute().item(),
+        "AURC": aurc.compute().item(),
+        "ECUAS_0": ccas_0.compute().item(),
+        "ECUAS_1": ccas_1.compute().item(),
     }
 
 
-def compute_CCAS_metrics(
+def compute_ecuas_metrics(
     confidences: np.ndarray, correctness: np.ndarray, ns: list[int]
 ) -> dict[str, float]:
     conf_t = torch.tensor(confidences, dtype=torch.float32)
@@ -180,7 +185,7 @@ def compute_CCAS_metrics(
     for n in ns:
         metric = CCAS(n=n)
         metric.update(conf_t, corr_t)
-        results[f"CCAS(n={n})"] = metric.compute().item()
+        results[f"ECUAS(n={n})"] = metric.compute().item()
 
     return results
 
@@ -196,7 +201,7 @@ def compute_gamma_ccas_metrics(
     for gamma in gammas:
         metric = GammaCCAS(gamma=gamma)
         metric.update(conf_t, corr_t)
-        col_name = f"γ-CCAS({gamma})"
+        col_name = f"γ-ECUAS({gamma})"
         results[col_name] = metric.compute().item()
 
     return results
@@ -204,14 +209,16 @@ def compute_gamma_ccas_metrics(
 
 # ── Standard table layout ─────────────────────────────────────────────
 
-STANDARD_COLUMNS = ["Acc", "AUROC", "ECE", "BS", "CE", "CCAS"]
+STANDARD_COLUMNS = ["Acc", "AUROC", "ECE", "BS", "CE", "AURC", "ECUAS_0", "ECUAS_1"]
 STANDARD_DIRECTION = {
     "Acc": True,
     "AUROC": True,
     "ECE": False,
     "BS": False,
     "CE": False,
-    "CCAS": False,
+    "AURC": False,
+    "ECUAS_0": False,
+    "ECUAS_1": False,
 }
 STANDARD_LATEX_HEADER = {
     "Acc": r"\textbf{Acc}",
@@ -219,7 +226,9 @@ STANDARD_LATEX_HEADER = {
     "ECE": r"\textbf{ECE}",
     "BS": r"\textbf{BS}",
     "CE": r"\textbf{CE}",
-    "CCAS": r"\textbf{CCAS}",
+    "AURC": r"\textbf{AURC}",
+    "ECUAS_0": r"\textbf{ECUAS$_0$}",
+    "ECUAS_1": r"\textbf{ECUAS$_1$}",
 }
 
 
@@ -308,7 +317,7 @@ def generate_standard_table(results: dict[str, dict[str, dict[str, float]]]) -> 
     return "\n".join(lines)
 
 
-def generate_ccas_plots(results: dict, gammas: list[float], output_dir: Path):
+def generate_gamma_ecuas_plots(results: dict, gammas: list[float], output_dir: Path):
     plots_dir = output_dir / "plots"
     plots_dir.mkdir(exist_ok=True)
 
@@ -325,25 +334,26 @@ def generate_ccas_plots(results: dict, gammas: list[float], output_dir: Path):
 
             y_vals = []
             for gamma in gammas:
-                col_name = f"γ-CCAS({gamma})"
+                col_name = f"γ-ECUAS({gamma})"
                 y_vals.append(llm_methods[method].get(col_name, np.nan))
 
             plt.plot(gammas, y_vals, marker="o", label=method)
 
-        plt.title(f"γ-CCAS vs γ for {llm}")
+        plt.title(f"γ-ECUAS vs γ for {llm}")
         plt.xlabel("γ")
-        plt.ylabel("γ-CCAS")
+        plt.ylabel("γ-ECUAS")
         plt.legend()
         plt.grid(True)
 
         out_path = (
-            plots_dir / f"{llm.replace(' ', '_').replace('.', '_')}_ccas_plots.png"
+            plots_dir
+            / f"{llm.replace(' ', '_').replace('.', '_')}_gamma-ecuas_plots.png"
         )
         plt.savefig(out_path, bbox_inches="tight")
         plt.close()
 
 
-def generate_CCAS_plots(results: dict, ns: list[int], output_dir: Path):
+def generate_ecuas_plots(results: dict, ns: list[int], output_dir: Path):
     plots_dir = output_dir / "plots"
     plots_dir.mkdir(exist_ok=True)
 
@@ -360,21 +370,21 @@ def generate_CCAS_plots(results: dict, ns: list[int], output_dir: Path):
 
             y_vals = []
             for n in ns:
-                col_name = f"CCAS(n={n})"
+                col_name = f"ECUAS(n={n})"
                 y_vals.append(llm_methods[method].get(col_name, np.nan))
 
             plt.plot(ns, y_vals, marker="o", label=method)
 
-        plt.title(f"CCAS vs n for {llm}")
+        plt.title(f"ECUAS vs n for {llm}")
         plt.xlabel("n")
         plt.xscale("symlog", linthresh=1.0)
         plt.xticks(ns, labels=[str(n) for n in ns])
-        plt.ylabel("CCAS")
+        plt.ylabel("ECUAS")
         plt.legend()
         plt.grid(True)
 
         out_path = (
-            plots_dir / f"{llm.replace(' ', '_').replace('.', '_')}_CCAS_plots.png"
+            plots_dir / f"{llm.replace(' ', '_').replace('.', '_')}_ecuas_plots.png"
         )
         plt.savefig(out_path, bbox_inches="tight")
         plt.close()
@@ -389,10 +399,14 @@ def main():
         "--ns", type=int, nargs="+", default=[0, 1, 2, 4, 8, 16, 32, 64, 128]
     )
     parser.add_argument(
-        "--output-dir", type=str, default="/home/eernst/callm/lightning_logs/mmlu"
+        "--output-dir",
+        type=str,
+        default="/home/eernst/callm/lightning_logs/paper_results/mmlu",
     )
     parser.add_argument(
-        "--logs-dir", type=str, default="/home/eernst/callm/lightning_logs/mmlu"
+        "--logs-dir",
+        type=str,
+        default="/home/eernst/callm/lightning_logs/paper_results/mmlu",
     )
     args = parser.parse_args()
 
@@ -421,18 +435,18 @@ def main():
 
         std_metrics = compute_standard_metrics(confidences, correctness)
         g_metrics = compute_gamma_ccas_metrics(confidences, correctness, args.gammas)
-        CCAS_metrics = compute_CCAS_metrics(confidences, correctness, args.ns)
+        ECUAS_metrics = compute_ecuas_metrics(confidences, correctness, args.ns)
 
         results[llm][method].update(std_metrics)
         results[llm][method].update(g_metrics)
-        results[llm][method].update(CCAS_metrics)
+        results[llm][method].update(ECUAS_metrics)
 
     tex_table = generate_standard_table(results)
     with open(out_dir / "table_standard.tex", "w") as f:
         f.write(tex_table)
 
-    generate_ccas_plots(results, args.gammas, out_dir)
-    generate_CCAS_plots(results, args.ns, out_dir)
+    generate_gamma_ecuas_plots(results, args.gammas, out_dir)
+    generate_ecuas_plots(results, args.ns, out_dir)
     print(f"Generated results in {out_dir}")
 
 

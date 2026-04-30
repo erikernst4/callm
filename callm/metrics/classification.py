@@ -266,9 +266,9 @@ class ClassificationECE(Metric):
         return shortcut_function
 
 
-class ClassificationNCCAS(Metric):
+class ClassificationECUAS(Metric):
     """
-    n-CCAS (Confidence Cost Abstention Game) metric.
+    n-ECUAS (Expected Cost for Uncertainty-Augmented Systems) metric.
     """
 
     full_state_update = False
@@ -287,18 +287,17 @@ class ClassificationNCCAS(Metric):
         self.reduction = reduction
         self.epsilon = epsilon
         if n == 0:
-            self.cost_fun = (
-                lambda logq_e, correct_indicator: torch.where(
-                    condition=correct_indicator.bool(),
-                    input=1 - torch.exp(logq_e),
-                    other=1 - torch.exp(logq_e) - torch.log(1 - torch.exp(logq_e)),
-                )
+            self.cost_fun = lambda logq_e, correct_indicator: torch.where(
+                condition=correct_indicator.bool(),
+                input=1 - torch.exp(logq_e),
+                other=1 - torch.exp(logq_e) - torch.log(1 - torch.exp(logq_e)),
             )
         elif n > 0:
             self.cost_fun = lambda logq_e, correct_indicator: torch.where(
                 condition=correct_indicator.bool(),
                 input=(1 - torch.exp(logq_e)) ** (n + 1),
-                other=(1 - torch.exp(logq_e)) ** (n + 1) + (n + 1) / n * (1 - (1 - torch.exp(logq_e)) ** n)
+                other=(1 - torch.exp(logq_e)) ** (n + 1)
+                + (n + 1) / n * (1 - (1 - torch.exp(logq_e)) ** n),
             )
         else:
             raise ValueError("n must be non-negative.")
@@ -358,7 +357,7 @@ class ClassificationNCCAS(Metric):
 
 class ClassificationGammaCCAS(Metric):
     """
-    Gamma-CCAS (Confidence Cost Abstention Game) metric.
+    Gamma-ECUAS (Expected Cost for Uncertainty-Augmented Systems) metric.
 
     Evaluates the expected cost of a selective prediction system that can
     abstain based on confidence scores. At a given gamma, the cost is:

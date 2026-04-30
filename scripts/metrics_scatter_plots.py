@@ -9,7 +9,7 @@ from callm.metrics.classification import (
     ClassificationCrossEntropy,
     ClassificationBrierScore,
     ClassificationErrorRate,
-    ClassificationNCCAS,
+    ClassificationECUAS,
 )
 from callm.data.classification import DATASETS
 
@@ -47,17 +47,17 @@ CCAS_METRICS = OrderedDict(
         (
             "0-ccas",
             {
-                "cls": ClassificationNCCAS,
+                "cls": ClassificationECUAS,
                 "args": {"n": 0, "normalize": False},
-                "display": "n-NCCAS (n=0)",
+                "display": "ECUAS (n=0)",
             },
         ),
         (
             "1-ccas",
             {
-                "cls": ClassificationNCCAS,
+                "cls": ClassificationECUAS,
                 "args": {"n": 1, "normalize": False},
-                "display": "n-NCCAS (n=1)",
+                "display": "ECUAS (n=1)",
             },
         ),
     ]

@@ -7,7 +7,7 @@ from .confidences import (
     ExpectedCalibrationError,
     ConfidenceAUCScore,
     ConfidenceBrierScore,
-    ConfidenceNCCAS,
+    ConfidenceECUAS,
     ConfidenceCrossEntropy,
     ConfidenceErrorRate,
     ConfidenceGammaCCAS,
@@ -20,7 +20,7 @@ from .classification import (
     ClassificationCrossEntropy,
     ClassificationECE,
     ClassificationFPR95,
-    ClassificationNCCAS,
+    ClassificationECUAS,
     ClassificationGammaCCAS,
 )
 
@@ -81,8 +81,8 @@ METRICS = OrderedDict(
             "conf_n-ccas",
             {
                 "full_name": "Confidence n-CCAS",
-                "function": ConfidenceNCCAS.create_shortcut_function(),
-                "cls": ConfidenceNCCAS,
+                "function": ConfidenceECUAS.create_shortcut_function(),
+                "cls": ConfidenceECUAS,
                 "higher_is_better": False,
                 "display": None,
             },
@@ -214,10 +214,10 @@ METRICS = OrderedDict(
             "cls_n-ccas",
             {
                 "full_name": "Classification n-CCAS",
-                "function": ClassificationNCCAS.create_shortcut_function(
+                "function": ClassificationECUAS.create_shortcut_function(
                     normalize=False
                 ),
-                "cls": partial(ClassificationNCCAS, normalize=False),
+                "cls": partial(ClassificationECUAS, normalize=False),
                 "higher_is_better": False,
                 "display": None,
             },
@@ -226,10 +226,10 @@ METRICS = OrderedDict(
             "cls_norm_n-ccas",
             {
                 "full_name": "Classification Normalized n-CCAS",
-                "function": ClassificationNCCAS.create_shortcut_function(
+                "function": ClassificationECUAS.create_shortcut_function(
                     normalize=True
                 ),
-                "cls": partial(ClassificationNCCAS, normalize=True),
+                "cls": partial(ClassificationECUAS, normalize=True),
                 "higher_is_better": False,
                 "display": None,
             },
