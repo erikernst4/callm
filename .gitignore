@@ -220,3 +220,7 @@ lightning_logs/
 scores/
 outputs/
 data/
+
+# Remote
+scripts/pull_from_remote.sh
+scripts/push_to_remote.sh
