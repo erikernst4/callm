@@ -10,7 +10,6 @@ import tempfile
 import os
 import matplotlib.pyplot as plt
 from expected_cost.calibration import calibration_with_crossval
-from collections import OrderedDict
 
 # ── Standard table layout ─────────────────────────────────────────────
 
@@ -25,9 +24,6 @@ TABLE_METRICS = [
     "cls_norm_n-ccas_n=1",
     "cls_norm_n-ccas_n=128",
 ]
-
-# KEEP fisrt 3 first items from oredered dict DATASETS
-# DATASETS = OrderedDict(list(DATASETS.items())[:3])
 
 
 def generate_results_table(
@@ -236,7 +232,68 @@ def plot_gamma_ccas(
     plt.savefig(output_path, bbox_inches="tight", dpi=300)
 
 
-def main(gammas, ns, table_metrics, logs_dir, output_dir, seed):
+def plot_temperature_ccas(
+    logs_dir: Path, output_path: Path, temperatures: list[float], nseeds: int = 5
+):
+    from collections import OrderedDict
+    DATASETS2 = OrderedDict(list(DATASETS.items())[:10])  # Only use the first 10 datasets for this plot to avoid clutter
+    fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    ns = [0, 1]
+    for i, n in enumerate(ns):
+        for dataset in DATASETS2:
+            logits, labels = load_scores(logs_dir / dataset)
+            results = []
+            for temp in temperatures:
+                seed_results = []
+                for seed in range(nseeds):  # Average over multiple runs for stability
+                    if temp == 0:
+                        confidence = torch.max(logits, dim=1).values
+                        pred = torch.argmax(logits, dim=1)
+                    else:
+                        pred = torch.distributions.Categorical(logits=logits / temp).sample()
+                        probs = torch.softmax(logits / temp, dim=1)
+                        confidence = probs[torch.arange(probs.size(0)), pred]
+                    correctness = (pred == labels).float()
+                    metric_info = get_metric_from_id(f"conf_n-ccas_n={n}")
+                    seed_results.append(metric_info["function"](confidence, correctness))
+                results.append({
+                    "dataset": DATASETS2[dataset]["dataset"],
+                    "model": DATASETS2[dataset]["model"],
+                    "temp": temp,
+                    "median": np.median(seed_results),
+                    "q1": np.percentile(seed_results, 25),
+                    "q3": np.percentile(seed_results, 75),
+                })
+            df = pd.DataFrame(results)
+            ax[i].plot(
+                df["temp"],
+                df["median"],
+                # marker="o",
+                linestyle="-",
+                label=f"{DATASETS[dataset]['dataset']} - {DATASETS[dataset]['model']}",
+            )
+            ax[i].fill_between(df["temp"], df["q1"], df["q3"], alpha=0.2)
+
+    ax[0].set_ylabel("n-CCAS (n=0)")
+    # ax[0].set_yscale("log")
+    ax[0].grid()
+    ax[0].set_xscale("symlog", linthresh=0.25)
+    # ax[0].set_ylim(bottom=1e-1, top=5e0)
+    ax[1].set_xlabel("Temperature")
+    ax[1].set_ylabel("n-CCAS (n=1)")
+    # ax[1].set_yscale("log")
+    # ax[1].set_ylim(bottom=8e-2, top=2e0)
+    ax[1].set_xscale("symlog", linthresh=0.25)
+    ax[1].grid()
+
+    # set global legend outside the plot
+    handles, labels = ax[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, -0.1), ncol=4)
+    fig.tight_layout()
+    plt.savefig(output_path, bbox_inches="tight", dpi=300)
+
+
+def main(gammas, ns, temperatures, table_metrics, logs_dir, output_dir, seed, nseeds = 5):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = generate_results_table(
@@ -251,6 +308,12 @@ def main(gammas, ns, table_metrics, logs_dir, output_dir, seed):
         output_dir / "classification_gamma_ccas_plot.pdf",
         gammas=gammas,
         normalize=False,
+    )
+    plot_temperature_ccas(
+        logs_dir,
+        output_dir / "classification_temperature_ccas_plot.pdf",
+        temperatures=temperatures,
+        nseeds = nseeds,
     )
 
 
@@ -273,6 +336,13 @@ if __name__ == "__main__":
         nargs="+",
         default=[0, 1, 2, 4, 8, 16, 32, 64, 128],
         help="List of n values for n-CCAS computation",
+    )
+    parser.add_argument(
+        "--temps",
+        type=float,
+        nargs="+",
+        default=[0.0] + np.logspace(-2, 2, 20).tolist(),
+        help="List of temperature values for Temperature-CCAS computation",
     )
     parser.add_argument(
         "--table-metrics",
@@ -299,9 +369,15 @@ if __name__ == "__main__":
         default=42,
         help="Random seed for calibration (if applicable)",
     )
+    parser.add_argument(
+        "--nseeds",
+        type=int,
+        default=5,
+        help="Number of seeds to average over for temperature-CCAS stability",
+    )
     args = parser.parse_args()
 
     logs_dir = Path(args.logs_dir)
     output_dir = Path(args.output_dir)
 
-    main(args.gammas, args.ns, args.table_metrics, logs_dir, output_dir, args.seed)
+    main(args.gammas, args.ns, args.temps, args.table_metrics, logs_dir, output_dir, args.seed, args.nseeds)
