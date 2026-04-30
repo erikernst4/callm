@@ -7,6 +7,7 @@ from .confidences import (
     ConfidenceNCCAS,
     ConfidenceGammaCCAS,
     CCAS,
+    ConfidenceAURC,
 )
 from .classification import (
     ClassificationErrorRate,
@@ -35,4 +36,5 @@ __all__ = [
     "ClassificationNCCAS",
     "ClassificationGammaCCAS",
     "get_metric_from_id",
+    "ConfidenceAURC",
 ]
