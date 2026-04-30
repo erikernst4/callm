@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import os
 import matplotlib.pyplot as plt
+from expected_cost.calibration import calibration_with_crossval
 
 # ── Standard table layout ─────────────────────────────────────────────
 
@@ -24,14 +25,35 @@ TABLE_METRICS = [
     "cls_norm_n-ccas_n=128",
 ]
 
+# KEEP fisrt 3 first items from oredered dict DATASETS
+# DATASETS = OrderedDict(list(DATASETS.items())[:3])
+
 
 def generate_results_table(
-    logs_dir: Path, table_metrics: list[str], output_filename: Path
+    logs_dir: Path, table_metrics: list[str], output_filename: Path, seed: int = 42
 ) -> str:
+    if (
+        (output_filename.with_suffix(".csv").exists())
+        and (output_filename.with_suffix(".pdf").exists())
+        and (output_filename.with_suffix(".tex").exists())
+    ):
+        print(f"Results already exist at {output_filename}, skipping generation.")
+        df = pd.read_csv(output_filename.with_suffix(".csv"), index_col=False)
+        df = df.set_index(["dataset", "model", "proc"])
+        return df
+
     results = []
     unique_metrics = {}
     for dataset in DATASETS:
+        print("Processing dataset:", dataset)
         logits, labels = load_scores(logs_dir / dataset)
+
+        # Calibrate and add metric value for calibrated scores
+        logpost_raw = torch.log_softmax(logits, dim=1)
+        calibrated_logprobs = calibration_with_crossval(
+            logpost_raw, labels, seed=seed, calparams={"bias": True}
+        )
+        calibrated_logprobs = torch.from_numpy(calibrated_logprobs).float()
 
         for metric in table_metrics:
             metric_info = get_metric_from_id(metric)
@@ -40,8 +62,20 @@ def generate_results_table(
                     "dataset_model": dataset,
                     "dataset": DATASETS[dataset]["dataset"],
                     "model": DATASETS[dataset]["model"],
+                    "proc": "raw",
                     "metric": metric_info["display"],
                     "value": metric_info["function"](logits, labels),
+                }
+            )
+            # Append calibrated results
+            results.append(
+                {
+                    "dataset_model": dataset,
+                    "dataset": DATASETS[dataset]["dataset"],
+                    "model": DATASETS[dataset]["model"],
+                    "proc": "cal",
+                    "metric": metric_info["display"],
+                    "value": metric_info["function"](calibrated_logprobs, labels),
                 }
             )
             unique_metrics[metric] = metric_info["display"]
@@ -49,7 +83,7 @@ def generate_results_table(
     df = (
         pd.DataFrame(results)
         .pivot_table(
-            index=["dataset_model", "dataset", "model"],
+            index=["dataset_model", "dataset", "model", "proc"],
             columns="metric",
             values="value",
         )
@@ -57,17 +91,28 @@ def generate_results_table(
         .reset_index()
         .set_index("dataset_model")
     )
-    df = df.loc[DATASETS.keys()].reset_index(drop=True).set_index(["dataset", "model"])
+    df = (
+        df.loc[DATASETS.keys()]
+        .reset_index(drop=True)
+        .set_index(["dataset", "model", "proc"])
+    )
+    df = df.groupby(level=["dataset", "model"], sort=False, group_keys=False).apply(
+        lambda g: g.sort_index(level="proc", ascending=False)
+    )
     df = df.loc[
         :, [unique_metrics[metric] for metric in table_metrics]
     ]  # Ensure columns are in the same order as table_metrics
     df.columns = [r"\textbf{" + col + r"}" for col in df.columns]
+    df.reset_index().to_csv(output_filename.with_suffix(".csv"), index=False)
+    return df
 
+
+def generate_latex(df: pd.DataFrame, output_filename: Path):
     latex_doc = df.to_latex(
         float_format="%.3f",
         multirow=True,
         index_names=False,
-        column_format="ll" + "c" * df.shape[1],
+        column_format="lll" + "c" * df.shape[1],
         escape=False,
     )
 
@@ -90,6 +135,10 @@ def generate_results_table(
         f"{latex_doc}"
         r"\end{document}"
     )
+
+    # Write the LaTeX code for the table (without standalone document) to the output directory
+    with open(output_filename.with_suffix(".tex"), "w") as f:
+        f.write(tex_doc)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tex_path = os.path.join(tmpdir, "table.tex")
@@ -118,10 +167,6 @@ def generate_results_table(
         os.replace(
             generated_pdf, output_filename.with_suffix(".pdf")
         )  # Move generated PDF to desired location
-
-    # Write the LaTeX code for the table (without standalone document) to the output directory
-    with open(output_filename.with_suffix(".tex"), "w") as f:
-        f.write(tex_doc)
 
 
 def load_scores(scores_dir: Path):
@@ -197,12 +242,13 @@ def plot_gamma_ccas(
     plt.savefig(output_path, bbox_inches="tight", dpi=300)
 
 
-def main(gammas, ns, table_metrics, logs_dir, output_dir):
+def main(gammas, ns, table_metrics, logs_dir, output_dir, seed):
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    generate_results_table(
-        logs_dir, table_metrics, output_dir / "classification_results"
+    df = generate_results_table(
+        logs_dir, table_metrics, output_dir / "classification_results", seed=seed
     )
+    generate_latex(df, output_dir / "classification_results")
     plot_ecuas(
         logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False
     )
@@ -253,9 +299,15 @@ if __name__ == "__main__":
         default="outputs",
         help="Directory to save the output files",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for calibration (if applicable)",
+    )
     args = parser.parse_args()
 
     logs_dir = Path(args.logs_dir)
     output_dir = Path(args.output_dir)
 
-    main(args.gammas, args.ns, args.table_metrics, logs_dir, output_dir)
+    main(args.gammas, args.ns, args.table_metrics, logs_dir, output_dir, args.seed)
