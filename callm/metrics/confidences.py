@@ -202,14 +202,28 @@ class ConfidenceNCCAS(Metric):
         self.epsilon = epsilon
         if n == 0:
             self.cost_fun = (
-                lambda q, correct_indicator: 1
-                - q
-                - (1 - correct_indicator) * torch.log(1 - q)
+                lambda q, correct_indicator: torch.where(
+                    condition=correct_indicator.bool(),
+                    input=1 - q,
+                    other=1 - q - torch.log(1 - q),
+                )
             )
         elif n > 0:
-            self.cost_fun = lambda q, correct_indicator: (1 - q) ** (n + 1) + (
-                n + 1
-            ) / n * (1 - (1 - q) ** n) * (1 - correct_indicator)
+            self.cost_fun = lambda q, correct_indicator: torch.where(
+                condition=correct_indicator.bool(),
+                input=(1 - q) ** (n + 1),
+                other=(1 - q) ** (n + 1) + (n + 1) / n * (1 - (1 - q) ** n)
+            )
+        # if n == 0:
+        #     self.cost_fun = (
+        #         lambda q, correct_indicator: 1
+        #         - q
+        #         - (1 - correct_indicator) * torch.log(1 - q)
+        #     )
+        # elif n > 0:
+        #     self.cost_fun = lambda q, correct_indicator: (1 - q) ** (n + 1) + (
+        #         n + 1
+        #     ) / n * (1 - (1 - q) ** n) * (1 - correct_indicator)
         else:
             raise ValueError("n must be non-negative.")
         self.add_state("sum_cost", default=torch.tensor(0.0), dist_reduce_fx="sum")

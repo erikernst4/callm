@@ -288,15 +288,17 @@ class ClassificationNCCAS(Metric):
         self.epsilon = epsilon
         if n == 0:
             self.cost_fun = (
-                lambda logq_e, correct_indicator: 1
-                - torch.exp(logq_e)
-                - (1 - correct_indicator) * torch.log(1 - torch.exp(logq_e))
+                lambda logq_e, correct_indicator: torch.where(
+                    condition=correct_indicator.bool(),
+                    input=1 - torch.exp(logq_e),
+                    other=1 - torch.exp(logq_e) - torch.log(1 - torch.exp(logq_e)),
+                )
             )
         elif n > 0:
-            self.cost_fun = lambda logq_e, correct_indicator: (
-                1 - torch.exp(logq_e)
-            ) ** (n + 1) + (n + 1) / n * (1 - (1 - torch.exp(logq_e)) ** n) * (
-                1 - correct_indicator
+            self.cost_fun = lambda logq_e, correct_indicator: torch.where(
+                condition=correct_indicator.bool(),
+                input=(1 - torch.exp(logq_e)) ** (n + 1),
+                other=(1 - torch.exp(logq_e)) ** (n + 1) + (n + 1) / n * (1 - (1 - torch.exp(logq_e)) ** n)
             )
         else:
             raise ValueError("n must be non-negative.")
