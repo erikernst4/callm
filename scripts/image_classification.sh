@@ -33,3 +33,5 @@ for dataset in "${DATASETS[@]}"; do
         done
     done
 done
+
+--dataset "cifar10" --model "resnet18" --max-epochs 1 --batch-size 64 --learning-rate 0.0001 --save-scores-every-n-steps 32 --log-train-loss-every-n-steps 16 --loss $loss

@@ -9,6 +9,7 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+from torch_uncertainty.datamodules import CIFAR10DataModule, CIFAR100DataModule
 
 dataset2display = {
     "cifar10": "CIFAR-10",
@@ -45,31 +46,20 @@ def load_dataset(dataset, batch_size):
     # Select dataset
     if dataset.lower() == "cifar10":
         num_classes = 10
-        DatasetClass = torchvision.datasets.CIFAR10
+        datamodule = CIFAR10DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_ood=True)
     elif dataset.lower() == "cifar100":
         num_classes = 100
-        DatasetClass = torchvision.datasets.CIFAR100
+        datamodule = CIFAR100DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_ood=True)
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
+    
+    datamodule.prepare_data()
+    datamodule.setup(stage="fit")
+    train_loader = datamodule.train_dataloader()
+    datamodule.setup(stage="test")
+    id_test_loader, ood_test_loader = datamodule.test_dataloader()
 
-    # Standard transforms
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        ]
-    )
-
-    train_set = DatasetClass(
-        root="./data", train=True, download=True, transform=transform
-    )
-    val_set = DatasetClass(
-        root="./data", train=False, download=True, transform=transform
-    )
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
-
-    return train_loader, val_loader, num_classes
+    return train_loader, id_test_loader, ood_test_loader, num_classes
 
 
 def load_model(model, num_classes):
@@ -86,23 +76,24 @@ def load_model(model, num_classes):
         raise ValueError(f"Unsupported model: {model}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     net = net.to(device)
     return net, device
 
 
-def _compute_val_scores(net, device, val_loader):
+def _compute_test_scores(net, device, test_loader):
     net.eval()
-    val_logits = []
+    test_logits = []
     with torch.no_grad():
-        for val_inputs, _ in val_loader:
-            val_inputs = val_inputs.to(device)
-            logits = net(val_inputs)
-            val_logits.append(logits.cpu())
-    val_logits = torch.cat(val_logits, dim=0)
+        for test_inputs, _ in test_loader:
+            test_inputs = test_inputs.to(device)
+            logits = net(test_inputs)
+            test_logits.append(logits.cpu())
+    test_logits = torch.cat(test_logits, dim=0)
     net.train()
 
     # Save scores to disk
-    return pd.DataFrame(val_logits.numpy())
+    return pd.DataFrame(test_logits.numpy())
 
 
 def _train_and_inference(
@@ -117,10 +108,13 @@ def _train_and_inference(
     scores_dir: Path,
 ):
     # Load dataset and save validation labels
-    train_loader, val_loader, num_classes = load_dataset(dataset, batch_size)
-    val_labels = torch.cat([item[1] for item in val_loader], dim=0)
-    val_labels_df = pd.DataFrame(val_labels.numpy(), columns=["label"])
-    val_labels_df.to_csv(scores_dir / "labels.csv", index=False, header=False)
+    train_loader, id_test_loader, ood_test_loader, num_classes = load_dataset(dataset, batch_size)
+    id_test_labels = torch.cat([item[1] for item in id_test_loader], dim=0)
+    id_test_labels_df = pd.DataFrame(id_test_labels.numpy(), columns=["label"])
+    id_test_labels_df.to_csv(scores_dir / "id_test_labels.csv", index=False, header=False)
+    ood_test_labels = torch.cat([item[1] for item in ood_test_loader], dim=0)
+    ood_test_labels_df = pd.DataFrame(ood_test_labels.numpy(), columns=["label"])
+    ood_test_labels_df.to_csv(scores_dir / "ood_test_labels.csv", index=False, header=False)
 
     # Load model
     net, device = load_model(model, num_classes=num_classes)
@@ -131,16 +125,25 @@ def _train_and_inference(
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
 
     # Train loop
-    all_scores = {}
+    id_scores = {}
+    ood_scores = {}
     train_step = 0
     net.train()
     for epoch in range(max_epochs):
         for inputs, targets in train_loader:
+            if train_step >= 40:
+                break
             # Save validation scores every n steps
             if train_step % save_scores_every_n_steps == 0:
-                all_scores[train_step] = _compute_val_scores(net, device, val_loader)
-                all_scores[train_step].to_csv(
-                    scores_dir / f"scores_step={train_step}.csv",
+                id_scores[train_step] = _compute_test_scores(net, device, id_test_loader)
+                id_scores[train_step].to_csv(
+                    scores_dir / f"id_scores_step={train_step}.csv",
+                    index=False,
+                    header=False,
+                )
+                ood_scores[train_step] = _compute_test_scores(net, device, ood_test_loader)
+                ood_scores[train_step].to_csv(
+                    scores_dir / f"ood_scores_step={train_step}.csv",
                     index=False,
                     header=False,
                 )
@@ -156,30 +159,44 @@ def _train_and_inference(
             # Log training loss every n steps
             if train_step % log_train_loss_every_n_steps == 0:
                 print(
-                    f"Epoch: {epoch}, Train step: {train_step}, Loss: {train_loss.item():.4f}"
+                    f"Epoch: {epoch}, Train step: {train_step}, Train Loss: {train_loss.item():.4f}"
                 )
 
             # Update training step
             train_step += 1
 
     # Add final validation scores after training is complete
-    all_scores[train_step] = _compute_val_scores(net, device, val_loader)
-    all_scores[train_step].to_csv(
-        scores_dir / f"scores_step={train_step}.csv", index=False, header=False
-    )
+    if train_step not in id_scores:
+        id_scores[train_step] = _compute_test_scores(net, device, id_test_loader)
+        id_scores[train_step].to_csv(
+            scores_dir / f"id_scores_step={train_step}.csv", index=False, header=False
+        )
+    if train_step not in ood_scores:
+        ood_scores[train_step] = _compute_test_scores(net, device, ood_test_loader)
+        ood_scores[train_step].to_csv(
+            scores_dir / f"ood_scores_step={train_step}.csv", index=False, header=False
+        )
 
     # Save last step results
-    last_train_step_scores = {train_step: all_scores[train_step]}
-    results = compute_metrics(last_train_step_scores, val_labels_df, metrics=[loss])
-    results = results.reset_index(drop=True)
-    results = (
-        results.T.reset_index()
+    last_train_step_id_scores = {train_step: id_scores[train_step]}
+    id_results = compute_metrics(last_train_step_id_scores, id_test_labels_df, metrics=[loss])
+    id_results = id_results.reset_index(drop=True)
+    id_results = (
+        id_results.T.reset_index()
         .rename(columns={"index": "metric", 0: "value"})
         .set_index("metric")
     )
-    results.to_csv(scores_dir / "results_last_step.csv", index=False)
+    id_results.to_csv(scores_dir / "results_id_last_step.csv", index=False)
+    ood_results = compute_metrics({train_step: ood_scores[train_step]}, ood_test_labels_df, metrics=[loss])
+    ood_results = ood_results.reset_index(drop=True)
+    ood_results = (
+        ood_results.T.reset_index()
+        .rename(columns={"index": "metric", 0: "value"})
+        .set_index("metric")
+    )
+    ood_results.to_csv(scores_dir / "results_ood_last_step.csv", index=False)
 
-    return all_scores, val_labels_df
+    return id_scores, id_test_labels_df, ood_scores, ood_test_labels_df
 
 
 def train_and_inference(
@@ -196,17 +213,25 @@ def train_and_inference(
     scores_dir = logs_dir / f"me={max_epochs}_bs={batch_size}_lr={learning_rate}"
     scores_dir.mkdir(parents=True, exist_ok=True)
 
-    if (scores_dir / "results_last_step.csv").exists():
+    if (scores_dir / "results_id_last_step.csv").exists() and (scores_dir / "results_ood_last_step.csv").exists():
         print(f"Scores already exist at {scores_dir}. Skipping training.")
-        all_scores = {
+        id_scores = {
             int(scores_path.stem.split("step=")[-1]): pd.read_csv(
                 scores_path, index_col=None, header=None
             )
-            for scores_path in scores_dir.glob("scores_step=*.csv")
+            for scores_path in scores_dir.glob("id_scores_step=*.csv")
         }
-        labels_df = pd.read_csv(scores_dir / "labels.csv", index_col=None, header=None)
+        id_labels_df = pd.read_csv(scores_dir / "id_test_labels.csv", index_col=None, header=None)
+        
+        ood_scores = {
+            int(scores_path.stem.split("step=")[-1]): pd.read_csv(
+                scores_path, index_col=None, header=None
+            )
+            for scores_path in scores_dir.glob("ood_scores_step=*.csv")
+        }
+        ood_labels_df = pd.read_csv(scores_dir / "ood_test_labels.csv", index_col=None, header=None)
 
-        return all_scores, labels_df
+        return id_scores, id_labels_df, ood_scores, ood_labels_df
 
     save_yaml(
         {
@@ -221,7 +246,7 @@ def train_and_inference(
         logs_dir / "config.yaml",
     )
 
-    all_scores, labels_df = _train_and_inference(
+    id_scores, id_labels_df, ood_scores, ood_labels_df = _train_and_inference(
         dataset=dataset,
         model=model,
         max_epochs=max_epochs,
@@ -233,7 +258,7 @@ def train_and_inference(
         scores_dir=scores_dir,
     )
 
-    return all_scores, labels_df
+    return id_scores, id_labels_df, ood_scores, ood_labels_df
 
 
 def compute_metrics(scores, labels, metrics):
@@ -258,22 +283,32 @@ def compute_metrics(scores, labels, metrics):
     return results
 
 
-def plot_results(results, loss, dataset, model, output_dir: Path):
-    steps = results.index.values
-    fig, ax = plt.subplots()
-    for metric in results.columns:
-        metric_results = results.loc[:, metric].values
-        ax.plot(steps, metric_results, label=metric)
+def plot_results(id_results, ood_results, loss, dataset, model, output_dir: Path):
+    steps = id_results.index.values
+    fig, ax = plt.subplots(1,2, figsize=(12, 5))
+    for metric in id_results.columns:
+        metric_results = id_results.loc[:, metric].values
+        ax[0].plot(steps, metric_results, label=metric)
+    for metric in ood_results.columns:
+        metric_results = ood_results.loc[:, metric].values
+        ax[1].plot(steps, metric_results, label=metric)
     loss_display = get_metric_from_id(loss)["display"]
     dataset_display = dataset2display[dataset]
     model_display = model2display[model]
-    ax.set_title(
-        f"Validation curves when trained with {loss_display}\nDataset: {dataset_display}, Model: {model_display}"
+    ax[0].set_title(
+        f"ID Test curves when trained with {loss_display}\nDataset: {dataset_display}, Model: {model_display}"
     )
-    ax.set_xlabel("Training Step")
-    ax.set_ylabel("Metric Value")
-    ax.grid()
-    ax.legend()
+    ax[0].set_xlabel("Training Step")
+    ax[0].set_ylabel("Metric Value")
+    ax[0].grid()
+    ax[0].legend()
+    ax[1].set_title(
+        f"OOD Test curves when trained with {loss_display}\nDataset: {dataset_display}, Model: {model_display}"
+    )
+    ax[1].set_xlabel("Training Step")
+    ax[1].set_ylabel("Metric Value")
+    ax[1].grid()
+    ax[1].legend()
     fig.savefig(output_dir / "training.pdf", bbox_inches="tight", dpi=300)
     plt.close(fig)
 
@@ -297,7 +332,7 @@ def main(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Train a model on a dataset and save the scores during training
-    scores, labels = train_and_inference(
+    id_scores, id_labels_df, ood_scores, ood_labels_df = train_and_inference(
         dataset=dataset,
         model=model,
         max_epochs=max_epochs,
@@ -310,11 +345,11 @@ def main(
     )
 
     # Compute evaluation metrics from the saved scores and labels
-    results = compute_metrics(scores, labels, eval_metrics)
+    id_results = compute_metrics(id_scores, id_labels_df, eval_metrics)
+    ood_results = compute_metrics(ood_scores, ood_labels_df, eval_metrics)
 
     # Plot the results
-    plot_results(results, loss, dataset, model, output_dir)
-
+    plot_results(id_results, ood_results, loss, dataset, model, output_dir)
 
 if __name__ == "__main__":
     import argparse
