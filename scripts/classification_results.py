@@ -249,17 +249,23 @@ def plot_temperature_ccas(
     for i, n in enumerate(ns):
         for dataset in DATASETS2:
             logits, labels = load_scores(logs_dir / dataset)
+            calibrated_logprobs = calibration_with_crossval(
+                torch.log_softmax(logits, dim=1),
+                labels,
+                calparams={"bias": True},
+                seed=nseeds,
+            )
+            calibrated_logprobs = torch.from_numpy(calibrated_logprobs).float()
             results = []
             for temp in temperatures:
                 seed_results = []
                 for seed in range(nseeds):  # Average over multiple runs for stability
                     if temp == 0:
-                        confidence = torch.max(logits, dim=1).values
-                        pred = torch.argmax(logits, dim=1)
+                        pred = torch.argmax(calibrated_logprobs, dim=1)
                     else:
-                        pred = torch.distributions.Categorical(logits=logits / temp).sample()
-                        probs = torch.softmax(logits / temp, dim=1)
-                        confidence = probs[torch.arange(probs.size(0)), pred]
+                        pred = torch.distributions.Categorical(logits=calibrated_logprobs / temp).sample()
+                    probs = torch.softmax(calibrated_logprobs, dim=1)
+                    confidence = probs[torch.arange(probs.size(0)), pred]
                     correctness = (pred == labels).float()
                     metric_info = get_metric_from_id(f"conf_n-ccas_n={n}")
                     seed_results.append(metric_info["function"](confidence, correctness))
@@ -306,7 +312,7 @@ def main(gammas, ns, temperatures, table_metrics, logs_dir, output_dir, seed, ns
     df = generate_results_table(
         logs_dir, table_metrics, output_dir / "classification_results", seed=seed
     )
-    generate_latex(df, output_dir / "classification_results")
+    # generate_latex(df, output_dir / "classification_results")
     plot_ecuas(
         logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False
     )
