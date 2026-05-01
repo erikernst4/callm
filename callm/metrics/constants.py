@@ -244,7 +244,7 @@ METRICS = OrderedDict(
                 ),
                 "cls": partial(ClassificationLogLog, normalize=False),
                 "higher_is_better": False,
-                "display": None,
+                "display": "LogLog",
             },
         ),
         (
@@ -256,7 +256,7 @@ METRICS = OrderedDict(
                 ),
                 "cls": partial(ClassificationLogLog, normalize=True),
                 "higher_is_better": False,
-                "display": None,
+                "display": "NLogLog",
             },
         ),
         (

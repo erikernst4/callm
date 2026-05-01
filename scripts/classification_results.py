@@ -244,7 +244,7 @@ def plot_temperature_ccas(
 ):
     from collections import OrderedDict
     DATASETS2 = OrderedDict(list(DATASETS.items())[:10])  # Only use the first 10 datasets for this plot to avoid clutter
-    fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    fig, ax = plt.subplots(1, 2, figsize=(10, 6), sharex=True, sharey=True)
     ns = [0, 1]
     for i, n in enumerate(ns):
         for dataset in DATASETS2:
@@ -290,13 +290,13 @@ def plot_temperature_ccas(
     ax[0].set_ylabel("n-CCAS (n=0)")
     # ax[0].set_yscale("log")
     ax[0].grid()
-    ax[0].set_xscale("symlog", linthresh=0.25)
+    # ax[0].set_xscale("symlog", linthresh=0.25)
     # ax[0].set_ylim(bottom=1e-1, top=5e0)
     ax[1].set_xlabel("Temperature")
     ax[1].set_ylabel("n-CCAS (n=1)")
     # ax[1].set_yscale("log")
     # ax[1].set_ylim(bottom=8e-2, top=2e0)
-    ax[1].set_xscale("symlog", linthresh=0.25)
+    # ax[1].set_xscale("symlog", linthresh=0.25)
     ax[1].grid()
 
     # set global legend outside the plot
@@ -354,7 +354,7 @@ if __name__ == "__main__":
         "--temps",
         type=float,
         nargs="+",
-        default=[0.0] + np.logspace(-2, 2, 20).tolist(),
+        default=[0.0, 0.1, 0.5, 1.0, 1.25, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0],
         help="List of temperature values for Temperature-CCAS computation",
     )
     parser.add_argument(
