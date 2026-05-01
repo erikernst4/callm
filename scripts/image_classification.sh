@@ -21,6 +21,7 @@ MODELS=(
 for dataset in "${DATASETS[@]}"; do
     for model in "${MODELS[@]}"; do
         for loss in "${TRAIN_LOSSES[@]}"; do
+            echo "Running image classification with dataset: $dataset, model: $model, loss: $loss"
             python scripts/image_classification.py \
                 --dataset $dataset \
                 --model $model \

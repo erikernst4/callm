@@ -76,7 +76,6 @@ def load_model(model, num_classes):
         raise ValueError(f"Unsupported model: {model}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
     net = net.to(device)
     return net, device
 
@@ -344,9 +343,9 @@ def main(
 
     # Compute evaluation metrics from the saved scores and labels
     id_results = compute_metrics(id_scores, id_labels_df, eval_metrics)
-    id_results.to_csv(logs_dir / "results_id.csv", index=True)
+    id_results.to_csv(output_dir / "results_id.csv", index=True)
     ood_results = compute_metrics(ood_scores, ood_labels_df, eval_metrics)
-    ood_results.to_csv(logs_dir / "results_ood.csv", index=True)
+    ood_results.to_csv(output_dir / "results_ood.csv", index=True)
 
     # Plot the results
     plot_results(id_results, ood_results, loss, dataset, model, output_dir)
