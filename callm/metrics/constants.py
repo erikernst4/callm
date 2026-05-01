@@ -21,6 +21,7 @@ from .classification import (
     ClassificationECE,
     ClassificationFPR95,
     ClassificationECUAS,
+    ClassificationLogLog,
     ClassificationGammaCCAS,
 )
 
@@ -230,6 +231,30 @@ METRICS = OrderedDict(
                     normalize=True
                 ),
                 "cls": partial(ClassificationECUAS, normalize=True),
+                "higher_is_better": False,
+                "display": None,
+            },
+        ),
+        (
+            "cls_loglog",
+            {
+                "full_name": "Classification LogLog",
+                "function": ClassificationLogLog.create_shortcut_function(
+                    normalize=False
+                ),
+                "cls": partial(ClassificationLogLog, normalize=False),
+                "higher_is_better": False,
+                "display": None,
+            },
+        ),
+        (
+            "cls_norm_loglog",
+            {
+                "full_name": "Classification Normalized LogLog",
+                "function": ClassificationLogLog.create_shortcut_function(
+                    normalize=True
+                ),
+                "cls": partial(ClassificationLogLog, normalize=True),
                 "higher_is_better": False,
                 "display": None,
             },

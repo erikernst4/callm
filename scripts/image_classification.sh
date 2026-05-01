@@ -1,7 +1,7 @@
 
 TRAIN_LOSSES=(
     "cls_cross_entropy"
-    "cls_brier"
+    "cls_loglog"
     "cls_n-ccas_n=0"
     "cls_n-ccas_n=1"
 )
@@ -14,7 +14,6 @@ DATASETS=(
 MODELS=(
     "resnet18"
     "vgg16"
-    "vgg19"
     "densenet121"
 )
 

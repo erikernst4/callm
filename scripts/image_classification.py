@@ -19,7 +19,6 @@ dataset2display = {
 model2display = {
     "resnet18": "ResNet-18",
     "vgg16": "VGG-16",
-    "vgg19": "VGG-19",
     "densenet121": "DenseNet-121",
 }
 
@@ -31,6 +30,7 @@ EVAL_METRICS = [
     # "cls_auc",
     # "cls_aurc",
     # "cls_ece_nbins=10",
+    "cls_norm_loglog",
     "cls_norm_n-ccas_n=0",
     "cls_norm_n-ccas_n=1",
 ]

@@ -354,6 +354,75 @@ class ClassificationECUAS(Metric):
 
         return shortcut_function
 
+class ClassificationLogLog(Metric):
+    """
+    n-ECUAS (Expected Cost for Uncertainty-Augmented Systems) metric.
+    """
+
+    full_state_update = False
+
+    def __init__(
+        self,
+        normalize: bool = True,
+        reduction: str = "mean",
+        epsilon: float = 1e-7,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.normalize = normalize
+        self.reduction = reduction
+        self.epsilon = epsilon
+        self.add_state("all_logits", default=[], dist_reduce_fx="cat")
+        self.add_state("all_labels", default=[], dist_reduce_fx="cat")
+
+    def update(self, logits: torch.Tensor, labels: torch.Tensor) -> None:
+        if torch.isnan(logits).any() or torch.isnan(labels).any():
+            raise ValueError("NaN values found in input tensors.")
+        if logits.ndim != 2 or labels.ndim != 1:
+            raise ValueError("Logits must be 2D and labels must be 1D.")
+        self.all_logits.append(logits.float())
+        self.all_labels.append(labels.long())
+
+    def compute(self) -> torch.Tensor:
+        if not self.all_logits:
+            raise ValueError("No data to compute metric.")
+        logprobs = torch.log_softmax(torch.cat(self.all_logits), dim=1)
+        labels = torch.cat(self.all_labels)
+        N, K = logprobs.size()
+        entropy = -torch.sum(torch.exp(logprobs) * logprobs, dim=1)
+        cost = entropy - logprobs[torch.arange(N), labels.long()] * torch.log(torch.log(torch.tensor(K)) / entropy)
+        cost = self._reduce(cost)
+        if self.normalize:
+            priors = torch.bincount(
+                labels.long(), minlength=K
+            ) / N
+            prior_entropy = -torch.sum(priors * torch.log(priors))
+            prior_cost = prior_entropy - torch.log(priors[labels.long()]) * torch.log(torch.log(torch.tensor(K)) / prior_entropy)
+            prior_cost = self._reduce(prior_cost)
+            cost = cost / prior_cost
+        return cost
+
+    def _reduce(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.reduction == "mean":
+            return tensor.mean()
+        elif self.reduction == "sum":
+            return tensor.sum()
+        elif self.reduction == "none":
+            return tensor
+        else:
+            raise ValueError(f"Invalid reduction: {self.reduction}")
+
+    @classmethod
+    def create_shortcut_function(cls, normalize: bool = True):
+        def shortcut_function(
+            logits: torch.Tensor, labels: torch.Tensor
+        ) -> torch.Tensor:
+            metric = cls(normalize=normalize)
+            metric.update(logits, labels)
+            return metric.compute().item()
+
+        return shortcut_function
+
 
 class ClassificationGammaCCAS(Metric):
     """
