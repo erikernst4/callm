@@ -24,14 +24,12 @@ for dataset in "${DATASETS[@]}"; do
             python scripts/image_classification.py \
                 --dataset $dataset \
                 --model $model \
-                --max-epochs 4 \
+                --max-epochs 6 \
                 --batch-size 64 \
-                --learning-rate 0.001 \
+                --learning-rate 0.0001 \
                 --save-scores-every-n-steps 32 \
                 --log-train-loss-every-n-steps 16 \
                 --loss $loss
         done
     done
 done
-
---dataset "cifar10" --model "resnet18" --max-epochs 1 --batch-size 64 --learning-rate 0.0001 --save-scores-every-n-steps 32 --log-train-loss-every-n-steps 16 --loss $loss

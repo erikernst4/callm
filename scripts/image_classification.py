@@ -131,8 +131,6 @@ def _train_and_inference(
     net.train()
     for epoch in range(max_epochs):
         for inputs, targets in train_loader:
-            if train_step >= 40:
-                break
             # Save validation scores every n steps
             if train_step % save_scores_every_n_steps == 0:
                 id_scores[train_step] = _compute_test_scores(net, device, id_test_loader)
@@ -346,7 +344,9 @@ def main(
 
     # Compute evaluation metrics from the saved scores and labels
     id_results = compute_metrics(id_scores, id_labels_df, eval_metrics)
+    id_results.to_csv(logs_dir / "results_id.csv", index=True)
     ood_results = compute_metrics(ood_scores, ood_labels_df, eval_metrics)
+    ood_results.to_csv(logs_dir / "results_ood.csv", index=True)
 
     # Plot the results
     plot_results(id_results, ood_results, loss, dataset, model, output_dir)
