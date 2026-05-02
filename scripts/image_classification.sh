@@ -2,8 +2,6 @@
 TRAIN_LOSSES=(
     "cls_cross_entropy"
     "cls_loglog"
-    "cls_n-ccas_n=0"
-    "cls_n-ccas_n=1"
 )
 
 DATASETS=(
@@ -24,10 +22,10 @@ for dataset in "${DATASETS[@]}"; do
             python scripts/image_classification.py \
                 --dataset $dataset \
                 --model $model \
-                --max-epochs 6 \
-                --batch-size 64 \
-                --learning-rate 0.0001 \
-                --save-scores-every-n-steps 32 \
+                --max-epochs 60 \
+                --batch-size 128 \
+                --learning-rate 0.0002 \
+                --save-scores-every-n-steps 128 \
                 --log-train-loss-every-n-steps 16 \
                 --loss $loss
         done
