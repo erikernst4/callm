@@ -256,7 +256,7 @@ class ConfidenceECUAS(Metric):
         return shortcut_function
 
 
-class ConfidenceGammaCCAS(Metric):
+class ConfidenceGammaECUAS(Metric):
     """
     Gamma-ECUAS (Expected Cost for Uncertainty-Augmented Systems) metric.
 
@@ -301,7 +301,7 @@ class ConfidenceGammaCCAS(Metric):
 
     def compute(self) -> torch.Tensor:
         if not self.all_confidences:
-            raise ValueError("No samples to compute Gamma-CCAS.")
+            raise ValueError("No samples to compute Gamma-ECUAS.")
 
         confidences = torch.cat(self.all_confidences)
         correctness = torch.cat(self.all_correctness)

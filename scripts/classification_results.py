@@ -20,9 +20,9 @@ TABLE_METRICS = [
     "cls_auc",
     "cls_aurc",
     "cls_ece_nbins=10",
-    "cls_norm_n-ccas_n=0",
-    "cls_norm_n-ccas_n=1",
-    "cls_norm_n-ccas_n=128",
+    "cls_norm_n-ecuas_n=0",
+    "cls_norm_n-ecuas_n=1",
+    "cls_norm_n-ecuas_n=128",
 ]
 
 
@@ -181,7 +181,7 @@ def plot_ecuas(
         results = {}
         for n in ns:
             norm_str = "norm_" if normalize else ""
-            metric_info = get_metric_from_id(f"cls_{norm_str}n-ccas_n={n}")
+            metric_info = get_metric_from_id(f"cls_{norm_str}n-ecuas_n={n}")
             results[n] = metric_info["function"](logits, labels)
 
         ax.plot(
@@ -209,7 +209,7 @@ def plot_ecuas(
     plt.savefig(output_path, bbox_inches="tight", dpi=300)
 
 
-def plot_gamma_ccas(
+def plot_gamma_ecuas(
     logs_dir: Path, output_path: Path, gammas: list[float], normalize: bool = False
 ):
     fig, ax = plt.subplots(1, 1, figsize=(10, 5))
@@ -218,7 +218,7 @@ def plot_gamma_ccas(
         results = {}
         for gamma in gammas:
             norm_str = "norm_" if normalize else ""
-            metric_info = get_metric_from_id(f"cls_{norm_str}gamma-ccas_gamma={gamma}")
+            metric_info = get_metric_from_id(f"cls_{norm_str}gamma-ecuas_gamma={gamma}")
             results[gamma] = metric_info["function"](logits, labels)
 
         ax.plot(
@@ -239,7 +239,7 @@ def plot_gamma_ccas(
     plt.savefig(output_path, bbox_inches="tight", dpi=300)
 
 
-def plot_temperature_ccas(
+def plot_temperature_ecuas(
     logs_dir: Path, output_path: Path, temperatures: list[float], nseeds: int = 5
 ):
     from collections import OrderedDict
@@ -267,7 +267,7 @@ def plot_temperature_ccas(
                     probs = torch.softmax(calibrated_logprobs, dim=1)
                     confidence = probs[torch.arange(probs.size(0)), pred]
                     correctness = (pred == labels).float()
-                    metric_info = get_metric_from_id(f"conf_n-ccas_n={n}")
+                    metric_info = get_metric_from_id(f"conf_n-ecuas_n={n}")
                     seed_results.append(metric_info["function"](confidence, correctness))
                 results.append({
                     "dataset": DATASETS2[dataset]["dataset"],
@@ -311,15 +311,15 @@ def main(gammas, ns, temperatures, table_metrics, logs_dir, output_dir, seed, ns
     # plot_ecuas(
     #     logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False
     # )
-    # plot_gamma_ccas(
+    # plot_gamma_ecuas(
     #     logs_dir,
-    #     output_dir / "classification_gamma_ccas_plot.pdf",
+    #     output_dir / "classification_gamma_ecuas_plot.pdf",
     #     gammas=gammas,
     #     normalize=False,
     # )
-    # plot_temperature_ccas(
+    # plot_temperature_ecuas(
     #     logs_dir,
-    #     output_dir / "classification_temperature_ccas_plot.pdf",
+    #     output_dir / "classification_temperature_ecuas_plot.pdf",
     #     temperatures=temperatures,
     #     nseeds = nseeds,
     # )
@@ -350,7 +350,7 @@ if __name__ == "__main__":
         type=float,
         nargs="+",
         default=[0.0, 0.1, 0.5, 1.0, 1.5, 2.0, 4.0, 8.0, 10.0, 20.0, 40.0],
-        help="List of temperature values for Temperature-CCAS computation",
+        help="List of temperature values for Temperature-ECUAS computation",
     )
     parser.add_argument(
         "--table-metrics",
@@ -381,7 +381,7 @@ if __name__ == "__main__":
         "--nseeds",
         type=int,
         default=5,
-        help="Number of seeds to average over for temperature-CCAS stability",
+        help="Number of seeds to average over for temperature-ECUAS stability",
     )
     args = parser.parse_args()
 

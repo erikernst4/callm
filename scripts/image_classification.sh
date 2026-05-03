@@ -2,8 +2,8 @@
 TRAIN_LOSSES=(
     "cls_cross_entropy"
     "cls_loglog"
-    "cls_n-ccas_n=0"
-    "cls_n-ccas_n=1"
+    "cls_n-ecuas_n=0"
+    "cls_n-ecuas_n=1"
 )
 
 DATASETS=(

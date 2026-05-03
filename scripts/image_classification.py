@@ -31,8 +31,8 @@ EVAL_METRICS = [
     # "cls_aurc",
     # "cls_ece_nbins=10",
     "cls_norm_loglog",
-    "cls_norm_n-ccas_n=0",
-    "cls_norm_n-ccas_n=1",
+    "cls_norm_n-ecuas_n=0",
+    "cls_norm_n-ecuas_n=1",
 ]
 
 

@@ -424,7 +424,7 @@ class ClassificationLogLog(Metric):
         return shortcut_function
 
 
-class ClassificationGammaCCAS(Metric):
+class ClassificationGammaECUAS(Metric):
     """
     Gamma-ECUAS (Expected Cost for Uncertainty-Augmented Systems) metric.
 

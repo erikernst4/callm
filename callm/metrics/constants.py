@@ -10,7 +10,7 @@ from .confidences import (
     ConfidenceECUAS,
     ConfidenceCrossEntropy,
     ConfidenceErrorRate,
-    ConfidenceGammaCCAS,
+    ConfidenceGammaECUAS,
 )
 from .classification import (
     ClassificationAURC,
@@ -22,7 +22,7 @@ from .classification import (
     ClassificationFPR95,
     ClassificationECUAS,
     ClassificationLogLog,
-    ClassificationGammaCCAS,
+    ClassificationGammaECUAS,
 )
 
 METRICS = OrderedDict(
@@ -79,9 +79,9 @@ METRICS = OrderedDict(
             },
         ),
         (
-            "conf_n-ccas",
+            "conf_n-ecuas",
             {
-                "full_name": "Confidence n-CCAS",
+                "full_name": "Confidence n-ECUAS",
                 "function": ConfidenceECUAS.create_shortcut_function(),
                 "cls": ConfidenceECUAS,
                 "higher_is_better": False,
@@ -89,11 +89,11 @@ METRICS = OrderedDict(
             },
         ),
         (
-            "conf_gamma-ccas",
+            "conf_gamma-ecuas",
             {
-                "full_name": "Confidence γ-CCAS",
-                "function": ConfidenceGammaCCAS.create_shortcut_function(),
-                "cls": ConfidenceGammaCCAS,
+                "full_name": "Confidence γ-ECUAS",
+                "function": ConfidenceGammaECUAS.create_shortcut_function(),
+                "cls": ConfidenceGammaECUAS,
                 "higher_is_better": False,
                 "display": None,
             },
@@ -212,9 +212,9 @@ METRICS = OrderedDict(
             },
         ),
         (
-            "cls_n-ccas",
+            "cls_n-ecuas",
             {
-                "full_name": "Classification n-CCAS",
+                "full_name": "Classification n-ECUAS",
                 "function": ClassificationECUAS.create_shortcut_function(
                     normalize=False
                 ),
@@ -224,9 +224,9 @@ METRICS = OrderedDict(
             },
         ),
         (
-            "cls_norm_n-ccas",
+            "cls_norm_n-ecuas",
             {
-                "full_name": "Classification Normalized n-CCAS",
+                "full_name": "Classification Normalized n-ECUAS",
                 "function": ClassificationECUAS.create_shortcut_function(
                     normalize=True
                 ),
@@ -260,25 +260,25 @@ METRICS = OrderedDict(
             },
         ),
         (
-            "cls_gamma-ccas",
+            "cls_gamma-ecuas",
             {
-                "full_name": "Classification γ-CCAS",
-                "function": ClassificationGammaCCAS.create_shortcut_function(
+                "full_name": "Classification γ-ECUAS",
+                "function": ClassificationGammaECUAS.create_shortcut_function(
                     normalize=False
                 ),
-                "cls": partial(ClassificationGammaCCAS, normalize=False),
+                "cls": partial(ClassificationGammaECUAS, normalize=False),
                 "higher_is_better": False,
                 "display": None,
             },
         ),
         (
-            "cls_norm_gamma-ccas",
+            "cls_norm_gamma-ecuas",
             {
-                "full_name": "Classification Normalized γ-CCAS",
-                "function": ClassificationGammaCCAS.create_shortcut_function(
+                "full_name": "Classification Normalized γ-ECUAS",
+                "function": ClassificationGammaECUAS.create_shortcut_function(
                     normalize=True
                 ),
-                "cls": partial(ClassificationGammaCCAS, normalize=True),
+                "cls": partial(ClassificationGammaECUAS, normalize=True),
                 "higher_is_better": False,
                 "display": None,
             },
