@@ -46,10 +46,10 @@ def load_dataset(dataset, batch_size):
     # Select dataset
     if dataset.lower() == "cifar10":
         num_classes = 10
-        datamodule = CIFAR10DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_ood=True)
+        datamodule = CIFAR10DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_shift=True, shift_severity=5)
     elif dataset.lower() == "cifar100":
         num_classes = 100
-        datamodule = CIFAR100DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_ood=True)
+        datamodule = CIFAR100DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_shift=True, shift_severity=5)
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
     
