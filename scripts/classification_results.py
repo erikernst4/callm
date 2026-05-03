@@ -244,7 +244,7 @@ def plot_temperature_ccas(
 ):
     from collections import OrderedDict
     DATASETS2 = OrderedDict(list(DATASETS.items())[:10])  # Only use the first 10 datasets for this plot to avoid clutter
-    fig, ax = plt.subplots(1, 2, figsize=(10, 6), sharex=True, sharey=True)
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4), sharex=True)
     ns = [0, 1]
     for i, n in enumerate(ns):
         for dataset in DATASETS2:
@@ -287,21 +287,16 @@ def plot_temperature_ccas(
             )
             ax[i].fill_between(df["temp"], df["q1"], df["q3"], alpha=0.2)
 
-    ax[0].set_ylabel("n-CCAS (n=0)")
-    # ax[0].set_yscale("log")
+    ax[0].set_ylabel("ECUAS (n=0)", fontsize=14)
+    ax[0].set_xlabel("Temperature", fontsize=14)
     ax[0].grid()
-    # ax[0].set_xscale("symlog", linthresh=0.25)
-    # ax[0].set_ylim(bottom=1e-1, top=5e0)
-    ax[1].set_xlabel("Temperature")
-    ax[1].set_ylabel("n-CCAS (n=1)")
-    # ax[1].set_yscale("log")
-    # ax[1].set_ylim(bottom=8e-2, top=2e0)
-    # ax[1].set_xscale("symlog", linthresh=0.25)
+    ax[1].set_xlabel("Temperature", fontsize=14)
+    ax[1].set_ylabel("ECUAS (n=1)", fontsize=14)
     ax[1].grid()
 
     # set global legend outside the plot
     handles, labels = ax[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, -0.1), ncol=4)
+    fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1, 0.5), ncol=1)
     fig.tight_layout()
     plt.savefig(output_path, bbox_inches="tight", dpi=300)
 
@@ -312,22 +307,22 @@ def main(gammas, ns, temperatures, table_metrics, logs_dir, output_dir, seed, ns
     df = generate_results_table(
         logs_dir, table_metrics, output_dir / "classification_results", seed=seed
     )
-    # generate_latex(df, output_dir / "classification_results")
-    plot_ecuas(
-        logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False
-    )
-    plot_gamma_ccas(
-        logs_dir,
-        output_dir / "classification_gamma_ccas_plot.pdf",
-        gammas=gammas,
-        normalize=False,
-    )
-    plot_temperature_ccas(
-        logs_dir,
-        output_dir / "classification_temperature_ccas_plot.pdf",
-        temperatures=temperatures,
-        nseeds = nseeds,
-    )
+    generate_latex(df, output_dir / "classification_results")
+    # plot_ecuas(
+    #     logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False
+    # )
+    # plot_gamma_ccas(
+    #     logs_dir,
+    #     output_dir / "classification_gamma_ccas_plot.pdf",
+    #     gammas=gammas,
+    #     normalize=False,
+    # )
+    # plot_temperature_ccas(
+    #     logs_dir,
+    #     output_dir / "classification_temperature_ccas_plot.pdf",
+    #     temperatures=temperatures,
+    #     nseeds = nseeds,
+    # )
 
 
 if __name__ == "__main__":
@@ -354,7 +349,7 @@ if __name__ == "__main__":
         "--temps",
         type=float,
         nargs="+",
-        default=[0.0, 0.1, 0.5, 1.0, 1.25, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0],
+        default=[0.0, 0.1, 0.5, 1.0, 1.5, 2.0, 4.0, 8.0, 10.0, 20.0, 40.0],
         help="List of temperature values for Temperature-CCAS computation",
     )
     parser.add_argument(
