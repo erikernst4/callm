@@ -32,7 +32,7 @@ from callm.metrics import (
     ConfidenceCrossEntropy as CrossEntropy,
     ConfidenceAUCScore as AUCScore,
     ConfidenceGammaCCAS as GammaCCAS,
-    ConfidenceECUAS as CCAS,
+    ConfidenceECUAS as ECUAS,
     ConfidenceAURC as AURC,
 )
 
@@ -156,22 +156,24 @@ def compute_standard_metrics(
     ce = CrossEntropy()
     auc = AUCScore()
     aurc = AURC()
-    ccas_0 = CCAS(n=0)
-    ccas_1 = CCAS(n=1)
+    ecuas_0 = ECUAS(n=0)
+    ecuas_1 = ECUAS(n=1)
+    ecuas_128 = ECUAS(n=128)
 
     # NaN confidences are handled internally by the metrics (fallback to 0.5)
-    for metric in [ece, bs, ce, auc, aurc, ccas_0, ccas_1]:
+    for metric in [ece, bs, ce, auc, aurc, ecuas_0, ecuas_1, ecuas_128]:
         metric.update(conf_t, corr_t)
 
     return {
         "Acc": accuracy,
         "AUROC": auc.compute().item(),
         "ECE": ece.compute().item(),
-        "BS": bs.compute().item(),
         "CE": ce.compute().item(),
+        "BS": bs.compute().item(),
         "AURC": aurc.compute().item(),
-        "ECUAS_0": ccas_0.compute().item(),
-        "ECUAS_1": ccas_1.compute().item(),
+        "ECUAS_0": ecuas_0.compute().item(),
+        "ECUAS_1": ecuas_1.compute().item(),
+        "ECUAS_128": ecuas_128.compute().item(),
     }
 
 
@@ -183,7 +185,7 @@ def compute_ecuas_metrics(
 
     results = {}
     for n in ns:
-        metric = CCAS(n=n)
+        metric = ECUAS(n=n)
         metric.update(conf_t, corr_t)
         results[f"ECUAS(n={n})"] = metric.compute().item()
 
@@ -209,26 +211,38 @@ def compute_gamma_ccas_metrics(
 
 # ── Standard table layout ─────────────────────────────────────────────
 
-STANDARD_COLUMNS = ["Acc", "AUROC", "ECE", "BS", "CE", "AURC", "ECUAS_0", "ECUAS_1"]
+STANDARD_COLUMNS = [
+    "Acc",
+    "AUROC",
+    "ECE",
+    "CE",
+    "BS",
+    "AURC",
+    "ECUAS_0",
+    "ECUAS_1",
+    "ECUAS_128",
+]
 STANDARD_DIRECTION = {
     "Acc": True,
     "AUROC": True,
     "ECE": False,
-    "BS": False,
     "CE": False,
+    "BS": False,
     "AURC": False,
     "ECUAS_0": False,
     "ECUAS_1": False,
+    "ECUAS_128": False,
 }
 STANDARD_LATEX_HEADER = {
     "Acc": r"\textbf{Acc}",
     "AUROC": r"\textbf{AUROC}",
     "ECE": r"\textbf{ECE}",
-    "BS": r"\textbf{BS}",
     "CE": r"\textbf{CE}",
+    "BS": r"\textbf{BS}",
     "AURC": r"\textbf{AURC}",
     "ECUAS_0": r"\textbf{ECUAS$_0$}",
     "ECUAS_1": r"\textbf{ECUAS$_1$}",
+    "ECUAS_128": r"\textbf{ECUAS$_{128}$}",
 }
 
 
