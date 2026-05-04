@@ -1,7 +1,7 @@
 import torch
 from torchmetrics import Metric
 import torch.nn.functional as F
-from torchmetrics.classification import AUROC, MulticlassCalibrationError
+from torchmetrics.classification import BinaryAUROC, MulticlassCalibrationError
 from torch_uncertainty.metrics.classification import AURC as _AURC, FPRx as _FPRx
 
 
@@ -209,9 +209,11 @@ class ClassificationAUC(Metric):
         if not self.all_logits:
             raise ValueError("No data to compute metric.")
         probs = torch.softmax(torch.cat(self.all_logits), dim=1)
+        confidences, indices = probs.max(dim=1)
         labels = torch.cat(self.all_labels)
-        auroc = AUROC(task="multiclass", num_classes=probs.size(1))
-        auroc.update(probs, labels.long())
+        correctness = (indices == labels).long()
+        auroc = BinaryAUROC()
+        auroc.update(confidences, correctness)
         return auroc.compute()
 
     @classmethod
@@ -286,23 +288,28 @@ class ClassificationECUAS(Metric):
         self.normalize = normalize
         self.reduction = reduction
         self.epsilon = epsilon
-        if n == 0:
-            self.cost_fun = lambda logq_e, correct_indicator: torch.where(
+        
+        self.add_state("all_logits", default=[], dist_reduce_fx="cat")
+        self.add_state("all_labels", default=[], dist_reduce_fx="cat")
+
+    def _cost_fn(self, logq_e: torch.Tensor, correct_indicator: torch.Tensor, K: int) -> torch.Tensor:
+        u_M = torch.tensor(1 - 1 / K)
+        alpha=(self.n + 1) / (u_M ** (self.n + 1))
+        u_c = 1 - torch.exp(logq_e)
+        if self.n == 0:
+            return torch.where(
                 condition=correct_indicator.bool(),
-                input=1 - torch.exp(logq_e),
-                other=1 - torch.exp(logq_e) - torch.log(1 - torch.exp(logq_e)),
+                input=alpha * u_c,
+                other=alpha * u_c + alpha * (torch.log(u_M) - torch.log(u_c))
             )
-        elif n > 0:
-            self.cost_fun = lambda logq_e, correct_indicator: torch.where(
+        elif self.n > 0:
+            return torch.where(
                 condition=correct_indicator.bool(),
-                input=(1 - torch.exp(logq_e)) ** (n + 1),
-                other=(1 - torch.exp(logq_e)) ** (n + 1)
-                + (n + 1) / n * (1 - (1 - torch.exp(logq_e)) ** n),
+                input=(u_c / u_M) ** (self.n + 1),
+                other=(u_c / u_M) ** (self.n + 1) + (self.n + 1) / self.n * (1/u_M - (u_c/u_M) ** self.n / u_M)
             )
         else:
             raise ValueError("n must be non-negative.")
-        self.add_state("all_logits", default=[], dist_reduce_fx="cat")
-        self.add_state("all_labels", default=[], dist_reduce_fx="cat")
 
     def update(self, logits: torch.Tensor, labels: torch.Tensor) -> None:
         if torch.isnan(logits).any() or torch.isnan(labels).any():
@@ -319,16 +326,17 @@ class ClassificationECUAS(Metric):
         labels = torch.cat(self.all_labels)
         logq_e, indices = torch.max(logprobs, dim=1)
         indicator = (indices == labels).float()
-        cost = self._reduce(self.cost_fun(logq_e, indicator))
+        K = logprobs.size(1)
+        cost = self._reduce(self._cost_fn(logq_e, indicator, K))
         if self.normalize:
             priors = torch.bincount(
-                labels.long(), minlength=logprobs.size(1)
+                labels.long(), minlength=K
             ) / labels.size(0)
             logqe_prior, indices = torch.max(torch.log(priors + self.epsilon), dim=0)
             logqe_prior = logqe_prior.expand(labels.size(0))
             prior_correct_indicator = (indices == labels).float()
             prior_cost = self._reduce(
-                self.cost_fun(logqe_prior, prior_correct_indicator)
+                self._cost_fn(logqe_prior, prior_correct_indicator, K)
             )
             cost = cost / prior_cost
         return cost
