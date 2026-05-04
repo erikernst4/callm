@@ -25,3 +25,5 @@ from callm.data.mmlu import (  # noqa: F401
     MMLUIsTrueDataModule,
     UntokenizedMMLUIsTrueDataModule,
 )
+
+from .simulation import SimulationDataset

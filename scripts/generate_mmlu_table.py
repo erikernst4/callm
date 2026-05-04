@@ -31,7 +31,7 @@ from callm.metrics import (
     ConfidenceBrierScore as BrierScore,
     ConfidenceCrossEntropy as CrossEntropy,
     ConfidenceAUCScore as AUCScore,
-    ConfidenceGammaCCAS as GammaCCAS,
+    ConfidenceGammaECUAS as GammaCCAS,
     ConfidenceECUAS as ECUAS,
     ConfidenceAURC as AURC,
 )

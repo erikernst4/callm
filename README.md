@@ -18,7 +18,6 @@ Supports both local HuggingFace models and GCP Vertex AI (Gemini) backends acros
 | **AUC** | Area Under the ROC Curve |
 | **BS** | Brier Score (MSE between confidence and correctness) |
 | **CE** | Binary Cross‑Entropy |
-| **CCAS** | Cost of Confidence Augmented Systems |
 | **ECUAS** | Expected Cost for Uncertainty-Augmented Systems (parameterised by n = 0, 1, 2, …) |
 | **γ‑ECUAS** | Gamma‑ECUAS — selective prediction at operating point γ |
 | **AURC** | Area Under the Risk‑Coverage curve |

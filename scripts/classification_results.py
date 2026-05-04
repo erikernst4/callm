@@ -2,8 +2,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from tqdm import tqdm
 from callm.metrics import get_metric_from_id
 from callm.data.classification import DATASETS
+from callm.data import SimulationDataset
 import pandas as pd
 import subprocess
 import tempfile
@@ -15,32 +17,43 @@ from expected_cost.calibration import calibration_with_crossval
 
 TABLE_METRICS = [
     "cls_ner",
-    "cls_nbs",
-    "cls_nce",
-    "cls_auc",
-    "cls_aurc",
     "cls_ece_nbins=10",
-    "cls_norm_n-ccas_n=0",
-    "cls_norm_n-ccas_n=1",
-    "cls_norm_n-ccas_n=128",
+    "cls_auc",
+    "conf_cross_entropy",
+    "conf_brier",
+    "cls_nce",
+    "cls_nbs",
+    "cls_aurc",
+    "cls_norm_n-ecuas_n=0",
+    "cls_norm_n-ecuas_n=1",
+    "cls_norm_n-ecuas_n=128",
 ]
 
-# KEEP fisrt 3 first items from oredered dict DATASETS
-# DATASETS = OrderedDict(list(DATASETS.items())[:3])
+SIM_METRICS = [
+    "conf_error_rate",
+    "conf_brier",
+    "conf_cross_entropy",
+    "conf_ece_nbins=10",
+    "conf_auc",
+    "conf_aurc",
+    "conf_n-ecuas_n=0",
+    "conf_n-ecuas_n=1",
+    "conf_n-ecuas_n=128",
+]
 
 
 def generate_results_table(
     logs_dir: Path, table_metrics: list[str], output_filename: Path, seed: int = 42
 ) -> str:
-    if (
-        (output_filename.with_suffix(".csv").exists())
-        and (output_filename.with_suffix(".pdf").exists())
-        and (output_filename.with_suffix(".tex").exists())
-    ):
-        print(f"Results already exist at {output_filename}, skipping generation.")
-        df = pd.read_csv(output_filename.with_suffix(".csv"), index_col=False)
-        df = df.set_index(["dataset", "model", "proc"])
-        return df
+    # if (
+    #     (output_filename.with_suffix(".csv").exists())
+    #     and (output_filename.with_suffix(".pdf").exists())
+    #     and (output_filename.with_suffix(".tex").exists())
+    # ):
+    #     print(f"Results already exist at {output_filename}, skipping generation.")
+    #     df = pd.read_csv(output_filename.with_suffix(".csv"), index_col=False)
+    #     df = df.set_index(["dataset", "model", "proc"])
+    #     return df
 
     results = []
     unique_metrics = {}
@@ -57,6 +70,16 @@ def generate_results_table(
 
         for metric in table_metrics:
             metric_info = get_metric_from_id(metric)
+            if "cls" in metric and "conf" not in metric:
+                inpt, tgt = logits, labels
+                cal_inpt, cal_tgt = calibrated_logprobs, labels
+            elif "conf" in metric and "cls" not in metric:
+                inpt, idx = torch.softmax(logits, dim=1).max(dim=1)
+                tgt = (idx == labels).long()
+                cal_inpt, idx = torch.softmax(calibrated_logprobs, dim=1).max(dim=1)
+                cal_tgt = (idx == labels).long()
+            else:
+                raise ValueError(f"Metric ID {metric} is not recognized as classification or confidence metric.")
             results.append(
                 {
                     "dataset_model": dataset,
@@ -64,7 +87,7 @@ def generate_results_table(
                     "model": DATASETS[dataset]["model"],
                     "proc": "raw",
                     "metric": metric_info["display"],
-                    "value": metric_info["function"](logits, labels),
+                    "value": metric_info["function"](inpt, tgt),
                 }
             )
             # Append calibrated results
@@ -75,7 +98,7 @@ def generate_results_table(
                     "model": DATASETS[dataset]["model"],
                     "proc": "cal",
                     "metric": metric_info["display"],
-                    "value": metric_info["function"](calibrated_logprobs, labels),
+                    "value": metric_info["function"](cal_inpt, cal_tgt),
                 }
             )
             unique_metrics[metric] = metric_info["display"]
@@ -112,7 +135,7 @@ def generate_latex(df: pd.DataFrame, output_filename: Path):
         float_format="%.3f",
         multirow=True,
         index_names=False,
-        column_format="lll" + "c" * df.shape[1],
+        column_format="l" * df.index.nlevels + "c" * df.shape[1],
         escape=False,
     )
 
@@ -184,7 +207,7 @@ def plot_ecuas(
         results = {}
         for n in ns:
             norm_str = "norm_" if normalize else ""
-            metric_info = get_metric_from_id(f"cls_{norm_str}n-ccas_n={n}")
+            metric_info = get_metric_from_id(f"cls_{norm_str}n-ecuas_n={n}")
             results[n] = metric_info["function"](logits, labels)
 
         ax.plot(
@@ -212,7 +235,7 @@ def plot_ecuas(
     plt.savefig(output_path, bbox_inches="tight", dpi=300)
 
 
-def plot_gamma_ccas(
+def plot_gamma_ecuas(
     logs_dir: Path, output_path: Path, gammas: list[float], normalize: bool = False
 ):
     fig, ax = plt.subplots(1, 1, figsize=(10, 5))
@@ -221,7 +244,7 @@ def plot_gamma_ccas(
         results = {}
         for gamma in gammas:
             norm_str = "norm_" if normalize else ""
-            metric_info = get_metric_from_id(f"cls_{norm_str}gamma-ccas_gamma={gamma}")
+            metric_info = get_metric_from_id(f"cls_{norm_str}gamma-ecuas_gamma={gamma}")
             results[gamma] = metric_info["function"](logits, labels)
 
         ax.plot(
@@ -242,22 +265,172 @@ def plot_gamma_ccas(
     plt.savefig(output_path, bbox_inches="tight", dpi=300)
 
 
-def main(gammas, ns, table_metrics, logs_dir, output_dir, seed):
+def plot_temperature_ecuas(
+    logs_dir: Path, output_path: Path, temperatures: list[float], nseeds: int = 5
+):
+    from collections import OrderedDict
+    DATASETS2 = OrderedDict(list(DATASETS.items())[:10])  # Only use the first 10 datasets for this plot to avoid clutter
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4), sharex=True)
+    ns = [0, 1]
+    for i, n in enumerate(ns):
+        for dataset in DATASETS2:
+            logits, labels = load_scores(logs_dir / dataset)
+            calibrated_logprobs = calibration_with_crossval(
+                torch.log_softmax(logits, dim=1),
+                labels,
+                calparams={"bias": True},
+                seed=nseeds,
+            )
+            calibrated_logprobs = torch.from_numpy(calibrated_logprobs).float()
+            results = []
+            for temp in temperatures:
+                seed_results = []
+                for seed in range(nseeds):  # Average over multiple runs for stability
+                    if temp == 0:
+                        pred = torch.argmax(calibrated_logprobs, dim=1)
+                    else:
+                        pred = torch.distributions.Categorical(logits=calibrated_logprobs / temp).sample()
+                    probs = torch.softmax(calibrated_logprobs, dim=1)
+                    confidence = probs[torch.arange(probs.size(0)), pred]
+                    correctness = (pred == labels).float()
+                    metric_info = get_metric_from_id(f"conf_n-ecuas_n={n}")
+                    seed_results.append(metric_info["function"](confidence, correctness))
+                results.append({
+                    "dataset": DATASETS2[dataset]["dataset"],
+                    "model": DATASETS2[dataset]["model"],
+                    "temp": temp,
+                    "median": np.median(seed_results),
+                    "q1": np.percentile(seed_results, 25),
+                    "q3": np.percentile(seed_results, 75),
+                })
+            df = pd.DataFrame(results)
+            ax[i].plot(
+                df["temp"],
+                df["median"],
+                # marker="o",
+                linestyle="-",
+                label=f"{DATASETS[dataset]['dataset']} - {DATASETS[dataset]['model']}",
+            )
+            ax[i].fill_between(df["temp"], df["q1"], df["q3"], alpha=0.2)
+
+    ax[0].set_ylabel("ECUAS (n=0)", fontsize=14)
+    ax[0].set_xlabel("Temperature", fontsize=14)
+    ax[0].grid()
+    ax[1].set_xlabel("Temperature", fontsize=14)
+    ax[1].set_ylabel("ECUAS (n=1)", fontsize=14)
+    ax[1].grid()
+
+    # set global legend outside the plot
+    handles, labels = ax[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1, 0.5), ncol=1)
+    fig.tight_layout()
+    plt.savefig(output_path, bbox_inches="tight", dpi=300)
+
+def generate_simulation_results(sim_metrics: list[str], seed: int) -> pd.DataFrame:
+
+    results = []
+    unique_metrics = {}
+    for sigma_K, sigma_N, K, N in tqdm([
+        (0.2, 0.5, 2, 5),
+        (0.1, 0.5, 2, 5),
+        (1.0, 2.5, 10, 5),
+        (0.5, 2.5, 10, 5),
+        (10.0, 25.0, 100, 5),
+        (5.0, 25.0, 100, 5),
+
+        (0.2, 2.5, 2, 5),
+        (0.1, 2.5, 2, 5),
+        (1.0, 12.5, 10, 5),
+        (0.5, 12.5, 10, 5),
+        (10.0, 125.0, 100, 5),
+        (5.0, 125.0, 100, 5),
+
+        (0.2, 0.1, 2, 5),
+        (0.1, 0.1, 2, 5),
+        (1.0, 0.5, 10, 5),
+        (0.5, 0.5, 10, 5),
+        (10.0, 5.0, 100, 5),
+        (5.0, 5.0, 100, 5),
+    ]):            
+        conf_eqclass, conf_answer, correctness, _, _ = SimulationDataset(
+            num_samples=1000, 
+            num_eqclasses=K, 
+            samples_per_eqclass=N, 
+            sigma_K=sigma_K,
+            sigma_N=sigma_N, 
+            suboptimal_T=1.0, 
+            seed=42
+        ).generate_confidences()
+
+        for metric in sim_metrics:
+            metric_info = get_metric_from_id(metric)
+            unique_metrics[metric] = metric_info["display"]
+            results.extend([
+                {
+                    "proc": "answer",
+                    # "N": N,
+                    "K": K,
+                    r"$\sigma_K$": f"{sigma_K:.1f}",
+                    r"$\sigma_N$": f"{sigma_N:.1f}",
+                    "metric": metric_info["display"],
+                    "value": metric_info["function"](conf_answer, correctness),
+                },
+                {
+                    "proc": "eq-group",
+                    # "N": N,
+                    "K": K,
+                    r"$\sigma_K$": f"{sigma_K:.1f}",
+                    r"$\sigma_N$": f"{sigma_N:.1f}",
+                    "metric": metric_info["display"],
+                    "value": metric_info["function"](conf_eqclass, correctness),
+                }
+            ])
+
+    sim_df = (
+        pd.DataFrame(results)
+        .pivot_table(
+            # index=["N", "K", r"$\sigma_K$", r"$\sigma_N$", "proc"],
+            index=["K", r"$\sigma_K$", r"$\sigma_N$", "proc"],
+            columns="metric",
+            values="value",
+
+        )
+        .rename_axis(columns=None)
+        .loc[:, [unique_metrics[metric] for metric in sim_metrics]]
+        .rename(columns={unique_metrics[metric]: r"\textbf{" + unique_metrics[metric] + r"}" for metric in sim_metrics})
+    )
+    return sim_df
+
+
+
+def main(gammas, ns, temperatures, table_metrics, sim_metrics, logs_dir, output_dir, seed, nseeds = 5):
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    df = generate_results_table(
-        logs_dir, table_metrics, output_dir / "classification_results", seed=seed
-    )
+    print("Generating results table...")
+    df = generate_results_table(logs_dir, table_metrics, output_dir / "classification_results", seed=seed)
     generate_latex(df, output_dir / "classification_results")
-    plot_ecuas(
-        logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False
-    )
-    plot_gamma_ccas(
-        logs_dir,
-        output_dir / "classification_gamma_ccas_plot.pdf",
-        gammas=gammas,
-        normalize=False,
-    )
+    
+    print("Generating simulation results...")
+    df = generate_simulation_results(sim_metrics, seed=seed)
+    generate_latex(df, output_dir / "simulation_results")
+
+    # print("Generating n-ECUAS plot...")
+    # plot_ecuas(logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False)
+
+    # print("Generating γ-ECUAS plot...")
+    # plot_gamma_ecuas(
+    #     logs_dir,
+    #     output_dir / "classification_gamma_ecuas_plot.pdf",
+    #     gammas=gammas,
+    #     normalize=False,
+    # )
+    # print("Generating temperature-ECUAS plot...")
+    # plot_temperature_ecuas(
+    #     logs_dir,
+    #     output_dir / "classification_temperature_ecuas_plot.pdf",
+    #     temperatures=temperatures,
+    #     nseeds = nseeds,
+    # )
 
 
 if __name__ == "__main__":
@@ -281,11 +454,25 @@ if __name__ == "__main__":
         help="List of n values for n-ECUAS computation",
     )
     parser.add_argument(
+        "--temps",
+        type=float,
+        nargs="+",
+        default=[0.0, 0.1, 0.5, 1.0, 1.5, 2.0, 4.0, 8.0, 10.0, 20.0, 40.0],
+        help="List of temperature values for Temperature-ECUAS computation",
+    )
+    parser.add_argument(
         "--table-metrics",
         type=str,
         nargs="+",
         default=TABLE_METRICS,
         help="List of metric IDs to include in the results table",
+    )
+    parser.add_argument(
+        "--sim-metrics",
+        type=str,
+        nargs="+",
+        default=SIM_METRICS,
+        help="List of metric IDs to include in the simulation results",
     )
     parser.add_argument(
         "--logs_dir",
@@ -305,9 +492,15 @@ if __name__ == "__main__":
         default=42,
         help="Random seed for calibration (if applicable)",
     )
+    parser.add_argument(
+        "--nseeds",
+        type=int,
+        default=5,
+        help="Number of seeds to average over for temperature-ECUAS stability",
+    )
     args = parser.parse_args()
 
     logs_dir = Path(args.logs_dir)
     output_dir = Path(args.output_dir)
 
-    main(args.gammas, args.ns, args.table_metrics, logs_dir, output_dir, args.seed)
+    main(args.gammas, args.ns, args.temps, args.table_metrics, args.sim_metrics, logs_dir, output_dir, args.seed, args.nseeds)

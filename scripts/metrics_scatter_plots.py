@@ -42,10 +42,10 @@ METRICS = OrderedDict(
     ]
 )
 
-CCAS_METRICS = OrderedDict(
+ECUAS_METRICS = OrderedDict(
     [
         (
-            "0-ccas",
+            "0-ecuas",
             {
                 "cls": ClassificationECUAS,
                 "args": {"n": 0, "normalize": False},
@@ -53,7 +53,7 @@ CCAS_METRICS = OrderedDict(
             },
         ),
         (
-            "1-ccas",
+            "1-ecuas",
             {
                 "cls": ClassificationECUAS,
                 "args": {"n": 1, "normalize": False},
@@ -71,8 +71,8 @@ def load_scores(scores_dir: Path):
 
 
 def compute_sample_metric(logits, labels, metric, logpriors=None):
-    if metric in CCAS_METRICS:
-        metrics_dict = CCAS_METRICS
+    if metric in ECUAS_METRICS:
+        metrics_dict = ECUAS_METRICS
     elif metric in METRICS:
         metrics_dict = METRICS
     else:
@@ -149,7 +149,7 @@ def autoscale_grid(axes, by_col_x=True, by_row_y=True):
                     axes[row, col].set_ylim(y_min - margin, y_max + margin)
 
 
-def plot_scatter(ccas_metrics, metrics, logs_dir, output_dir):
+def plot_scatter(ecuas_metrics, metrics, logs_dir, output_dir):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for dataset in DATASETS:
@@ -161,11 +161,11 @@ def plot_scatter(ccas_metrics, metrics, logs_dir, output_dir):
         logpriors = torch.log(prior).unsqueeze(0).expand(logits.size(0), -1)
 
         fig, ax = plt.subplots(
-            len(ccas_metrics),
+            len(ecuas_metrics),
             len(metrics),
-            figsize=(5 * len(metrics), 4 * len(ccas_metrics)),
+            figsize=(5 * len(metrics), 4 * len(ecuas_metrics)),
         )
-        for i, y_metric in enumerate(ccas_metrics):
+        for i, y_metric in enumerate(ecuas_metrics):
             for j, x_metric in enumerate(metrics):
                 x_results = compute_sample_metric(logits, labels, x_metric, logpriors)
                 y_results = compute_sample_metric(logits, labels, y_metric, logpriors)
@@ -190,13 +190,13 @@ def plot_scatter(ccas_metrics, metrics, logs_dir, output_dir):
                 #     f"{DATASETS[dataset]['dataset']} - {DATASETS[dataset]['model']} (r={corrcoef:.2f})"
                 # )
                 ax[i, j].grid()
-        for i, m in enumerate(ccas_metrics):
-            ax[i, 0].set_ylabel(CCAS_METRICS[m]["display"])
+        for i, m in enumerate(ecuas_metrics):
+            ax[i, 0].set_ylabel(ECUAS_METRICS[m]["display"])
             for j in range(1, len(metrics)):
                 ax[i, j].set_yticklabels([])
         for j, m in enumerate(metrics):
             ax[-1, j].set_xlabel(METRICS[m]["display"])
-            for i in range(len(ccas_metrics) - 1):
+            for i in range(len(ecuas_metrics) - 1):
                 ax[i, j].set_xticklabels([])
 
         autoscale_grid(ax, by_col_x=True, by_row_y=True)
@@ -214,8 +214,8 @@ def plot_scatter(ccas_metrics, metrics, logs_dir, output_dir):
         plt.close(fig)
 
 
-def main(ccas_metrics, metrics, logs_dir, output_dir):
-    plot_scatter(ccas_metrics, metrics, logs_dir, output_dir / "scatter_plots")
+def main(ecuas_metrics, metrics, logs_dir, output_dir):
+    plot_scatter(ecuas_metrics, metrics, logs_dir, output_dir / "scatter_plots")
 
 
 if __name__ == "__main__":
@@ -226,10 +226,10 @@ if __name__ == "__main__":
         "--metrics", nargs="+", help="List of metrics to plot.", default=METRICS
     )
     parser.add_argument(
-        "--ccas_metrics",
+        "--ecuas_metrics",
         nargs="+",
-        help="List of CCAS metrics to plot.",
-        default=CCAS_METRICS,
+        help="List of ECUAS metrics to plot.",
+        default=ECUAS_METRICS,
     )
     parser.add_argument(
         "--logs_dir",
@@ -245,7 +245,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     main(
-        ccas_metrics=args.ccas_metrics,
+        ecuas_metrics=args.ecuas_metrics,
         metrics=args.metrics,
         logs_dir=Path(args.logs_dir),
         output_dir=Path(args.output_dir),

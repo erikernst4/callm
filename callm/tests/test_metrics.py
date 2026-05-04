@@ -8,7 +8,7 @@ from callm.metrics import (
     ConfidenceCrossEntropy,
     ConfidenceAUCScore,
     CCAS,
-    ConfidenceGammaCCAS,
+    ConfidenceGammaECUAS,
 )
 
 
@@ -413,14 +413,14 @@ class TestCCAS:
         assert np.isfinite(cost)
 
 
-class TestGammaCCAS:
-    """Tests for Gamma-CCAS metric."""
+class TestGammaECUAS:
+    """Tests for Gamma-ECUAS metric."""
 
     def test_high_confidence_abstains(self):
         """High confidence (s < gamma) triggers abstain, cost = gamma."""
         confidences = torch.tensor([0.9])
         correctness = torch.tensor([True])
-        metric = ConfidenceGammaCCAS(gamma=0.5)
+        metric = ConfidenceGammaECUAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = 0.1 < 0.5 → abstain → cost = 0.5
@@ -430,7 +430,7 @@ class TestGammaCCAS:
         """Low confidence (s >= gamma) triggers answer, correct → cost = 0."""
         confidences = torch.tensor([0.3])
         correctness = torch.tensor([True])
-        metric = ConfidenceGammaCCAS(gamma=0.5)
+        metric = ConfidenceGammaECUAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = 0.7 >= 0.5 → answer, correct → cost = 0
@@ -440,7 +440,7 @@ class TestGammaCCAS:
         """Low confidence (s >= gamma) triggers answer, incorrect → cost = 1."""
         confidences = torch.tensor([0.3])
         correctness = torch.tensor([False])
-        metric = ConfidenceGammaCCAS(gamma=0.5)
+        metric = ConfidenceGammaECUAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = 0.7 >= 0.5 → answer, incorrect → cost = 1
@@ -450,7 +450,7 @@ class TestGammaCCAS:
         """Mix of high-confidence (abstain) and low-confidence (answer) samples."""
         confidences = torch.tensor([0.9, 0.3, 0.8])
         correctness = torch.tensor([True, False, False])
-        metric = ConfidenceGammaCCAS(gamma=0.5)
+        metric = ConfidenceGammaECUAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = [0.1, 0.7, 0.2]
@@ -465,7 +465,7 @@ class TestGammaCCAS:
         """All high-confidence → all abstain → cost = gamma."""
         confidences = torch.tensor([0.99, 0.95, 0.98])
         correctness = torch.tensor([True, False, True])
-        metric = ConfidenceGammaCCAS(gamma=0.5)
+        metric = ConfidenceGammaECUAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = [0.01, 0.05, 0.02], all < 0.5 → all abstain → cost = 0.5
@@ -475,7 +475,7 @@ class TestGammaCCAS:
         """All low-confidence → all answer → cost depends on correctness."""
         confidences = torch.tensor([0.1, 0.2, 0.3])
         correctness = torch.tensor([True, True, False])
-        metric = ConfidenceGammaCCAS(gamma=0.5)
+        metric = ConfidenceGammaECUAS(gamma=0.5)
         metric.update(confidences, correctness)
         cost = metric.compute().item()
         # s = [0.9, 0.8, 0.7], all >= 0.5 → all answer
@@ -490,7 +490,7 @@ class TestGammaCCAS:
 
         costs = []
         for gamma in [0.15, 0.45, 0.85]:
-            metric = ConfidenceGammaCCAS(gamma=gamma)
+            metric = ConfidenceGammaECUAS(gamma=gamma)
             metric.update(confidences, correctness)
             costs.append(metric.compute().item())
 
@@ -499,7 +499,7 @@ class TestGammaCCAS:
 
     def test_nan_confidence_uses_fallback(self):
         """Test that NaN confidences are replaced with 0.5 fallback."""
-        metric = ConfidenceGammaCCAS(gamma=0.5)
+        metric = ConfidenceGammaECUAS(gamma=0.5)
         confidences = torch.tensor([float("nan"), 0.5])
         correctness = torch.tensor([True, False])
         metric.update(confidences, correctness)
@@ -508,7 +508,7 @@ class TestGammaCCAS:
 
     def test_nan_correctness_raises_error(self):
         """Test that NaN correctness still raises ValueError."""
-        metric = ConfidenceGammaCCAS(gamma=0.5)
+        metric = ConfidenceGammaECUAS(gamma=0.5)
         confidences = torch.tensor([0.5, 0.5])
         correctness = torch.tensor([float("nan"), 0.0])
         import pytest
@@ -520,8 +520,8 @@ class TestGammaCCAS:
         """Test with no data raises ValueError."""
         import pytest
 
-        metric = ConfidenceGammaCCAS(gamma=0.5)
-        with pytest.raises(ValueError, match="No samples to compute Gamma-CCAS."):
+        metric = ConfidenceGammaECUAS(gamma=0.5)
+        with pytest.raises(ValueError, match="No samples to compute Gamma-ECUAS."):
             metric.compute()
 
     def test_incremental_update(self):
@@ -529,11 +529,11 @@ class TestGammaCCAS:
         confidences = torch.tensor([0.9, 0.5, 0.3, 0.8])
         correctness = torch.tensor([True, False, True, False])
 
-        m1 = ConfidenceGammaCCAS(gamma=0.5)
+        m1 = ConfidenceGammaECUAS(gamma=0.5)
         m1.update(confidences, correctness)
         c1 = m1.compute().item()
 
-        m2 = ConfidenceGammaCCAS(gamma=0.5)
+        m2 = ConfidenceGammaECUAS(gamma=0.5)
         m2.update(confidences[:2], correctness[:2])
         m2.update(confidences[2:], correctness[2:])
         c2 = m2.compute().item()
@@ -544,7 +544,7 @@ class TestGammaCCAS:
         """Cost should always be non-negative."""
         torch.manual_seed(42)
         for gamma in [0.05, 0.1, 0.5, 0.9, 0.95]:
-            metric = ConfidenceGammaCCAS(gamma=gamma)
+            metric = ConfidenceGammaECUAS(gamma=gamma)
             metric.update(torch.rand(50), (torch.rand(50) > 0.5).float())
             cost = metric.compute().item()
             assert cost >= 0, f"Negative cost at gamma={gamma}"
@@ -566,7 +566,7 @@ class TestIntegration:
             "ce": ConfidenceCrossEntropy(),
             "auc": ConfidenceAUCScore(),
             "cc": CCAS(),
-            "gamma_ccaS": ConfidenceGammaCCAS(gamma=0.5),
+            "gamma_ecuas": ConfidenceGammaECUAS(gamma=0.5),
         }
 
         for metric in metrics.values():
@@ -577,7 +577,7 @@ class TestIntegration:
         ce = metrics["ce"].compute().item()
         auc = metrics["auc"].compute().item()
         cc = metrics["cc"].compute().item()
-        gc = metrics["gamma_ccaS"].compute().item()
+        gc = metrics["gamma_ecuas"].compute().item()
 
         # All should be in valid ranges
         assert 0 <= ece <= 1

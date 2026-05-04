@@ -62,9 +62,9 @@ TABLE_METRICS = [
     "conf_cross_entropy",
     "conf_auc",
     "conf_aurc",
-    "conf_n-ccas_n=0",
-    "conf_n-ccas_n=1",
-    "conf_n-ccas_n=128",
+    "conf_n-ecuas_n=0",
+    "conf_n-ecuas_n=1",
+    "conf_n-ecuas_n=128",
 ]
 
 
@@ -281,7 +281,7 @@ def generate_table(
             f.write(tex_doc)
 
 
-def generate_gamma_ccas_plots(results: dict, gammas: list[float], output_dir: Path):
+def generate_gamma_ecuas_plots(results: dict, gammas: list[float], output_dir: Path):
     plots_dir = output_dir / "plots"
     plots_dir.mkdir(exist_ok=True)
 
@@ -297,7 +297,7 @@ def generate_gamma_ccas_plots(results: dict, gammas: list[float], output_dir: Pa
                 continue
 
             y_vals = [
-                llm_methods[method].get(f"conf_gamma-ccas_gamma={g}", np.nan)
+                llm_methods[method].get(f"conf_gamma-ecuas_gamma={g}", np.nan)
                 for g in gammas
             ]
             ax.plot(gammas, y_vals, marker="o", linestyle="-", label=method)
@@ -311,7 +311,7 @@ def generate_gamma_ccas_plots(results: dict, gammas: list[float], output_dir: Pa
         plt.tight_layout()
         out_path = (
             plots_dir
-            / f"{llm.replace(' ', '_').replace('.', '_')}_gamma-ccas_plots.pdf"
+            / f"{llm.replace(' ', '_').replace('.', '_')}_gamma-ecuas_plots.pdf"
         )
         plt.savefig(out_path, bbox_inches="tight")
         plt.close()
@@ -334,7 +334,7 @@ def generate_ecuas_plots(results: dict, ns: list[int], output_dir: Path):
 
             y_vals = []
             for n in ns:
-                y_vals.append(llm_methods[method].get(f"conf_n-ccas_n={n}", np.nan))
+                y_vals.append(llm_methods[method].get(f"conf_n-ecuas_n={n}", np.nan))
 
             plt.plot(ns, y_vals, marker="o", label=method)
 
@@ -417,8 +417,8 @@ def main():
         # Compute Gamma-CCAS metrics and update results
         gamma_results[llm][method].update(
             {
-                f"conf_gamma-ccas_gamma={g}": get_metric_from_id(
-                    f"conf_gamma-ccas_gamma={g}"
+                f"conf_gamma-ecuas_gamma={g}": get_metric_from_id(
+                    f"conf_gamma-ecuas_gamma={g}"
                 )["function"](confidences, correctness)
                 for g in args.gammas
             }
@@ -427,7 +427,7 @@ def main():
         # Compute ECUAS metrics and update results
         n_results[llm][method].update(
             {
-                f"conf_n-ccas_n={n}": get_metric_from_id(f"conf_n-ccas_n={n}")[
+                f"conf_n-ecuas_n={n}": get_metric_from_id(f"conf_n-ecuas_n={n}")[
                     "function"
                 ](confidences, correctness)
                 for n in args.ns
@@ -435,7 +435,7 @@ def main():
         )
 
     generate_table(table_results, table_metrics, out_dir / "confidence_results")
-    generate_gamma_ccas_plots(gamma_results, args.gammas, out_dir)
+    generate_gamma_ecuas_plots(gamma_results, args.gammas, out_dir)
     generate_ecuas_plots(n_results, args.ns, out_dir)
     print(f"Generated results in {out_dir}")
 
