@@ -58,9 +58,9 @@ METHODS = OrderedDict(
 TABLE_METRICS = [
     "conf_error_rate",
     "conf_ece_nbins=10",
-    "conf_brier",
-    "conf_cross_entropy",
     "conf_auc",
+    "conf_cross_entropy",
+    "conf_brier",
     "conf_aurc",
     "conf_n-ecuas_n=0",
     "conf_n-ecuas_n=1",
@@ -167,15 +167,15 @@ def generate_table(
     metrics: list[dict],
     output_filename: Path,
 ) -> str:
-    n_metrics = len(metrics)
-    col_spec = "cc|" + "c" * n_metrics
-    header_cols = " & ".join(r"\textbf{" + m["display"] + r"}" for m in metrics)
+    col_spec = "ll|c|cccc|c|ccc"
 
     lines = [
         r"\begin{tabular}{" + col_spec + "}",
         r"\toprule",
-        r"\textbf{LLM} & \textbf{Method} & " + header_cols + r"\\",
-        r"\hline",
+        r"& & $\tilde d$ & \multicolumn{4}{c|}{$q_e$} & $\tilde d$, $q_e$ & \multicolumn{3}{c}{$\tilde d$, $q_e$} \\",
+        r"& & & & & & & & \multicolumn{3}{c}{ECUAS$_n$} \\",
+        r"\textbf{LLM} & \textbf{Method} & \textbf{ER} & \textbf{ECE} & \textbf{AUC} & \textbf{CE$_{q_e}$} & \textbf{BS$_{q_e}$} & \textbf{AURC} & \textbf{n=0} & \textbf{n=1} & \textbf{n=128} \\",
+        r"\midrule",
     ]
 
     for llm in LLMS.values():

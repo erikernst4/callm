@@ -165,7 +165,7 @@ def compute_standard_metrics(
         metric.update(conf_t, corr_t)
 
     return {
-        "Acc": accuracy,
+        "ER": 1.0 - accuracy,
         "AUROC": auc.compute().item(),
         "ECE": ece.compute().item(),
         "CE": ce.compute().item(),
@@ -212,9 +212,9 @@ def compute_gamma_ccas_metrics(
 # ── Standard table layout ─────────────────────────────────────────────
 
 STANDARD_COLUMNS = [
-    "Acc",
-    "AUROC",
+    "ER",
     "ECE",
+    "AUROC",
     "CE",
     "BS",
     "AURC",
@@ -223,7 +223,7 @@ STANDARD_COLUMNS = [
     "ECUAS_128",
 ]
 STANDARD_DIRECTION = {
-    "Acc": True,
+    "ER": False,
     "AUROC": True,
     "ECE": False,
     "CE": False,
@@ -234,15 +234,15 @@ STANDARD_DIRECTION = {
     "ECUAS_128": False,
 }
 STANDARD_LATEX_HEADER = {
-    "Acc": r"\textbf{Acc}",
-    "AUROC": r"\textbf{AUROC}",
+    "ER": r"\textbf{ER}",
+    "AUROC": r"\textbf{AUC}",
     "ECE": r"\textbf{ECE}",
-    "CE": r"\textbf{CE}",
-    "BS": r"\textbf{BS}",
+    "CE": r"\textbf{CE$_{q_e}$}",
+    "BS": r"\textbf{BS$_{q_e}$}",
     "AURC": r"\textbf{AURC}",
-    "ECUAS_0": r"\textbf{ECUAS$_0$}",
-    "ECUAS_1": r"\textbf{ECUAS$_1$}",
-    "ECUAS_128": r"\textbf{ECUAS$_{128}$}",
+    "ECUAS_0": r"\textbf{n=0}",
+    "ECUAS_1": r"\textbf{n=1}",
+    "ECUAS_128": r"\textbf{n=128}",
 }
 
 
@@ -269,9 +269,7 @@ def find_best_values(
 
 
 def generate_standard_table(results: dict[str, dict[str, dict[str, float]]]) -> str:
-    n_metrics = len(STANDARD_COLUMNS)
-    col_spec = "cc|" + "c" * n_metrics
-    header_cols = " & ".join(STANDARD_LATEX_HEADER[m] for m in STANDARD_COLUMNS)
+    col_spec = "ll|c|cccc|c|ccc"
 
     lines = [
         r"\begin{table}[h]",
@@ -279,8 +277,10 @@ def generate_standard_table(results: dict[str, dict[str, dict[str, float]]]) -> 
         r"\resizebox{\columnwidth}{!}{%",
         r"\begin{tabular}{" + col_spec + "}",
         r"\toprule",
-        r"\textbf{LLM} & \textbf{Method} & " + header_cols + r"\\",
-        r"\hline",
+        r"& & $\tilde d$ & \multicolumn{4}{c|}{$q_e$} & $\tilde d$, $q_e$ & \multicolumn{3}{c}{$\tilde d$, $q_e$} \\",
+        r"& & & & & & & & \multicolumn{3}{c}{ECUAS$_n$} \\",
+        r"\textbf{LLM} & \textbf{Method} & \textbf{ER} & \textbf{ECE} & \textbf{AUC} & \textbf{CE$_{q_e}$} & \textbf{BS$_{q_e}$} & \textbf{AURC} & \textbf{n=0} & \textbf{n=1} & \textbf{n=128} \\",
+        r"\midrule",
     ]
 
     for llm in LLM_ORDER:
