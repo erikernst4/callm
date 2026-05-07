@@ -4,6 +4,18 @@ import torch.nn.functional as F
 from torchmetrics.classification import BinaryAUROC, MulticlassCalibrationError
 from torch_uncertainty.metrics.classification import AURC as _AURC, FPRx as _FPRx
 
+def log1mexp(x):
+    """
+    Numerically stable implementation of log(1 - exp(x)) for x < 0.
+    """
+    # Use a cutoff of -log(2)
+    cutoff = -0.6931471805599453  # math.log(2)
+    
+    return torch.where(
+        x > cutoff,
+        torch.log(-torch.expm1(x)),  # Stable for small |x|
+        torch.log1p(-torch.exp(x))   # Stable for large |x|
+    )
 
 class ClassificationErrorRate(Metric):
     """
@@ -102,6 +114,10 @@ class ClassificationCrossEntropy(Metric):
             raise ValueError("No data to compute metric.")
         logits = torch.cat(self.all_logits)
         labels = torch.cat(self.all_labels)
+        # xx = F.cross_entropy(torch.log_softmax(logits, dim=1), labels.long(), reduction="none")
+        # logq_e, indices = torch.max(torch.log_softmax(logits, dim=1), dim=1)
+        # print(logq_e[~(indices == labels).bool()])
+        # import pdb; pdb.set_trace()
         ce = F.cross_entropy(logits, labels.long(), reduction=self.reduction)
         if self.normalize:
             priors = torch.bincount(
@@ -296,11 +312,12 @@ class ClassificationECUAS(Metric):
         u_M = torch.tensor(1 - 1 / K)
         alpha=(self.n + 1) / (u_M ** (self.n + 1))
         u_c = 1 - torch.exp(logq_e)
+        log_u_c = log1mexp(logq_e - self.epsilon)
         if self.n == 0:
             return torch.where(
                 condition=correct_indicator.bool(),
                 input=alpha * u_c,
-                other=alpha * u_c + alpha * (torch.log(u_M) - torch.log(u_c))
+                other=alpha * u_c + alpha * (torch.log(u_M) - log_u_c)
             )
         elif self.n > 0:
             return torch.where(

@@ -1,3 +1,4 @@
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,7 @@ import tempfile
 import os
 import matplotlib.pyplot as plt
 from expected_cost.calibration import calibration_with_crossval
+import matplotlib.cm as cm
 
 # ── Standard table layout ─────────────────────────────────────────────
 
@@ -19,8 +21,8 @@ TABLE_METRICS = [
     "cls_ner",
     "cls_ece_nbins=10",
     "cls_auc",
-    "conf_cross_entropy",
-    "conf_brier",
+    "conf_norm_cross_entropy",
+    "conf_norm_brier",
     "cls_nce",
     "cls_nbs",
     "cls_aurc",
@@ -57,6 +59,7 @@ def generate_results_table(
 
     results = []
     unique_metrics = {}
+    higher_is_better = {}
     for dataset in DATASETS:
         print("Processing dataset:", dataset)
         logits, labels = load_scores(logs_dir / dataset)
@@ -102,6 +105,7 @@ def generate_results_table(
                 }
             )
             unique_metrics[metric] = metric_info["display"]
+            higher_is_better[metric] = metric_info["higher_is_better"]
 
     df = (
         pd.DataFrame(results)
@@ -127,8 +131,36 @@ def generate_results_table(
     ]  # Ensure columns are in the same order as table_metrics
     df.columns = [r"\textbf{" + col + r"}" for col in df.columns]
     df.reset_index().to_csv(output_filename.with_suffix(".csv"), index=False)
+
+    # compute the higher_is_better dict for the metrics in the table
+    higher_is_better = {r"\textbf{" + unique_metrics[metric] + r"}" : higher_is_better[metric] for metric in table_metrics}
+    # import pdb; pdb.set_trace()  # --- IGNORE ---
+    df = highlight_best_systems(df, higher_is_better)
+
     return df
 
+
+def highlight_best_systems(df: pd.DataFrame, higher_is_better: dict) -> pd.DataFrame:
+    # for each dataset, find the best value for each metric (considering all models and both raw and cal) and bold it
+    df_str = df.copy()
+    df_str = df_str.astype(str)
+    for dataset in df.index.get_level_values("dataset").unique():
+        dataset_df = df.xs(dataset, level="dataset")
+        for metric in df.columns:
+            if metric not in higher_is_better:
+                continue
+            elif not higher_is_better[metric]:
+                best_value = dataset_df[metric].min()
+            else:
+                best_value = dataset_df[metric].max()
+            best_mask = dataset_df[metric] == best_value
+
+            for model, proc in best_mask.index:
+                if best_mask.loc[(model, proc)]:
+                    df_str.loc[(dataset, model, proc), metric] = r"\textbf{" + f"{float(df.loc[(dataset, model, proc), metric]):.4f}" + r"}"
+                else:
+                    df_str.loc[(dataset, model, proc), metric] = f"{float(df.loc[(dataset, model, proc), metric]):.4f}"
+    return df_str
 
 def generate_latex(df: pd.DataFrame, output_filename: Path):
     latex_doc = df.to_latex(
@@ -326,81 +358,6 @@ def plot_temperature_ecuas(
     fig.tight_layout()
     plt.savefig(output_path, bbox_inches="tight", dpi=300)
 
-def generate_simulation_results(sim_metrics: list[str], seed: int) -> pd.DataFrame:
-
-    results = []
-    unique_metrics = {}
-    for sigma_K, sigma_N, K, N in tqdm([
-        (0.2, 0.5, 2, 5),
-        (0.1, 0.5, 2, 5),
-        (1.0, 2.5, 10, 5),
-        (0.5, 2.5, 10, 5),
-        (10.0, 25.0, 100, 5),
-        (5.0, 25.0, 100, 5),
-
-        (0.2, 2.5, 2, 5),
-        (0.1, 2.5, 2, 5),
-        (1.0, 12.5, 10, 5),
-        (0.5, 12.5, 10, 5),
-        (10.0, 125.0, 100, 5),
-        (5.0, 125.0, 100, 5),
-
-        (0.2, 0.1, 2, 5),
-        (0.1, 0.1, 2, 5),
-        (1.0, 0.5, 10, 5),
-        (0.5, 0.5, 10, 5),
-        (10.0, 5.0, 100, 5),
-        (5.0, 5.0, 100, 5),
-    ]):            
-        conf_eqclass, conf_answer, correctness, _, _ = SimulationDataset(
-            num_samples=1000, 
-            num_eqclasses=K, 
-            samples_per_eqclass=N, 
-            sigma_K=sigma_K,
-            sigma_N=sigma_N, 
-            suboptimal_T=1.0, 
-            seed=42
-        ).generate_confidences()
-
-        for metric in sim_metrics:
-            metric_info = get_metric_from_id(metric)
-            unique_metrics[metric] = metric_info["display"]
-            results.extend([
-                {
-                    "proc": "answer",
-                    # "N": N,
-                    "K": K,
-                    r"$\sigma_K$": f"{sigma_K:.1f}",
-                    r"$\sigma_N$": f"{sigma_N:.1f}",
-                    "metric": metric_info["display"],
-                    "value": metric_info["function"](conf_answer, correctness),
-                },
-                {
-                    "proc": "eq-group",
-                    # "N": N,
-                    "K": K,
-                    r"$\sigma_K$": f"{sigma_K:.1f}",
-                    r"$\sigma_N$": f"{sigma_N:.1f}",
-                    "metric": metric_info["display"],
-                    "value": metric_info["function"](conf_eqclass, correctness),
-                }
-            ])
-
-    sim_df = (
-        pd.DataFrame(results)
-        .pivot_table(
-            # index=["N", "K", r"$\sigma_K$", r"$\sigma_N$", "proc"],
-            index=["K", r"$\sigma_K$", r"$\sigma_N$", "proc"],
-            columns="metric",
-            values="value",
-
-        )
-        .rename_axis(columns=None)
-        .loc[:, [unique_metrics[metric] for metric in sim_metrics]]
-        .rename(columns={unique_metrics[metric]: r"\textbf{" + unique_metrics[metric] + r"}" for metric in sim_metrics})
-    )
-    return sim_df
-
 
 
 def main(gammas, ns, temperatures, table_metrics, sim_metrics, logs_dir, output_dir, seed, nseeds = 5):
@@ -410,10 +367,6 @@ def main(gammas, ns, temperatures, table_metrics, sim_metrics, logs_dir, output_
     df = generate_results_table(logs_dir, table_metrics, output_dir / "classification_results", seed=seed)
     generate_latex(df, output_dir / "classification_results")
     
-    print("Generating simulation results...")
-    df = generate_simulation_results(sim_metrics, seed=seed)
-    generate_latex(df, output_dir / "simulation_results")
-
     # print("Generating n-ECUAS plot...")
     # plot_ecuas(logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False)
 
