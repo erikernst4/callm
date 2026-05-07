@@ -112,7 +112,7 @@ def plot_distribution(mu, sigma_K, sigma_N, x, confidences_eq, confidences_pred,
     # plot circles for each sample
     for k, m in enumerate(mu):
         circle = plt.Circle(
-            (0 if k == 0 else 1, 0 if k == 1 else 1), sigma_K, color=f"tab:green", fill=True, alpha=0.3
+            (0 if k == 0 else 1, 0 if k == 1 else 1), 3 * sigma_K, color=f"tab:green", fill=True, alpha=0.3
         )
         for i in range(m.shape[0]):
             ax[0].scatter(
@@ -124,7 +124,7 @@ def plot_distribution(mu, sigma_K, sigma_N, x, confidences_eq, confidences_pred,
                 marker="x",
             )
             circle = plt.Circle(
-                (m[i, 0], m[i, 1]), sigma_N, color=f"C{k}", fill=False, alpha=0.5
+                (m[i, 0], m[i, 1]), 3 * sigma_N, color=f"C{k}", fill=False, alpha=0.5
             )
             ax[0].add_artist(circle)
     ax[0].scatter(
@@ -200,7 +200,7 @@ def main(num_samples, K, N, sigma_K, sigma_N, output_dir):
         sigma_K=sigma_K,
         sigma_N=sigma_N, 
         suboptimal_T=1.0, 
-        seed=42
+        seed=torch.randint(0, 10000, (1,)).item()
     ).generate_confidences()
 
     plot_distribution(mu, sigma_K, sigma_N, x, confidences_eq, conf_pred, correctness, output_dir)
