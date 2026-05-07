@@ -2,7 +2,7 @@
 name = "callm"
 version = "0.1.0"
 description = ""
-authors = [{ name = "Erik Ernst", email = "erik_ernst@hotmail.com.ar" }]
+authors = [{ name = "", email = "" }]
 requires-python = "~=3.13.0"
 readme = "README.md"
 dependencies = [

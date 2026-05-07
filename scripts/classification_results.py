@@ -360,7 +360,7 @@ def plot_temperature_ecuas(
 
 
 
-def main(gammas, ns, temperatures, table_metrics, sim_metrics, logs_dir, output_dir, seed, nseeds = 5):
+def main(gammas, ns, temperatures, table_metrics, logs_dir, output_dir, seed, nseeds = 5):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Generating results table...")
@@ -377,13 +377,13 @@ def main(gammas, ns, temperatures, table_metrics, sim_metrics, logs_dir, output_
     #     gammas=gammas,
     #     normalize=False,
     # )
-    # print("Generating temperature-ECUAS plot...")
-    # plot_temperature_ecuas(
-    #     logs_dir,
-    #     output_dir / "classification_temperature_ecuas_plot.pdf",
-    #     temperatures=temperatures,
-    #     nseeds = nseeds,
-    # )
+    print("Generating temperature-ECUAS plot...")
+    plot_temperature_ecuas(
+        logs_dir,
+        output_dir / "classification_temperature_ecuas_plot.pdf",
+        temperatures=temperatures,
+        nseeds = nseeds,
+    )
 
 
 if __name__ == "__main__":
@@ -421,13 +421,6 @@ if __name__ == "__main__":
         help="List of metric IDs to include in the results table",
     )
     parser.add_argument(
-        "--sim-metrics",
-        type=str,
-        nargs="+",
-        default=SIM_METRICS,
-        help="List of metric IDs to include in the simulation results",
-    )
-    parser.add_argument(
         "--logs_dir",
         type=str,
         default="scores/classification",
@@ -456,4 +449,4 @@ if __name__ == "__main__":
     logs_dir = Path(args.logs_dir)
     output_dir = Path(args.output_dir)
 
-    main(args.gammas, args.ns, args.temps, args.table_metrics, args.sim_metrics, logs_dir, output_dir, args.seed, args.nseeds)
+    main(args.gammas, args.ns, args.temps, args.table_metrics, logs_dir, output_dir, args.seed, args.nseeds)
