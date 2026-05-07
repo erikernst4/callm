@@ -1,6 +1,7 @@
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
 from callm.config import CACHE_PATH, HF_TOKEN
 import os
+import re
 from datasets import Dataset
 from transformers import Glm4vForConditionalGeneration
 from transformers import (
@@ -119,16 +120,14 @@ def normalize_answer(text: str) -> str:
     if not isinstance(text, str):
         return str(text) if text is not None else ""
     t = text.lower().strip()
+    t = re.sub(r"\s*\([^)]*\)", "", t)  # Remove parenthetical content
+    t = t.replace("'", "").replace("-", "")
     t = t.replace("**", "")
     t = t.strip("\"'")
     t = t.strip()
     t = t.rstrip(".")
     t = t.strip()
     return t
-
-
-def remove_apostrophes_and_dashes(answer: str) -> str:
-    return answer.replace("'", "").replace("-", "")
 
 
 def check_exact_match(pred_answer: str, gold_answers: list) -> bool:
@@ -139,11 +138,6 @@ def check_exact_match(pred_answer: str, gold_answers: list) -> bool:
     norm_golds = [normalize_answer(g) for g in gold_answers]
 
     if norm_pred in norm_golds:
-        res = True
-    else:
-        # Try removing apostrophes and dashes
-        norm_pred_second = remove_apostrophes_and_dashes(norm_pred)
-        norm_golds_second = [remove_apostrophes_and_dashes(g) for g in norm_golds]
-        res = norm_pred_second in norm_golds_second
+        return True
 
-    return res
+    return False

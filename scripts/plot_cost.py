@@ -70,7 +70,7 @@ def main():
 
         ax.set_xlabel(r"$q_e$", fontsize=26)
         if ax == axes[0]:
-            ax.set_ylabel(r"ECUAS$_n$", fontsize=26)
+            ax.set_ylabel(r"$C_n^*$", fontsize=26)
 
         K_title = r"\infty" if K == float("inf") else int(K)
         ax.set_title(rf"$K = {K_title}$", fontsize=28)

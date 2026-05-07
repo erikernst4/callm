@@ -413,8 +413,8 @@ class TestCCAS:
         assert np.isfinite(cost)
 
 
-class TestGammaCCAS:
-    """Tests for Gamma-CCAS metric."""
+class TestGammaECUAS:
+    """Tests for Gamma-ECUAS metric."""
 
     def test_high_confidence_abstains(self):
         """High confidence (s < gamma) triggers abstain, cost = gamma."""
@@ -521,7 +521,7 @@ class TestGammaCCAS:
         import pytest
 
         metric = ConfidenceGammaECUAS(gamma=0.5)
-        with pytest.raises(ValueError, match="No samples to compute Gamma-CCAS."):
+        with pytest.raises(ValueError, match="No samples to compute Gamma-ECUAS."):
             metric.compute()
 
     def test_incremental_update(self):
@@ -566,7 +566,7 @@ class TestIntegration:
             "ce": ConfidenceCrossEntropy(),
             "auc": ConfidenceAUCScore(),
             "cc": CCAS(),
-            "gamma_ccaS": ConfidenceGammaECUAS(gamma=0.5),
+            "gamma_ecuas": ConfidenceGammaECUAS(gamma=0.5),
         }
 
         for metric in metrics.values():
@@ -577,7 +577,7 @@ class TestIntegration:
         ce = metrics["ce"].compute().item()
         auc = metrics["auc"].compute().item()
         cc = metrics["cc"].compute().item()
-        gc = metrics["gamma_ccaS"].compute().item()
+        gc = metrics["gamma_ecuas"].compute().item()
 
         # All should be in valid ranges
         assert 0 <= ece <= 1

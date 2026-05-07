@@ -9,6 +9,7 @@ Supports both local HuggingFace models and GCP Vertex AI (Gemini) backends acros
 |---|---|---|
 | **TriviaQA** | Open‑ended QA | Yes — uses an evaluator LLM |
 | **MMLU** | Multiple‑choice | No — exact match on answer letter |
+| **Classification** | Image/Audio/Text Classification | No — exact match on class label |
 
 ## Calibration Metrics
 
@@ -18,11 +19,13 @@ Supports both local HuggingFace models and GCP Vertex AI (Gemini) backends acros
 | **AUC** | Area Under the ROC Curve |
 | **BS** | Brier Score (MSE between confidence and correctness) |
 | **CE** | Binary Cross‑Entropy |
-| **ECUAS** | Expected Cost for Uncertainty-Augmented Systems (parameterised by n = 0, 1, 2, …) |
+| **n‑ECUAS** | Expected Cost for Uncertainty-Augmented Systems (parameterised by n = 0, 1, 2, …) |
 | **γ‑ECUAS** | Gamma‑ECUAS — selective prediction at operating point γ |
 | **AURC** | Area Under the Risk‑Coverage curve |
 | **FPR@95** | False Positive Rate at 95% recall |
 | **Error Rate** | Overall prediction error rate |
+| **LogLog** | LogLog Score (Classification) |
+| **NER / NBS / NCE** | Normalized versions of Error Rate, Brier Score, and Cross-Entropy |
 
 ## Quick Start
 
@@ -125,7 +128,8 @@ callm/
 │   ├── triviaqa/            # TriviaQA data modules
 │   ├── mmlu/                # MMLU data modules
 │   ├── answers_data.py      # Shared answer-loading utilities
-│   └── classification.py    # Classification data module
+│   ├── classification.py    # Classification data module
+│   └── simulation.py        # Simulated confidence data module
 ├── extractors/
 │   ├── base.py              # Base + posterior extractors
 │   ├── triviaqa.py          # TriviaQA verbalized-confidence extractor
@@ -135,7 +139,7 @@ callm/
 │   ├── triviaqa.py          # TriviaQA prompt templates
 │   └── mmlu.py              # MMLU prompt templates
 ├── metrics/
-│   ├── confidences.py       # Calibration metrics (ECE, AUC, BS, CE, ECUAS, …)
+│   ├── confidences.py       # Calibration metrics (ECE, AUC, BS, CE, n-ECUAS, …)
 │   ├── classification.py    # Classification-specific metric variants
 │   ├── constants.py         # Metric constants and registry
 │   └── utils.py             # Metric lookup helpers
