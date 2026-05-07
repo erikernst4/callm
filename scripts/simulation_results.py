@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
-from callm.data import SimulationDataset, SimulationDataset2D
+from callm.data import SimulationDataset, SimulationDataset1D
 from callm.metrics.utils import get_metric_from_id
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -20,8 +20,13 @@ def relative_difference(d):
 
 
 
-def plot_heatmaps(K, N, metrics, output_dir, seed):
+def plot_heatmaps(K, N, metrics, output_dir, unidim, seed):
     results = []
+
+    if unidim:
+        SimulationClass = SimulationDataset1D
+    else:
+        SimulationClass = SimulationDataset
     
     torch.manual_seed(seed+1)
     min_sigma_K = 1e-10
@@ -29,12 +34,10 @@ def plot_heatmaps(K, N, metrics, output_dir, seed):
     min_sigma_N = 1e-10
     max_sigma_N = 1
     num_grid_points = 40
-    # sigma_K_values =  (torch.rand(10) * (max_sigma_K - min_sigma_K) + min_sigma_K).tolist()
-    # sigma_N_values =  (torch.rand(10) * (max_sigma_N - min_sigma_N) + min_sigma_N).tolist()
     sigma_K_values = torch.linspace(min_sigma_K, max_sigma_K, num_grid_points).tolist()
     sigma_N_values = torch.linspace(min_sigma_N, max_sigma_N, num_grid_points).tolist()
     for sigma_K, sigma_N in tqdm(product(sigma_K_values, sigma_N_values)):
-        conf_eqclass, conf_answer, correctness, _, _ = SimulationDataset2D(
+        conf_eqclass, conf_answer, correctness, _, _ = SimulationClass(
             num_samples=1000, 
             num_eqclasses=K, 
             samples_per_eqclass=N, 
@@ -115,15 +118,18 @@ def plot_heatmaps(K, N, metrics, output_dir, seed):
     ])
     sm = cm.ScalarMappable(cmap=cmap, norm=norm)
     fig.colorbar(sm, cax=cbar_ax)
-    # fig.suptitle(f"Relative Difference between Answer and Eq-group (K={K})", fontsize=16)
-    plt.savefig(output_dir / f"heatmap_K={K}_N={N}_seed={seed}.pdf", bbox_inches="tight", dpi=300)
+    if unidim:
+        filename = f"heatmap_1D_K={K}_N={N}_seed={seed}.pdf"
+    else:
+        filename = f"heatmap_K={K}_N={N}_seed={seed}.pdf"
+    plt.savefig(output_dir / filename, bbox_inches="tight", dpi=300)
 
 
 
-def main(K, N,metrics, output_dir, seed):
+def main(K, N,metrics, output_dir, unidim, seed):
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_heatmaps(K, N, metrics, output_dir, seed=seed)
+    plot_heatmaps(K, N, metrics, output_dir, unidim=unidim, seed=seed)
 
 
 
@@ -167,5 +173,10 @@ if __name__ == "__main__":
         default=5,
         help="Number of samples per eq-class (N)",
     )
+    parser.add_argument(
+        "--unidim",
+        action="store_true",
+        help="Whether to use the 1D version of the simulation dataset (instead of K-D)",
+    )
     args = parser.parse_args()
-    main(K=args.K, N=args.N, metrics=args.metrics, output_dir=Path(args.output_dir), seed=args.seed)
+    main(K=args.K, N=args.N, metrics=args.metrics, output_dir=Path(args.output_dir), unidim=args.unidim, seed=args.seed)
