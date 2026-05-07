@@ -120,6 +120,13 @@ class ConfidenceAUCScore(BinaryAUROC):
 class ConfidenceBrierScore(MeanSquaredError):
     """Brier Score = MSE between confidence and correctness."""
 
+    def __init__(self, normalize: bool = False, **kwargs):
+        super().__init__(**kwargs)
+        self.normalize = normalize
+        if normalize:
+            self.add_state("sum_corr", default=torch.tensor(0.0), dist_reduce_fx="sum")
+            self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
         if torch.isnan(correctness).any():
             raise ValueError("NaN values found in correctness tensor.")
@@ -127,13 +134,24 @@ class ConfidenceBrierScore(MeanSquaredError):
             torch.isnan(confidences), torch.tensor(0.5), confidences
         )
         super().update(confidences.float(), correctness.float())
+        if self.normalize:
+            self.sum_corr += correctness.float().sum()
+            self.count += confidences.numel()
+
+    def compute(self) -> torch.Tensor:
+        mse = super().compute()
+        if self.normalize:
+            corr_prior = self.sum_corr / self.count
+            mse_prior = corr_prior * (1 - corr_prior) / 2
+            mse = mse / mse_prior
+        return mse
 
     @classmethod
-    def create_shortcut_function(cls):
+    def create_shortcut_function(cls, normalize: bool = False):
         def shortcut_function(
             confidences: torch.Tensor, correctness: torch.Tensor
         ) -> torch.Tensor:
-            metric = cls()
+            metric = cls(normalize=normalize)
             metric.update(confidences, correctness)
             return metric.compute().item()
 
@@ -154,11 +172,14 @@ class ConfidenceCrossEntropy(Metric):
 
     full_state_update = False
 
-    def __init__(self, epsilon: float = 1e-7, **kwargs):
+    def __init__(self, epsilon: float = 1e-7, normalize: bool = False, **kwargs):
         super().__init__(**kwargs)
         self.epsilon = epsilon
+        self.normalize = normalize
         self.add_state("sum_ce", default=torch.tensor(0.0), dist_reduce_fx="sum")
         self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+        if self.normalize:
+            self.add_state("sum_corr", default=torch.tensor(0.0), dist_reduce_fx="sum")
 
     def update(self, confidences: torch.Tensor, correctness: torch.Tensor) -> None:
         if torch.isnan(correctness).any():
@@ -171,18 +192,28 @@ class ConfidenceCrossEntropy(Metric):
         ce = F.binary_cross_entropy(conf, corr, reduction="sum")
         self.sum_ce += ce
         self.count += confidences.numel()
+        if self.normalize:
+            self.sum_corr += corr.sum()
 
     def compute(self) -> torch.Tensor:
         if self.count == 0:
             raise ValueError("No samples to compute cross entropy.")
-        return self.sum_ce / self.count
+        ce = self.sum_ce / self.count
+        if self.normalize:
+            corr_prior = self.sum_corr / self.count
+            ce_prior = -(
+                corr_prior * torch.log(corr_prior + self.epsilon) + 
+                (1 - corr_prior) * torch.log(1 - corr_prior + self.epsilon)
+            )
+            ce = ce / ce_prior
+        return ce
 
     @classmethod
-    def create_shortcut_function(cls):
+    def create_shortcut_function(cls, normalize: bool = False):
         def shortcut_function(
             confidences: torch.Tensor, correctness: torch.Tensor
         ) -> torch.Tensor:
-            metric = cls()
+            metric = cls(normalize=normalize)
             metric.update(confidences, correctness)
             return metric.compute().item()
 

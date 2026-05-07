@@ -15,7 +15,7 @@ def get_metric_from_id(id_name):
             "function": partial(METRICS["conf_n-ecuas"]["function"], n=n),
             "obj": METRICS["conf_n-ecuas"]["cls"](n=n),
             "higher_is_better": METRICS["conf_n-ecuas"]["higher_is_better"],
-            "display": f"ECUAS$^*$ (n={n})",
+            "display": f"ECUAS$_{n}$",
         }
     elif "conf_gamma-ecuas" in id_name:
         gamma = float(id_name.split("_gamma=")[-1])

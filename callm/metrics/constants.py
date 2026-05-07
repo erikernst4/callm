@@ -59,10 +59,30 @@ METRICS = OrderedDict(
             },
         ),
         (
+            "conf_norm_brier",
+            {
+                "full_name": "Confidence Normalized Brier Score",
+                "function": ConfidenceBrierScore.create_shortcut_function(normalize=True),
+                "cls": ConfidenceBrierScore,
+                "higher_is_better": False,
+                "display": "BS$^*$",
+            },
+        ),
+        (
             "conf_cross_entropy",
             {
                 "full_name": "Confidence Cross-Entropy",
                 "function": ConfidenceCrossEntropy.create_shortcut_function(),
+                "cls": ConfidenceCrossEntropy,
+                "higher_is_better": False,
+                "display": "CE$^*$",
+            },
+        ),
+        (
+            "conf_norm_cross_entropy",
+            {
+                "full_name": "Confidence Normalized Cross-Entropy",
+                "function": ConfidenceCrossEntropy.create_shortcut_function(normalize=True),
                 "cls": ConfidenceCrossEntropy,
                 "higher_is_better": False,
                 "display": "CE$^*$",
@@ -115,7 +135,7 @@ METRICS = OrderedDict(
                 "function": ConfidenceAURC.create_shortcut_function(),
                 "cls": ConfidenceAURC,
                 "higher_is_better": False,
-                "display": "AURC$^*$",
+                "display": "AURC",
             },
         ),
         ## CLASSIFICATION METRICS
