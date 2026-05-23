@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from callm.extractors import BaseExtractor
 from callm.models.base import BaseLightningModule
-from callm.metrics import (
+from ecuas import (
     ExpectedCalibrationError,
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,

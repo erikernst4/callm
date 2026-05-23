@@ -4,7 +4,7 @@ import os
 import csv
 import shutil
 import glob
-from callm.metrics import (
+from ecuas import (
     ExpectedCalibrationError,
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,

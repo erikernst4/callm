@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 # Add project root to path so we can import callm
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from callm.metrics import get_metric_from_id
+from ecuas import get_metric_from_id
 
 # ── Directory → (Method, LLM) mapping ──────────────────────────────────
 

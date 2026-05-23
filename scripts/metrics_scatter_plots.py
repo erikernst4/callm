@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 import torch
 
-from callm.metrics.classification import (
+from ecuas import (
     ClassificationCrossEntropy,
     ClassificationBrierScore,
     ClassificationErrorRate,

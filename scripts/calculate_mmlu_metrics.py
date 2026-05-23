@@ -15,7 +15,7 @@ import argparse
 import numpy as np
 import torch
 
-from callm.metrics import (
+from ecuas import (
     ExpectedCalibrationError,
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,

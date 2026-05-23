@@ -5,7 +5,7 @@ import numpy as np
 from callm.extractors import BaseExtractor
 from callm.utils import initialize_model, get_tokenizer_for_model
 from callm.models.base import BaseLightningModule
-from callm.metrics import (
+from ecuas import (
     ExpectedCalibrationError,
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,
