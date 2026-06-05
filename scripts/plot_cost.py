@@ -38,7 +38,7 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default="cost_vs_q_k_comparison.pdf",
+        default="outputs/cost_vs_q_k_comparison.pdf",
         help="Output filename for the plot.",
     )
     args = parser.parse_args()

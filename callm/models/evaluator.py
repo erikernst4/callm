@@ -13,7 +13,7 @@ import shutil
 import glob
 
 from callm.utils import initialize_model, get_tokenizer_for_model
-from callm.metrics import (
+from ecuas import (
     ExpectedCalibrationError,
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,

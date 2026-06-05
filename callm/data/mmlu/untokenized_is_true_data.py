@@ -55,22 +55,23 @@ class UntokenizedMMLUIsTrueDataModule(AnswersDataModule):
         """Override to skip tokenizer setup."""
         pass
 
-    def val_dataloader(self):
-        def collate_fn(batch):
-            return {
-                "input": [item["input"] for item in batch],
-                "question": [item["question"] for item in batch],
-                "label": [item["label"] for item in batch],
-                "pred_answer": [item["pred_answer"] for item in batch],
-                "confidence": [item["confidence"] for item in batch],
-                "raw_output": [item["raw_output"] for item in batch],
-                "index": [item["index"] for item in batch],
-            }
+    @staticmethod
+    def collate_fn(batch):
+        return {
+            "input": [item["input"] for item in batch],
+            "question": [item["question"] for item in batch],
+            "label": [item["label"] for item in batch],
+            "pred_answer": [item["pred_answer"] for item in batch],
+            "confidence": [item["confidence"] for item in batch],
+            "raw_output": [item["raw_output"] for item in batch],
+            "index": [item["index"] for item in batch],
+        }
 
+    def val_dataloader(self):
         return DataLoader(
             self.dataset,
             batch_size=self.batch_size,
-            collate_fn=collate_fn,
+            collate_fn=self.collate_fn,
             num_workers=self.num_workers,
             persistent_workers=self.num_workers > 0,
         )
