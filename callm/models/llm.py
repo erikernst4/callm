@@ -51,17 +51,25 @@ class LLM(BaseLightningModule):
         self.return_logits = return_logits
         self.max_new_tokens = max_new_tokens
 
-    def forward(self, input_ids, attention_mask):
+    def forward(
+        self,
+        input_ids,
+        attention_mask,
+        generate: bool = True,
+        return_hidden_states: bool = False,
+    ):
         """
-        Generate text output from the model.
-
-        Args:
-            input_ids: Input token IDs
-            attention_mask: Attention mask
-
-        Returns:
-            Generated token IDs
+        Forward pass of LLM to generate text and/or return hidden states.
         """
+        if not generate:
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            return outputs.hidden_states
+
         generation_kwargs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -83,7 +91,19 @@ class LLM(BaseLightningModule):
                 and self.tokenizer.pad_token_id is not None
             ):
                 generation_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
-        return self.model.generate(**generation_kwargs)
+
+        generated_ids = self.model.generate(**generation_kwargs)
+
+        if return_hidden_states:
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            return generated_ids, outputs.hidden_states
+
+        return generated_ids
 
     def training_step(self, batch, batch_idx):
         # Not implemented for this task
