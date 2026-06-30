@@ -13,6 +13,9 @@ def cli_main():
             "evaluate_csv": {
                 "default_config_files": ["configs/config_base_evaluation.yaml"]
             },
+            "extract_activations": {
+                "default_config_files": ["configs/config_extract_activations.yaml"]
+            },
             "parser_mode": "omegaconf",
         },
     )

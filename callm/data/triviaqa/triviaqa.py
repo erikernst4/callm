@@ -17,6 +17,7 @@ class TriviaQADataModule(LightningDataModule):
         seed: int = 42,
         num_workers: int = 0,
         disable_thinking: bool = False,
+        split: str = "validation",
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -27,6 +28,7 @@ class TriviaQADataModule(LightningDataModule):
         self.seed = seed
         self.num_workers = num_workers
         self.disable_thinking = disable_thinking
+        self.split = split
 
     def prepare_data(self):
         load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
@@ -36,7 +38,7 @@ class TriviaQADataModule(LightningDataModule):
         if self.tokenizer is None:
             self.tokenizer = get_tokenizer_for_model(self.model_name)
 
-        dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")["validation"]
+        dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")[self.split]
 
         # Limit samples if requested
         dataset = subsample_dataset(dataset, self.max_samples, self.seed)

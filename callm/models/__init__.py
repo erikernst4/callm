@@ -3,6 +3,7 @@ from .evaluator import EvaluatorModule
 from .gcp_llm import GCPLLM
 from .gcp_evaluator import GCPEvaluatorModule
 from .probe import ConfidenceAugmentedLLM, Probe
+from .activation_extractor import ActivationExtractor
 
 __all__ = [
     "LLM",
@@ -11,4 +12,5 @@ __all__ = [
     "GCPEvaluatorModule",
     "ConfidenceAugmentedLLM",
     "Probe",
+    "ActivationExtractor",
 ]

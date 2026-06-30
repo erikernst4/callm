@@ -172,6 +172,38 @@ class CalibrationTrainer(Trainer):
         model.log = log_printer
         model.calculate_metrics()
 
+    def extract_activations(
+        self,
+        output_dir: str = None,
+        layer_indices: list[int] | None = None,
+        save_dtype: str = "bfloat16",
+        **kwargs,
+    ):
+        """Extract and save LLM activations for probe training."""
+        model = kwargs.get("model")
+        datamodule = kwargs.get("datamodule")
+
+        if model is None:
+            raise ValueError("model is required for extract_activations")
+        if datamodule is None:
+            raise ValueError("datamodule is required for extract_activations")
+
+        if output_dir is None:
+            log_dir = self.default_root_dir or os.getcwd()
+            output_dir = os.path.join(log_dir, "activations")
+
+        # Import locally to avoid circular imports
+        from callm.models.activation_extractor import ActivationExtractor
+
+        extractor = ActivationExtractor(
+            llm=model,
+            output_dir=output_dir,
+            layer_indices=layer_indices,
+            save_dtype=save_dtype,
+        )
+
+        self.validate(model=extractor, datamodule=datamodule)
+
 
 class CalibrationCLI(LightningCLI):
     """Extended LightningCLI that runs evaluation after validation."""
@@ -224,6 +256,13 @@ class CalibrationCLI(LightningCLI):
                 # llm_outputs_path is not manually added, so let it be added by signature
             },
             "evaluate_csv": {
+                "model",
+                "dataloaders",
+                "datamodule",
+                "train_dataloaders",
+                "val_dataloaders",
+            },
+            "extract_activations": {
                 "model",
                 "dataloaders",
                 "datamodule",
