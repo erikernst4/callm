@@ -84,3 +84,8 @@ class ChatPrompt(Prompt):
                 }
             )
         return messages
+
+
+TRANSPARENT_PROMPT_ZERO_SHOT = ChatPrompt(
+    user="{{ question }}",
+)
