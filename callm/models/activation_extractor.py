@@ -58,7 +58,14 @@ class ActivationExtractor(BaseLightningModule):
 
         # 1. Run LLM with generate=True to get generated_ids
         with torch.no_grad():
-            generated_ids = self.llm(input_ids, attention_mask, generate=True)
+            generated_output = self.llm(input_ids, attention_mask, generate=True)
+
+        # When return_logits=True, model.generate() returns a GenerateOutput
+        # dict-like object with a .sequences attribute instead of a plain tensor.
+        if hasattr(generated_output, "sequences"):
+            generated_ids = generated_output.sequences
+        else:
+            generated_ids = generated_output
 
         # 2. Run LLM with generate=False to extract activations
         with torch.no_grad():
@@ -138,8 +145,9 @@ class ActivationExtractor(BaseLightningModule):
         num_samples = len(self.outputs)
         shard_size = 1000
 
-        # Save llm_outputs.csv
-        llm_outputs_file = os.path.join(self.output_dir, "llm_outputs.csv")
+        # Save llm_outputs.csv to the versioned log directory to avoid overwriting
+        log_dir = self.trainer.log_dir or self.output_dir
+        llm_outputs_file = os.path.join(log_dir, "llm_outputs.csv")
         try:
             with open(llm_outputs_file, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
