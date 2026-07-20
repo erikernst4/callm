@@ -31,14 +31,19 @@ class ActivationsDataModule(LightningDataModule):
         self,
         activations_dir: str,
         evaluation_csv: str,
-        layer_idx: int = -1,
+        layer_idx: int | list[int] | str = -1,
         batch_size: int = 64,
         num_workers: int = 4,
         pool_strategy: str = "mean",  # "mean", "last", "none"
         train_split: float = 0.8,
         seed: int = 42,
+        activations_to_use: str = "prompt",
     ):
         super().__init__()
+        if activations_to_use not in ("prompt", "answer", "both"):
+            raise ValueError(
+                f"activations_to_use must be one of 'prompt', 'answer', 'both'. Got: {activations_to_use}"
+            )
         self.activations_dir = activations_dir
         self.evaluation_csv = evaluation_csv
         self.layer_idx = layer_idx
@@ -47,6 +52,7 @@ class ActivationsDataModule(LightningDataModule):
         self.pool_strategy = pool_strategy
         self.train_split = train_split
         self.seed = seed
+        self.activations_to_use = activations_to_use
 
         self.train_dataset = None
         self.val_dataset = None
@@ -113,21 +119,75 @@ class ActivationsDataModule(LightningDataModule):
             if num_layers == 0:
                 raise ValueError(f"Sample {idx} has no saved layer activations.")
 
-            resolved_layer_key = layer_keys[self.layer_idx % num_layers]
-            act_tensor = sample["activations"][resolved_layer_key]
-
-            # Apply pool strategy
-            if self.pool_strategy == "mean":
-                pooled_act = act_tensor.mean(dim=0)  # (hidden_dim)
-            elif self.pool_strategy == "last":
-                pooled_act = act_tensor[-1]  # (hidden_dim)
-            elif self.pool_strategy == "none":
-                pooled_act = act_tensor  # (seq_len, hidden_dim)
+            # Support single integer, list of integers, or "all"
+            if isinstance(self.layer_idx, int):
+                resolved_layers = [self.layer_idx % num_layers]
+                is_multi_layer = False
+            elif isinstance(self.layer_idx, list):
+                resolved_layers = [layer_i % num_layers for layer_i in self.layer_idx]
+                is_multi_layer = True
+            elif isinstance(self.layer_idx, str) and self.layer_idx.lower() == "all":
+                resolved_layers = list(range(num_layers))
+                is_multi_layer = True
             else:
-                raise ValueError(f"Unknown pool strategy: {self.pool_strategy}")
+                raise ValueError(
+                    f"Unsupported type/value for layer_idx: {self.layer_idx}"
+                )
+
+            # Retrieve and pool activations for the resolved layers
+            layer_acts = []
+            for layer_i in resolved_layers:
+                resolved_layer_key = layer_keys[layer_i]
+                act_tensor = sample["activations"][resolved_layer_key]
+
+                # Slice activations based on activations_to_use
+                prompt_len = sample.get("prompt_length", sample["seq_len"])
+                if self.activations_to_use == "prompt":
+                    act_tensor = act_tensor[:prompt_len]
+                elif self.activations_to_use == "answer":
+                    act_tensor = act_tensor[prompt_len:]
+                elif self.activations_to_use == "both":
+                    pass
+                else:
+                    raise ValueError(
+                        f"Unknown activations_to_use: {self.activations_to_use}"
+                    )
+
+                if act_tensor.shape[0] == 0:
+                    # Safe fallback for empty slices (e.g. empty answer or old cache)
+                    if self.pool_strategy in ("mean", "last"):
+                        pooled_act = torch.zeros(
+                            act_tensor.shape[1],
+                            device=act_tensor.device,
+                            dtype=act_tensor.dtype,
+                        )
+                    else:
+                        pooled_act = act_tensor
+                else:
+                    # Apply pool strategy
+                    if self.pool_strategy == "mean":
+                        pooled_act = act_tensor.mean(dim=0)  # (hidden_dim)
+                    elif self.pool_strategy == "last":
+                        pooled_act = act_tensor[-1]  # (hidden_dim)
+                    elif self.pool_strategy == "none":
+                        pooled_act = act_tensor  # (seq_len, hidden_dim)
+                    else:
+                        raise ValueError(f"Unknown pool strategy: {self.pool_strategy}")
+
+                layer_acts.append(pooled_act.float())
+
+            if is_multi_layer:
+                # Stack along a new layer dimension (dim=0)
+                final_act = torch.stack(layer_acts, dim=0)
+            else:
+                final_act = layer_acts[0]
 
             dataset_samples.append(
-                {"activations": pooled_act, "correct": correctness_map[idx]}
+                {
+                    "activations": final_act,
+                    "correct": correctness_map[idx],
+                    "is_multi_layer": is_multi_layer,
+                }
             )
 
         if not dataset_samples:
@@ -160,19 +220,42 @@ class ActivationsDataModule(LightningDataModule):
     @staticmethod
     def collate_fn(batch):
         correct = torch.tensor([item["correct"] for item in batch], dtype=torch.long)
-
         first_act = batch[0]["activations"]
-        if first_act.ndim == 1:
-            # Already pooled: stack into (batch_size, hidden_dim)
-            activations = torch.stack([item["activations"] for item in batch])
-        elif first_act.ndim == 2:
-            # Sequence: pad into (batch_size, max_seq_len, hidden_dim)
-            activations_list = [item["activations"] for item in batch]
-            activations = torch.nn.utils.rnn.pad_sequence(
-                activations_list, batch_first=True, padding_value=0.0
-            )
+        is_multi_layer = batch[0].get("is_multi_layer", False)
+
+        if not is_multi_layer:
+            if first_act.ndim == 1:
+                # Already pooled: stack into (batch_size, hidden_dim)
+                activations = torch.stack([item["activations"] for item in batch])
+            elif first_act.ndim == 2:
+                # Sequence: pad into (batch_size, max_seq_len, hidden_dim)
+                activations_list = [item["activations"] for item in batch]
+                activations = torch.nn.utils.rnn.pad_sequence(
+                    activations_list, batch_first=True, padding_value=0.0
+                )
+            else:
+                raise ValueError(
+                    f"Unexpected activation tensor shape: {first_act.shape}"
+                )
         else:
-            raise ValueError(f"Unexpected activation tensor shape: {first_act.shape}")
+            if first_act.ndim == 2:
+                # Multi-layer, pre-pooled: shape of each item is (num_layers, hidden_dim)
+                # Stack into (batch_size, num_layers, hidden_dim)
+                activations = torch.stack([item["activations"] for item in batch])
+            elif first_act.ndim == 3:
+                # Multi-layer, sequence: shape of each item is (num_layers, seq_len, hidden_dim)
+                # Pad sequence dimension (dim=1) across batch.
+                # To do this, permute each to (seq_len, num_layers, hidden_dim)
+                permuted_list = [item["activations"].permute(1, 0, 2) for item in batch]
+                padded = torch.nn.utils.rnn.pad_sequence(
+                    permuted_list, batch_first=True, padding_value=0.0
+                )  # (batch_size, max_seq_len, num_layers, hidden_dim)
+                # Permute back to (batch_size, num_layers, max_seq_len, hidden_dim)
+                activations = padded.permute(0, 2, 1, 3)
+            else:
+                raise ValueError(
+                    f"Unexpected multi-layer activation tensor shape: {first_act.shape}"
+                )
 
         return {
             "activations": activations,

@@ -67,15 +67,33 @@ class ActivationExtractor(BaseLightningModule):
         else:
             generated_ids = generated_output
 
-        # 2. Run LLM with generate=False to extract activations
+        batch_size = input_ids.shape[0]
+        input_length = input_ids.shape[1] if not self.llm.is_seq2seq else 0
+
+        # 2. Run forward pass on full sequence (prompt + answer) to extract activations
         with torch.no_grad():
-            hidden_states = self.llm(input_ids, attention_mask, generate=False)
+            if not self.llm.is_seq2seq:
+                # For causal LMs: generated_ids = [prompt | answer]
+                full_ids = generated_ids
+                # Build attention mask: keep original prompt mask (which may
+                # have left-padding zeros) and append ones for the generated
+                # answer tokens (which are never padding).
+                answer_len = full_ids.shape[1] - input_ids.shape[1]
+                answer_mask = torch.ones(
+                    batch_size,
+                    answer_len,
+                    device=attention_mask.device,
+                    dtype=attention_mask.dtype,
+                )
+                full_attention_mask = torch.cat([attention_mask, answer_mask], dim=1)
+                hidden_states = self.llm(full_ids, full_attention_mask, generate=False)
+            else:
+                # For seq2seq: prompt activations come from encoder on input_ids
+                full_attention_mask = attention_mask
+                hidden_states = self.llm(input_ids, attention_mask, generate=False)
 
         if not isinstance(hidden_states, (list, tuple)):
             hidden_states = (hidden_states,)
-
-        batch_size = input_ids.shape[0]
-        input_length = input_ids.shape[1] if not self.llm.is_seq2seq else 0
 
         for i in range(batch_size):
             # Decode generated output
@@ -88,7 +106,9 @@ class ActivationExtractor(BaseLightningModule):
 
             # Extract specified layers
             sample_activations = {}
-            valid_mask = attention_mask[i] == 1
+            # valid_mask covers the full sequence (prompt + answer), minus left-padding
+            valid_mask = full_attention_mask[i] == 1
+            prompt_length = int((attention_mask[i] == 1).sum().item())
             num_layers = len(hidden_states)
             target_layers = self.layer_indices
             if target_layers is None:
@@ -120,6 +140,7 @@ class ActivationExtractor(BaseLightningModule):
                     "raw_output": raw_output,
                     "activations": sample_activations,
                     "seq_len": int(valid_mask.sum().item()),
+                    "prompt_length": prompt_length,
                 }
             )
 
@@ -179,6 +200,7 @@ class ActivationExtractor(BaseLightningModule):
                     {
                         "activations": sample["activations"],
                         "seq_len": sample["seq_len"],
+                        "prompt_length": sample["prompt_length"],
                         "sample_idx": sample["sample_idx"],
                     }
                 )
