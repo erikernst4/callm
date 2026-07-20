@@ -19,6 +19,19 @@ class CalibrationTrainer(Trainer):
         evaluator_batch_size: int = 8,
         **kwargs,
     ):
+        # Ensure CSVLogger is added by default to capture metrics
+        loggers = kwargs.get("logger")
+        save_dir = kwargs.get("default_root_dir", os.getcwd())
+        csv_logger = CSVLogger(save_dir=save_dir)
+        if loggers is None or loggers is True:
+            kwargs["logger"] = csv_logger
+        elif isinstance(loggers, list):
+            if not any(isinstance(logger, CSVLogger) for logger in loggers):
+                loggers.append(csv_logger)
+        else:
+            if not isinstance(loggers, CSVLogger):
+                kwargs["logger"] = [loggers, csv_logger]
+
         super().__init__(*args, **kwargs)
         self.evaluate_correctness = evaluate_correctness
         self.evaluator_model_name = evaluator_model_name
