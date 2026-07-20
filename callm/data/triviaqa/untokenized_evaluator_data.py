@@ -1,9 +1,10 @@
 from torch.utils.data import DataLoader
 from datasets import Dataset
+from typing import Optional
 
 from callm.data.answers_data import AnswersDataModule
 from callm.utils import subsample_dataset, check_exact_match
-from callm.data.triviaqa.evaluator_data import SEMANTIC_EQUIVALENCE_PROMPT
+from callm.prompts import Prompt, SEMANTIC_EQUIVALENCE_PROMPT
 
 
 class UntokenizedEvaluatorDataModule(AnswersDataModule):
@@ -11,6 +12,10 @@ class UntokenizedEvaluatorDataModule(AnswersDataModule):
 
     Skips tokenization entirely and supplies the raw evaluator string as 'input'.
     """
+
+    def __init__(self, prompt: Optional[Prompt] = None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.prompt = prompt if prompt is not None else SEMANTIC_EQUIVALENCE_PROMPT
 
     def setup(self, stage: str = None):
         # We purposely don't initialize internal self.tokenizer from the base class `self._setup_tokenizer()`
@@ -38,7 +43,7 @@ class UntokenizedEvaluatorDataModule(AnswersDataModule):
                 prompts.append("")  # Won't be used
             else:
                 exact_matches.append(False)
-                prompt = SEMANTIC_EQUIVALENCE_PROMPT.render(
+                prompt = self.prompt(
                     question=question,
                     pred_answer=pred_answer,
                     gold_answers=gold_answers,

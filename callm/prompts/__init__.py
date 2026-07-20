@@ -34,3 +34,8 @@ from callm.prompts.mmlu import (  # noqa: F401
     format_choices,
     answer_index_to_letter,
 )
+
+from callm.prompts.correctness_evaluation import (  # noqa: F401
+    SEMANTIC_EQUIVALENCE_PROMPT,
+    SEMANTIC_EQUIVALENCE_PROMPT_FOR_FREE_ANSWERS,
+)

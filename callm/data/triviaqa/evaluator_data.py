@@ -7,24 +7,19 @@ for batched evaluation.
 
 from torch.utils.data import DataLoader
 from datasets import Dataset
-from jinja2 import Template
+from typing import Optional
 
 from callm.data.answers_data import AnswersDataModule
 from callm.utils import subsample_dataset, check_exact_match
-
-SEMANTIC_EQUIVALENCE_PROMPT = Template(
-    """Is the predicted answer to my question semantically equivalent to any of the gold standard answers?
-
-Question: {{ question }}
-Predicted answer: {{ pred_answer }}
-Gold Standard Answers: {{ gold_answers }}
-
-Please answer with a single word, either 'Yes.' or 'No.'"""
-)
+from callm.prompts import SEMANTIC_EQUIVALENCE_PROMPT, Prompt
 
 
 class EvaluatorDataModule(AnswersDataModule):
     """DataModule for batched correctness evaluation."""
+
+    def __init__(self, prompt: Optional[Prompt] = None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.prompt = prompt if prompt is not None else SEMANTIC_EQUIVALENCE_PROMPT
 
     def setup(self, stage: str = None):
         self._setup_tokenizer()
@@ -51,7 +46,7 @@ class EvaluatorDataModule(AnswersDataModule):
                 prompts.append("")  # Won't be used
             else:
                 exact_matches.append(False)
-                prompt = SEMANTIC_EQUIVALENCE_PROMPT.render(
+                prompt = self.prompt(
                     question=question,
                     pred_answer=pred_answer,
                     gold_answers=gold_answers,
