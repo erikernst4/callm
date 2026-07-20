@@ -196,7 +196,7 @@ class GCPEvaluatorModule(BaseLightningModule):
                 for result in self.outputs:
                     conf_str = (
                         f"{float(result['confidence']):.6f}"
-                        if result["confidence"] not in ["nan", ""]
+                        if result["confidence"] not in ["nan", "", None]
                         else "nan"
                     )
                     evaluator_resp = result.get("evaluator_response", "")
