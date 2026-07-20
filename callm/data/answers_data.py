@@ -130,7 +130,6 @@ class AnswersDataModule(LightningDataModule):
                     "question",
                     "gold_answers",
                     "pred_answer",
-                    "confidence",
                 ]
                 if any(row.get(k) is None for k in required_cols):
                     raise ValueError(
@@ -143,7 +142,7 @@ class AnswersDataModule(LightningDataModule):
                         g.strip().lower() for g in row["gold_answers"].split("|")
                     ],
                     "pred_answer": row["pred_answer"],
-                    "confidence": row["confidence"],
+                    "confidence": row.get("confidence"),
                     "raw_output": row.get("raw_output", ""),
                     "index": i,
                 }
