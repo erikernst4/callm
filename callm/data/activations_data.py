@@ -3,6 +3,7 @@ import csv
 import glob
 import torch
 import random
+from tqdm import tqdm
 from lightning import LightningDataModule
 from torch.utils.data import Dataset, DataLoader
 
@@ -86,7 +87,7 @@ class ActivationsDataModule(LightningDataModule):
                 is_correct = row[correct_col].strip().lower() == "yes"
                 correctness_map[i] = is_correct
 
-        # 2. Find and load all activation shards
+        # 2. Stream load activation shards and extract target layer(s) on-the-fly to save RAM
         shard_files = sorted(
             glob.glob(os.path.join(self.activations_dir, "activations_*.pt"))
         )
@@ -95,100 +96,107 @@ class ActivationsDataModule(LightningDataModule):
                 f"No activation shards found in {self.activations_dir}"
             )
 
-        all_samples = []
-        for shard_file in shard_files:
+        dataset_samples = []
+        for shard_file in tqdm(
+            shard_files,
+            desc=f"Loading activation shards ({self.activations_to_use})",
+        ):
             try:
-                shard_data = torch.load(
+                shard_samples = torch.load(
                     shard_file, map_location="cpu", weights_only=False
                 )
-                all_samples.extend(shard_data)
             except Exception as e:
                 raise RuntimeError(f"Failed to load activation shard {shard_file}: {e}")
 
-        # 3. Align and pool activations
-        dataset_samples = []
-        for sample in all_samples:
-            idx = sample["sample_idx"]
-            if idx not in correctness_map:
-                # If evaluation is incomplete or samples mismatched, skip or warning
-                continue
+            for sample in shard_samples:
+                idx = sample["sample_idx"]
+                if idx not in correctness_map:
+                    # If evaluation is incomplete or samples mismatched, skip
+                    continue
 
-            # Resolve layer index
-            layer_keys = sorted(list(sample["activations"].keys()))
-            num_layers = len(layer_keys)
-            if num_layers == 0:
-                raise ValueError(f"Sample {idx} has no saved layer activations.")
+                layer_keys = sorted(list(sample["activations"].keys()))
+                num_layers = len(layer_keys)
+                if num_layers == 0:
+                    raise ValueError(f"Sample {idx} has no saved layer activations.")
 
-            # Support single integer, list of integers, or "all"
-            if isinstance(self.layer_idx, int):
-                resolved_layers = [self.layer_idx % num_layers]
-                is_multi_layer = False
-            elif isinstance(self.layer_idx, list):
-                resolved_layers = [layer_i % num_layers for layer_i in self.layer_idx]
-                is_multi_layer = True
-            elif isinstance(self.layer_idx, str) and self.layer_idx.lower() == "all":
-                resolved_layers = list(range(num_layers))
-                is_multi_layer = True
-            else:
-                raise ValueError(
-                    f"Unsupported type/value for layer_idx: {self.layer_idx}"
-                )
-
-            # Retrieve and pool activations for the resolved layers
-            layer_acts = []
-            for layer_i in resolved_layers:
-                resolved_layer_key = layer_keys[layer_i]
-                act_tensor = sample["activations"][resolved_layer_key]
-
-                # Slice activations based on activations_to_use
-                prompt_len = sample.get("prompt_length", sample["seq_len"])
-                if self.activations_to_use == "prompt":
-                    act_tensor = act_tensor[:prompt_len]
-                elif self.activations_to_use == "answer":
-                    act_tensor = act_tensor[prompt_len:]
-                elif self.activations_to_use == "both":
-                    pass
+                # Support single integer, list of integers, or "all"
+                if isinstance(self.layer_idx, int):
+                    resolved_layers = [self.layer_idx % num_layers]
+                    is_multi_layer = False
+                elif isinstance(self.layer_idx, list):
+                    resolved_layers = [
+                        layer_i % num_layers for layer_i in self.layer_idx
+                    ]
+                    is_multi_layer = True
+                elif (
+                    isinstance(self.layer_idx, str) and self.layer_idx.lower() == "all"
+                ):
+                    resolved_layers = list(range(num_layers))
+                    is_multi_layer = True
                 else:
                     raise ValueError(
-                        f"Unknown activations_to_use: {self.activations_to_use}"
+                        f"Unsupported type/value for layer_idx: {self.layer_idx}"
                     )
 
-                if act_tensor.shape[0] == 0:
-                    # Safe fallback for empty slices (e.g. empty answer or old cache)
-                    if self.pool_strategy in ("mean", "last"):
-                        pooled_act = torch.zeros(
-                            act_tensor.shape[1],
-                            device=act_tensor.device,
-                            dtype=act_tensor.dtype,
+                # Retrieve and pool activations for the resolved layers
+                layer_acts = []
+                for layer_i in resolved_layers:
+                    resolved_layer_key = layer_keys[layer_i]
+                    act_tensor = sample["activations"][resolved_layer_key]
+
+                    # Slice activations based on activations_to_use
+                    prompt_len = sample.get("prompt_length", sample["seq_len"])
+                    if self.activations_to_use == "prompt":
+                        act_tensor = act_tensor[:prompt_len]
+                    elif self.activations_to_use == "answer":
+                        act_tensor = act_tensor[prompt_len:]
+                    elif self.activations_to_use == "both":
+                        pass
+                    else:
+                        raise ValueError(
+                            f"Unknown activations_to_use: {self.activations_to_use}"
                         )
+
+                    if act_tensor.shape[0] == 0:
+                        # Safe fallback for empty slices (e.g. empty answer or old cache)
+                        if self.pool_strategy in ("mean", "last"):
+                            pooled_act = torch.zeros(
+                                act_tensor.shape[1],
+                                device=act_tensor.device,
+                                dtype=act_tensor.dtype,
+                            )
+                        else:
+                            pooled_act = act_tensor
                     else:
-                        pooled_act = act_tensor
+                        # Apply pool strategy
+                        if self.pool_strategy == "mean":
+                            pooled_act = act_tensor.mean(dim=0)  # (hidden_dim)
+                        elif self.pool_strategy == "last":
+                            pooled_act = act_tensor[-1]  # (hidden_dim)
+                        elif self.pool_strategy == "none":
+                            pooled_act = act_tensor  # (seq_len, hidden_dim)
+                        else:
+                            raise ValueError(
+                                f"Unknown pool strategy: {self.pool_strategy}"
+                            )
+
+                    layer_acts.append(pooled_act.float())
+
+                if is_multi_layer:
+                    # Stack along a new layer dimension (dim=0)
+                    final_act = torch.stack(layer_acts, dim=0)
                 else:
-                    # Apply pool strategy
-                    if self.pool_strategy == "mean":
-                        pooled_act = act_tensor.mean(dim=0)  # (hidden_dim)
-                    elif self.pool_strategy == "last":
-                        pooled_act = act_tensor[-1]  # (hidden_dim)
-                    elif self.pool_strategy == "none":
-                        pooled_act = act_tensor  # (seq_len, hidden_dim)
-                    else:
-                        raise ValueError(f"Unknown pool strategy: {self.pool_strategy}")
+                    final_act = layer_acts[0]
 
-                layer_acts.append(pooled_act.float())
+                dataset_samples.append(
+                    {
+                        "activations": final_act,
+                        "correct": correctness_map[idx],
+                        "is_multi_layer": is_multi_layer,
+                    }
+                )
 
-            if is_multi_layer:
-                # Stack along a new layer dimension (dim=0)
-                final_act = torch.stack(layer_acts, dim=0)
-            else:
-                final_act = layer_acts[0]
-
-            dataset_samples.append(
-                {
-                    "activations": final_act,
-                    "correct": correctness_map[idx],
-                    "is_multi_layer": is_multi_layer,
-                }
-            )
+            del shard_samples
 
         if not dataset_samples:
             raise ValueError(
