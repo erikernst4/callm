@@ -45,7 +45,7 @@ trainer:
 model:
   class_path: callm.models.GCPLLM
   init_args:
-    model_name: gemini-2.5-flash
+    model_name: gemini-2.5-pro
     return_logits: true
     extractor:
       class_path: callm.extractors.IsTruePosteriorExtractor
@@ -53,7 +53,7 @@ model:
       #   model_name: ${model.init_args.model_name}
     save_outputs: false
     flush_outputs_every_n_steps: 100
-    max_new_tokens: 10
+    max_new_tokens: 500
     location: "global"
 data:
   class_path: callm.data.UntokenizedMMLUIsTrueDataModule
@@ -63,7 +63,7 @@ data:
     max_samples: 1000
     seed: 42
     num_workers: 8
-    llm_outputs_path: /home/eernst/callm/lightning_logs/mmlu/label_prob_gemini-2.5-flash/llm_outputs.csv
+    llm_outputs_path: /home/eernst/callm/lightning_logs/paper_results/mmlu/label_prob_gemini-2.5-pro/llm_outputs.csv
 optimizer: null
 lr_scheduler: null
 ckpt_path: null

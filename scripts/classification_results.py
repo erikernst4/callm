@@ -1,19 +1,15 @@
-from itertools import product
 from pathlib import Path
 
 import numpy as np
 import torch
-from tqdm import tqdm
-from callm.metrics import get_metric_from_id
+from ecuas import get_metric_from_id
 from callm.data.classification import DATASETS
-from callm.data import SimulationDataset
 import pandas as pd
 import subprocess
 import tempfile
 import os
 import matplotlib.pyplot as plt
 from expected_cost.calibration import calibration_with_crossval
-import matplotlib.cm as cm
 
 # ── Standard table layout ─────────────────────────────────────────────
 
@@ -82,7 +78,9 @@ def generate_results_table(
                 cal_inpt, idx = torch.softmax(calibrated_logprobs, dim=1).max(dim=1)
                 cal_tgt = (idx == labels).long()
             else:
-                raise ValueError(f"Metric ID {metric} is not recognized as classification or confidence metric.")
+                raise ValueError(
+                    f"Metric ID {metric} is not recognized as classification or confidence metric."
+                )
             results.append(
                 {
                     "dataset_model": dataset,
@@ -133,7 +131,10 @@ def generate_results_table(
     df.reset_index().to_csv(output_filename.with_suffix(".csv"), index=False)
 
     # compute the higher_is_better dict for the metrics in the table
-    higher_is_better = {r"\textbf{" + unique_metrics[metric] + r"}" : higher_is_better[metric] for metric in table_metrics}
+    higher_is_better = {
+        r"\textbf{" + unique_metrics[metric] + r"}": higher_is_better[metric]
+        for metric in table_metrics
+    }
     # import pdb; pdb.set_trace()  # --- IGNORE ---
     df = highlight_best_systems(df, higher_is_better)
 
@@ -157,10 +158,17 @@ def highlight_best_systems(df: pd.DataFrame, higher_is_better: dict) -> pd.DataF
 
             for model, proc in best_mask.index:
                 if best_mask.loc[(model, proc)]:
-                    df_str.loc[(dataset, model, proc), metric] = r"\textbf{" + f"{float(df.loc[(dataset, model, proc), metric]):.4f}" + r"}"
+                    df_str.loc[(dataset, model, proc), metric] = (
+                        r"\textbf{"
+                        + f"{float(df.loc[(dataset, model, proc), metric]):.4f}"
+                        + r"}"
+                    )
                 else:
-                    df_str.loc[(dataset, model, proc), metric] = f"{float(df.loc[(dataset, model, proc), metric]):.4f}"
+                    df_str.loc[(dataset, model, proc), metric] = (
+                        f"{float(df.loc[(dataset, model, proc), metric]):.4f}"
+                    )
     return df_str
+
 
 def generate_latex(df: pd.DataFrame, output_filename: Path):
     latex_doc = df.to_latex(
@@ -301,7 +309,10 @@ def plot_temperature_ecuas(
     logs_dir: Path, output_path: Path, temperatures: list[float], nseeds: int = 5
 ):
     from collections import OrderedDict
-    DATASETS2 = OrderedDict(list(DATASETS.items())[:10])  # Only use the first 10 datasets for this plot to avoid clutter
+
+    DATASETS2 = OrderedDict(
+        list(DATASETS.items())[:10]
+    )  # Only use the first 10 datasets for this plot to avoid clutter
     fig, ax = plt.subplots(1, 2, figsize=(10, 4), sharex=True)
     ns = [0, 1]
     for i, n in enumerate(ns):
@@ -321,20 +332,26 @@ def plot_temperature_ecuas(
                     if temp == 0:
                         pred = torch.argmax(calibrated_logprobs, dim=1)
                     else:
-                        pred = torch.distributions.Categorical(logits=calibrated_logprobs / temp).sample()
+                        pred = torch.distributions.Categorical(
+                            logits=calibrated_logprobs / temp
+                        ).sample()
                     probs = torch.softmax(calibrated_logprobs, dim=1)
                     confidence = probs[torch.arange(probs.size(0)), pred]
                     correctness = (pred == labels).float()
                     metric_info = get_metric_from_id(f"conf_n-ecuas_n={n}")
-                    seed_results.append(metric_info["function"](confidence, correctness))
-                results.append({
-                    "dataset": DATASETS2[dataset]["dataset"],
-                    "model": DATASETS2[dataset]["model"],
-                    "temp": temp,
-                    "median": np.median(seed_results),
-                    "q1": np.percentile(seed_results, 25),
-                    "q3": np.percentile(seed_results, 75),
-                })
+                    seed_results.append(
+                        metric_info["function"](confidence, correctness)
+                    )
+                results.append(
+                    {
+                        "dataset": DATASETS2[dataset]["dataset"],
+                        "model": DATASETS2[dataset]["model"],
+                        "temp": temp,
+                        "median": np.median(seed_results),
+                        "q1": np.percentile(seed_results, 25),
+                        "q3": np.percentile(seed_results, 75),
+                    }
+                )
             df = pd.DataFrame(results)
             ax[i].plot(
                 df["temp"],
@@ -354,19 +371,20 @@ def plot_temperature_ecuas(
 
     # set global legend outside the plot
     handles, labels = ax[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1, 0.5), ncol=1)
+    fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5), ncol=1)
     fig.tight_layout()
     plt.savefig(output_path, bbox_inches="tight", dpi=300)
 
 
-
-def main(gammas, ns, temperatures, table_metrics, logs_dir, output_dir, seed, nseeds = 5):
+def main(gammas, ns, temperatures, table_metrics, logs_dir, output_dir, seed, nseeds=5):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Generating results table...")
-    df = generate_results_table(logs_dir, table_metrics, output_dir / "classification_results", seed=seed)
+    df = generate_results_table(
+        logs_dir, table_metrics, output_dir / "classification_results", seed=seed
+    )
     generate_latex(df, output_dir / "classification_results")
-    
+
     # print("Generating n-ECUAS plot...")
     # plot_ecuas(logs_dir, output_dir / "classification_ecuas_plot.pdf", ns=ns, normalize=False)
 
@@ -382,7 +400,7 @@ def main(gammas, ns, temperatures, table_metrics, logs_dir, output_dir, seed, ns
         logs_dir,
         output_dir / "classification_temperature_ecuas_plot.pdf",
         temperatures=temperatures,
-        nseeds = nseeds,
+        nseeds=nseeds,
     )
 
 
@@ -449,4 +467,13 @@ if __name__ == "__main__":
     logs_dir = Path(args.logs_dir)
     output_dir = Path(args.output_dir)
 
-    main(args.gammas, args.ns, args.temps, args.table_metrics, logs_dir, output_dir, args.seed, args.nseeds)
+    main(
+        args.gammas,
+        args.ns,
+        args.temps,
+        args.table_metrics,
+        logs_dir,
+        output_dir,
+        args.seed,
+        args.nseeds,
+    )
