@@ -24,8 +24,8 @@ dataset2display = {
 
 model2display = {
     "resnet20": "ResNet-20",
-    "vgg16_bn": "VGG-16",
-    "shufflenetv2_x2_0": "ShuffleNetV2",
+    "vgg19_bn": "VGG-19",
+    "repvgg_a2": "RepVGG-A2",
 }
 
 
@@ -82,52 +82,55 @@ def main(
 
     all_results = []
 
-    for model in ["resnet20", "vgg16_bn", "shufflenetv2_x2_0"]:
+    for model in ["resnet20", "vgg19_bn", "repvgg_a2"]:
         for dataset in ["cifar10", "cifar100"]:
-            # net = torch.hub.load("checkpoints/chenyaofo/pytorch-cifar-models", f"{dataset}_{model}", pretrained=True, trust_repo=True, source="local")
-            # net = net.to(device)
+            net = torch.hub.load("checkpoints/chenyaofo/pytorch-cifar-models", f"{dataset}_{model}", pretrained=True, trust_repo=True, source="local")
+            net = net.to(device)
 
-            for shift_severity in [1, 2, 3, 4, 5]:
+            for shift_severity in [5]:
 
-                # if dataset == "cifar10":
-                #     datamodule = CIFAR10DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_shift=True, shift_severity=shift_severity, eval_ood=True)
-                # elif dataset == "cifar100":
-                #     datamodule = CIFAR100DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_shift=True, shift_severity=shift_severity, eval_ood=True)
-                # datamodule.prepare_data()
+                if dataset == "cifar10":
+                    datamodule = CIFAR10DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_shift=True, shift_severity=shift_severity, eval_ood=True)
+                elif dataset == "cifar100":
+                    datamodule = CIFAR100DataModule(root="./data", batch_size=batch_size, num_workers=8, eval_shift=True, shift_severity=shift_severity, eval_ood=True)
+                datamodule.prepare_data()
 
                 # Define the outputs directory for the current model, dataset, and shift severity
                 outputs_dir = root_outputs_dir / model / dataset
                 outputs_dir.mkdir(parents=True, exist_ok=True)
 
-                # datamodule.setup(stage="test")
-                # id_test_loader, ood_test_loader, shift_test_loader = datamodule.test_dataloader()
-                # test_loaders = {
-                #     "ID": id_test_loader,
-                #     "OOD": ood_test_loader,
-                #     "Shift": shift_test_loader,
-                # }
+                datamodule.setup(stage="test")
+                id_test_loader, ood_test_loader, shift_test_loader = datamodule.test_dataloader()
+                test_loaders = {
+                    "ID": id_test_loader,
+                    "OOD": ood_test_loader,
+                    "Shift": shift_test_loader,
+                }
 
                 print(f"Computing for model {model} and dataset {dataset} with shift severity {shift_severity}...")
 
                 # for prefix in ["ID", "OOD", "Shift"]:
-                for prefix in ["ID", "OOD"]:
+                for prefix in ["ID", "Shift"]:
 
                     if prefix == "ID":
                         results_path = outputs_dir / f"results_ID.csv"
-                        dataset_name = dataset2display[dataset] + " (ID)"
+                        dataset_base = dataset2display[dataset]
+                        dataset_type = "ID"
                     elif prefix == "OOD":
                         results_path = outputs_dir / f"results_OOD.csv"
-                        dataset_name = dataset2display[dataset] + f" (OOD)"
+                        dataset_base = dataset2display[dataset]
+                        dataset_type = "OOD"
                     elif prefix == "Shift":
                         results_path = outputs_dir / f"results_Shift_severity={shift_severity}.csv"
-                        dataset_name = dataset2display[dataset] + f" (Shift, severity={shift_severity})"
+                        dataset_base = dataset2display[dataset]
+                        dataset_type = f"Shift (severity={shift_severity})"
 
                     if results_path.exists():
                         print(f"Results already exist at {results_path}. Skipping computation.")
                         results = pd.read_csv(results_path)
 
                     else:
-                        # test_loader = test_loaders[prefix]
+                        test_loader = test_loaders[prefix]
                         test_labels = torch.cat([item[1] for item in test_loader], dim=0)
                         test_labels_df = pd.DataFrame(test_labels.numpy(), columns=["label"])
 
@@ -136,38 +139,27 @@ def main(
 
                         # Compute metrics and save results
                         results = compute_metrics(scores, test_labels_df, metrics=EVAL_METRICS)
-                        results["severity"] = shift_severity
                         results["model"] = model2display[model]
-                        results["dataset"] = dataset_name
+                        results["dataset-base"] = dataset_base
+                        results["dataset-type"] = dataset_type
 
                         results.to_csv(results_path, index=False)
 
                     all_results.append(results)
 
     df_all_results = pd.concat(all_results, axis=0)
-    # df_all_results = df_all_results.pivot_table(
-    #     index=["model", "dataset"],
-    #     columns="metric",
-    #     values="value",
-    # ).reset_index()
-    df_all_results.to_csv(root_outputs_dir / f"results.csv", index=False)
-    generate_latex_table(df_all_results, root_outputs_dir / f"results", root_outputs_dir=root_outputs_dir)
-
-
-def generate_latex_table(df_all_results, output_filename: Path, root_outputs_dir: Path):
-
-    # import pdb; pdb.set_trace()
-
-    df_all_results["dataset-base"] = df_all_results["dataset"].apply(lambda x: x.split(" ")[0])
-    df_all_results["dataset-type"] = df_all_results["dataset"].apply(lambda x: " ".join(x.split(" ")[1:]).strip("()"))
-    df_all_results.drop(columns=["dataset"], inplace=True)
     df_all_results = df_all_results.pivot_table(
         index=["dataset-base", "model"],
         columns=["metric", "dataset-type"],
         values="value",
     )
-    # Remove column index name
     df_all_results.columns.name = None
+    df_all_results.to_csv(root_outputs_dir / f"results.csv", index=False)
+    generate_latex_table(df_all_results, root_outputs_dir / f"results")
+
+
+def generate_latex_table(df_all_results, output_filename: Path):
+
     latex_doc = df_all_results.to_latex(
         index=True, 
         float_format="%.4f",
