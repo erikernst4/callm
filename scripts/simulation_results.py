@@ -117,14 +117,14 @@ def plot_heatmaps(K, N, metrics, output_dir, unidim, seed):
         ax[j].set_title(f"Relative {unique_metrics[metric]} change", fontsize=14)
         ax[j].set_xlabel(r"$\sigma_N$", fontsize=14)
 
-    pos_left = ax[0].get_position()  # bounding box del primer plot
-    pos_right = ax[-1].get_position()  # bounding box del último plot
+    pos_left = ax[0].get_position()  # bounding box of the first plot
+    pos_right = ax[-1].get_position()  # bounding box of the last plot
     cbar_ax = fig.add_axes(
         [
-            pos_right.x1 + 0.01,  # justo a la derecha del último plot
-            pos_left.y0,  # mismo bottom
-            0.02,  # ancho de la barra
-            pos_left.height,  # mismo alto que los plots
+            pos_right.x1 + 0.01,  # right to the right of the last plot
+            pos_left.y0,  # same bottom
+            0.02,  # colorbar width
+            pos_left.height,  # same height as the plots
         ]
     )
     sm = cm.ScalarMappable(cmap=cmap, norm=norm)
