@@ -164,8 +164,9 @@ MMLU variants (`MMLUSequencePosteriorExtractor`, `MMLUVerbalizedExtractor`, etc.
 
 ## Reproducing Paper Results
 
-All results in the paper can be reproduced using the scripts in the `scripts/` directory.
-Each script is self-contained and can be run from the project root with `uv run python scripts/<script>.py`.
+Main benchmark runs (TriviaQA, MMLU) are executed using the CLI commands detailed in the [Usage](#usage) section above. The scripts in `scripts/` are used to perform post-processing, re-evaluations, classification/simulation experiments, and to generate the final paper tables and figures.
+
+Each script can be run from the project root using `uv run python scripts/<script>.py`.
 
 ### LLM Experiments & Evaluation
 
