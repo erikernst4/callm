@@ -6,16 +6,8 @@ import tempfile
 import pandas as pd
 import torch
 from ecuas import get_metric_from_id
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-import yaml
-import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
 from torch_uncertainty.datamodules import CIFAR10DataModule, CIFAR100DataModule
-
-from scripts.merge_mmlu_istrue import compute_metrics
+from tqdm import tqdm
 
 dataset2display = {
     "cifar10": "CIFAR-10",
@@ -36,10 +28,10 @@ EVAL_METRICS = [
     "cls_auc",
     "cls_aurc",
     "cls_ece_nbins=10",
-    # "cls_norm_loglog",
     "cls_norm_n-ecuas_n=0",
     "cls_norm_n-ecuas_n=1",
 ]
+
 
 def compute_test_scores(net, device, test_loader):
     net.eval()
@@ -51,8 +43,8 @@ def compute_test_scores(net, device, test_loader):
             test_logits.append(logits.cpu())
     test_logits = torch.cat(test_logits, dim=0)
 
-    # Save scores to disk
     return pd.DataFrame(test_logits.numpy())
+
 
 def compute_metrics(scores, labels, metrics):
     results = []
@@ -64,20 +56,15 @@ def compute_metrics(scores, labels, metrics):
         labels_arr = labels.values.reshape(-1).copy()
         labels_tensor = torch.from_numpy(labels_arr).long()
         metric_value = metric_fn(logits_tensor, labels_tensor)
-        results.append(
-            {"metric": metric_dict["display"], "value": metric_value}
-        )
+        results.append({"metric": metric_dict["display"], "value": metric_value})
     results = pd.DataFrame(results)
     return results
-
-
 
 
 def main(
     batch_size: int = 128,
     root_outputs_dir: Path = Path("outputs/ood_analysis"),
 ):
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     all_results = []
@@ -107,7 +94,9 @@ def main(
                     "Shift": shift_test_loader,
                 }
 
-                print(f"Computing for model {model} and dataset {dataset} with shift severity {shift_severity}...")
+                print(
+                    f"Computing for model {model} and dataset {dataset} with shift severity {shift_severity}..."
+                )
 
                 # for prefix in ["ID", "OOD", "Shift"]:
                 for prefix in ["ID", "Shift"]:
@@ -126,7 +115,9 @@ def main(
                         dataset_type = f"Shift (severity={shift_severity})"
 
                     if results_path.exists():
-                        print(f"Results already exist at {results_path}. Skipping computation.")
+                        print(
+                            f"Results already exist at {results_path}. Skipping computation."
+                        )
                         results = pd.read_csv(results_path)
 
                     else:
@@ -161,7 +152,7 @@ def main(
 def generate_latex_table(df_all_results, output_filename: Path):
 
     latex_doc = df_all_results.to_latex(
-        index=True, 
+        index=True,
         float_format="%.4f",
         multirow=True,
         multicolumn=True,
@@ -182,11 +173,9 @@ def generate_latex_table(df_all_results, output_filename: Path):
     with tempfile.TemporaryDirectory() as tmpdir:
         tex_path = os.path.join(tmpdir, "table.tex")
 
-        # Write LaTeX file
         with open(tex_path, "w") as f:
             f.write(standalone_pdf_doc)
 
-        # Compile LaTeX → PDF
         try:
             subprocess.run(
                 ["pdflatex", "-interaction=nonstopmode", "table.tex"],
@@ -198,14 +187,11 @@ def generate_latex_table(df_all_results, output_filename: Path):
         except subprocess.CalledProcessError:
             raise RuntimeError("LaTeX compilation failed")
 
-        # Move resulting PDF
         generated_pdf = os.path.join(tmpdir, "table.pdf")
         if not os.path.exists(generated_pdf):
             raise RuntimeError("PDF was not generated")
 
-        os.replace(
-            generated_pdf, output_filename.with_suffix(".pdf")
-        )  # Move generated PDF to desired location
+        os.replace(generated_pdf, output_filename.with_suffix(".pdf"))
 
 
 if __name__ == "__main__":
@@ -213,10 +199,12 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="OOD Analysis")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-    parser.add_argument("--outputs_dir", type=Path, default=Path("outputs/ood_analysis"), help="Directory to save outputs")
-    args = parser.parse_args()
-    
-
+    parser.add_argument(
+        "--outputs_dir",
+        type=Path,
+        default=Path("outputs/ood_analysis"),
+        help="Directory to save outputs",
+    )
     args = parser.parse_args()
 
     main(

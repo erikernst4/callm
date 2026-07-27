@@ -415,12 +415,12 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="/home/eernst/callm/lightning_logs/paper_results/mmlu",
+        default=f"{str(Path(__file__).resolve().parents[1])}/lightning_logs/paper_results/mmlu",
     )
     parser.add_argument(
         "--logs-dir",
         type=str,
-        default="/home/eernst/callm/lightning_logs/paper_results/mmlu",
+        default=f"{str(Path(__file__).resolve().parents[1])}/lightning_logs/paper_results/mmlu",
     )
     args = parser.parse_args()
 
