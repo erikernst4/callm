@@ -85,14 +85,28 @@ class ExactAnswerExtractorDataModule(AnswersDataModule):
                 prompts.append("")
             else:
                 needs_extraction.append(True)
-                prompt_text = f"""Extract from the following long answer the short answer, only the relevant tokens. If the long answer does not answer the question, output NO ANSWER.
+                prompt_text = f"""Extract the short, exact answer entity from the provided long answer (A:).
+
+Rules:
+1. The extracted short answer MUST be a verbatim, strict substring copied directly from the long answer (A:). Do NOT paraphrase, rephrase, or alter words.
+2. Ensure the short answer is complete (extract full entity names, phrases, or titles).
+3. Base your extraction ONLY on the text in the long answer (A:). Do NOT use external knowledge. Even if the long answer states a factually incorrect entity, extract the entity as stated in the long answer.
+4. If the long answer (A:) does not contain an answer or states that it does not know, output NO ANSWER.
 
 Q: Which musical featured the song The Street Where You Live?
 A: The song "The Street Where You Live" is from the Lerner and Loewe musical **"My Fair Lady."** It is one of the most famous songs from the show, and it is sung by Professor Henry Higgins as he reflects on the transformation of Eliza Doolittle and the memories they have shared together.
 Exact answer: My Fair Lady
 
-Q: Which Swedish actress won the Best Supporting Actress Oscar for Murder on the Orient Express?
-A: I'm glad you asked about a Swedish actress who won an Oscar for "Murder on the Orient Express," but I must clarify that there seems to be a misunderstanding here. No Swedish actress has won an Oscar for Best Supporting Actress for that film. The 1974 "Murder on the Orient Express" was an American production, and the cast was predominantly British and American. If you have any other questions or if there's another
+Q: Which personality of the American West is buried next to her partner Frank Butler?
+A: The American West personality buried next to her partner Frank Butler is **Dollie Madison** (often referred to as **Dollie**).
+Exact answer: Dollie Madison
+
+Q: What does 'Chipping' indicate in a place name such as Chipping Norton?
+A: In place names like **Chipping Norton**, the term **"Chipping"** indicates the presence of a **market town** that historically held a **fair or market**.
+Exact answer: market town
+
+Q: What year was the internet invented?
+A: I apologize, but I do not have access to that information and cannot answer this question.
 Exact answer: NO ANSWER
 
 Q: {row["question"]}
