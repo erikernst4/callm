@@ -27,7 +27,7 @@ model:
       init_args:
         model_name: ${model.init_args.model_name}
     save_outputs: false
-    flush_outputs_every_n_steps: 1000
+    flush_outputs_every_n_steps: 100
     max_new_tokens: 200
 
 data:
@@ -35,8 +35,8 @@ data:
   init_args:
     batch_size: 1
     model_name: ${model.init_args.model_name}
-    prompt: callm.prompts.CHAT_LABEL_PROB_PROMPT_ZERO_SHOT
-    max_samples: 1000
+    prompt: callm.prompts.TRANSPARENT_PROMPT_ZERO_SHOT
+    max_samples: 5000
     seed: 42
     num_workers: 24
     disable_thinking: true

@@ -289,3 +289,369 @@ class ActivationsDataModule(LightningDataModule):
             num_workers=self.num_workers,
             persistent_workers=self.num_workers > 0,
         )
+
+
+class SelectedTokensActivationsDataModule(ActivationsDataModule):
+    """
+    LightningDataModule that loads pre-computed activations from disk,
+    aligns them with exact answer entity indices extracted by an LLM / evaluator,
+    and slices the activations for specific token window strategies.
+
+    100% Sample Retention Guarantee:
+    No samples are filtered out. If an exact answer entity cannot be found or is invalid,
+    it falls back to a default token slice (e.g. prompt boundary or first/last answer token).
+    """
+
+    VALID_ACTIVATIONS_TO_USE = (
+        "prompt",
+        "answer",
+        "both",
+        "exact_answer",
+        "exact_answer_first_token",
+        "exact_answer_last_token",
+        "exact_answer_before_first_token",
+        "exact_answer_after_last_token",
+    )
+
+    def __init__(
+        self,
+        *args,
+        model_name: str = "Qwen/Qwen3.5-9B",
+        prompt: str = "callm.prompts.TRANSPARENT_PROMPT_ZERO_SHOT",
+        **kwargs,
+    ):
+        activations_to_use = kwargs.get("activations_to_use", "prompt")
+        if activations_to_use not in self.VALID_ACTIVATIONS_TO_USE:
+            raise ValueError(
+                f"activations_to_use must be one of {self.VALID_ACTIVATIONS_TO_USE}. Got: {activations_to_use}"
+            )
+
+        kwargs_for_parent = dict(kwargs)
+        if activations_to_use in (
+            "exact_answer",
+            "exact_answer_first_token",
+            "exact_answer_last_token",
+            "exact_answer_before_first_token",
+            "exact_answer_after_last_token",
+        ):
+            kwargs_for_parent["activations_to_use"] = "both"
+
+        super().__init__(*args, **kwargs_for_parent)
+        self.activations_to_use = activations_to_use
+        self.model_name = model_name
+        self.prompt = prompt
+        self.tokenizer = None
+
+    def setup(self, stage: str = None):
+        if not os.path.exists(self.evaluation_csv):
+            raise FileNotFoundError(
+                f"Evaluation CSV not found at {self.evaluation_csv}"
+            )
+
+        from callm.utils import get_tokenizer_for_model, get_indices_of_exact_answer
+        import importlib
+
+        if self.tokenizer is None:
+            self.tokenizer = get_tokenizer_for_model(self.model_name)
+
+        if isinstance(self.prompt, str):
+            module_name, obj_name = self.prompt.rsplit(".", 1)
+            module = importlib.import_module(module_name)
+            self.prompt_obj = getattr(module, obj_name)
+        else:
+            self.prompt_obj = self.prompt
+
+        # Load correctness map and exact answer information from CSV
+        exact_info_map = {}
+        with open(self.evaluation_csv, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            field_map = {col.lower(): col for col in reader.fieldnames or []}
+
+            correct_col = field_map.get("correct")
+            if correct_col is None:
+                raise ValueError(
+                    f"Could not find 'Correct' column in {self.evaluation_csv}"
+                )
+
+            ea_col = field_map.get("exact answer") or field_map.get("exact_answer")
+            vea_col = field_map.get("valid exact answer") or field_map.get(
+                "valid_exact_answer"
+            )
+            q_col = field_map.get("question")
+            r_col = field_map.get("raw output") or field_map.get("raw_output")
+
+            for i, row in enumerate(reader):
+                is_correct = row[correct_col].strip().lower() == "yes"
+                exact_ans = row.get(ea_col, "") if ea_col else ""
+                valid_exact = (
+                    (row.get(vea_col, "").strip().lower() in ("yes", "true", "1"))
+                    if vea_col
+                    else False
+                )
+                question = row.get(q_col, "") if q_col else ""
+                raw_out = row.get(r_col, "") if r_col else ""
+
+                exact_info_map[i] = {
+                    "correct": is_correct,
+                    "exact_answer": exact_ans,
+                    "valid_exact_answer": valid_exact,
+                    "question": question,
+                    "raw_output": raw_out,
+                }
+
+        shard_files = sorted(
+            glob.glob(os.path.join(self.activations_dir, "activations_*.pt"))
+        )
+        if not shard_files:
+            raise FileNotFoundError(
+                f"No activation shards found in {self.activations_dir}"
+            )
+
+        dataset_samples = []
+        for shard_file in tqdm(
+            shard_files,
+            desc=f"Loading activation shards ({self.activations_to_use})",
+        ):
+            try:
+                shard_samples = torch.load(
+                    shard_file, map_location="cpu", weights_only=False
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to load activation shard {shard_file}: {e}")
+
+            for sample in shard_samples:
+                idx = sample["sample_idx"]
+                if idx not in exact_info_map:
+                    continue
+
+                info = exact_info_map[idx]
+                is_correct = info["correct"]
+
+                layer_keys = sorted(list(sample["activations"].keys()))
+                num_layers = len(layer_keys)
+                if num_layers == 0:
+                    raise ValueError(f"Sample {idx} has no saved layer activations.")
+
+                if isinstance(self.layer_idx, int):
+                    resolved_layers = [self.layer_idx % num_layers]
+                    is_multi_layer = False
+                elif isinstance(self.layer_idx, list):
+                    resolved_layers = [
+                        layer_i % num_layers for layer_i in self.layer_idx
+                    ]
+                    is_multi_layer = True
+                elif (
+                    isinstance(self.layer_idx, str) and self.layer_idx.lower() == "all"
+                ):
+                    resolved_layers = list(range(num_layers))
+                    is_multi_layer = True
+                else:
+                    raise ValueError(
+                        f"Unsupported type/value for layer_idx: {self.layer_idx}"
+                    )
+
+                layer_acts = []
+                for layer_i in resolved_layers:
+                    resolved_layer_key = layer_keys[layer_i]
+                    act_tensor = sample["activations"][resolved_layer_key]
+                    prompt_len = sample.get("prompt_length", sample["seq_len"])
+                    seq_len = act_tensor.shape[0]
+
+                    if self.activations_to_use in (
+                        "exact_answer",
+                        "exact_answer_first_token",
+                        "exact_answer_last_token",
+                        "exact_answer_before_first_token",
+                        "exact_answer_after_last_token",
+                    ):
+                        exact_range = None
+                        if info["valid_exact_answer"] and info["exact_answer"]:
+                            # Reconstruct prompt + answer token IDs
+                            prompt_text = self.prompt_obj(question=info["question"])
+                            from callm.prompts.base import ChatPrompt
+
+                            if isinstance(self.prompt_obj, ChatPrompt):
+                                chat_template_kwargs = {
+                                    "tokenize": True,
+                                    "enable_thinking": False,
+                                }
+                                has_assistant_prefill = (
+                                    self.prompt_obj.assistant_template is not None
+                                )
+                                if has_assistant_prefill:
+                                    chat_template_kwargs["continue_final_message"] = (
+                                        True
+                                    )
+                                else:
+                                    chat_template_kwargs["add_generation_prompt"] = True
+
+                                prompt_tokens = self.tokenizer.apply_chat_template(
+                                    prompt_text, **chat_template_kwargs
+                                )
+                                if hasattr(prompt_tokens, "input_ids"):
+                                    prompt_tokens = prompt_tokens["input_ids"]
+                                elif (
+                                    isinstance(prompt_tokens, dict)
+                                    and "input_ids" in prompt_tokens
+                                ):
+                                    prompt_tokens = prompt_tokens["input_ids"]
+
+                                if torch.is_tensor(prompt_tokens):
+                                    prompt_ids = prompt_tokens.squeeze().tolist()
+                                    if isinstance(prompt_ids, int):
+                                        prompt_ids = [prompt_ids]
+                                elif isinstance(prompt_tokens, list):
+                                    prompt_ids = prompt_tokens
+                                else:
+                                    prompt_ids = list(prompt_tokens)
+                            else:
+                                prompt_ids = self.tokenizer.encode(
+                                    prompt_text, add_special_tokens=True
+                                )
+                                if torch.is_tensor(prompt_ids):
+                                    prompt_ids = prompt_ids.squeeze().tolist()
+                                    if isinstance(prompt_ids, int):
+                                        prompt_ids = [prompt_ids]
+                                elif not isinstance(prompt_ids, list):
+                                    prompt_ids = list(prompt_ids)
+
+                            answer_ids = self.tokenizer.encode(
+                                info["raw_output"], add_special_tokens=False
+                            )
+                            if torch.is_tensor(answer_ids):
+                                answer_ids = answer_ids.squeeze().tolist()
+                                if isinstance(answer_ids, int):
+                                    answer_ids = [answer_ids]
+                            elif hasattr(answer_ids, "input_ids"):
+                                answer_ids = answer_ids["input_ids"]
+                            if not isinstance(answer_ids, list):
+                                answer_ids = list(answer_ids)
+
+                            full_ids = prompt_ids + answer_ids
+
+                            exact_range = get_indices_of_exact_answer(
+                                self.tokenizer,
+                                full_ids,
+                                info["exact_answer"],
+                                len(prompt_ids),
+                            )
+
+                        if exact_range is not None:
+                            lower = exact_range[0]
+                            higher = exact_range[-1]
+                            if self.activations_to_use == "exact_answer":
+                                act_tensor = act_tensor[lower : higher + 1]
+                            elif self.activations_to_use == "exact_answer_first_token":
+                                act_tensor = act_tensor[lower : lower + 1]
+                            elif self.activations_to_use == "exact_answer_last_token":
+                                act_tensor = act_tensor[higher : higher + 1]
+                            elif (
+                                self.activations_to_use
+                                == "exact_answer_before_first_token"
+                            ):
+                                start = max(0, lower - 1)
+                                end = max(1, lower)
+                                act_tensor = act_tensor[start:end]
+                            elif (
+                                self.activations_to_use
+                                == "exact_answer_after_last_token"
+                            ):
+                                start = min(seq_len - 1, higher + 1)
+                                end = min(seq_len, higher + 2)
+                                if start >= end:
+                                    start = max(0, seq_len - 1)
+                                    end = seq_len
+                                act_tensor = act_tensor[start:end]
+                        else:
+                            # 100% Retention Fallback when exact answer range is not found
+                            if self.activations_to_use == "exact_answer":
+                                act_tensor = act_tensor[prompt_len:]
+                            elif self.activations_to_use == "exact_answer_first_token":
+                                start = min(prompt_len, max(0, seq_len - 1))
+                                act_tensor = act_tensor[start : start + 1]
+                            elif self.activations_to_use == "exact_answer_last_token":
+                                start = max(0, seq_len - 1)
+                                act_tensor = act_tensor[start : start + 1]
+                            elif (
+                                self.activations_to_use
+                                == "exact_answer_before_first_token"
+                            ):
+                                start = max(0, prompt_len - 1)
+                                act_tensor = act_tensor[start : start + 1]
+                            elif (
+                                self.activations_to_use
+                                == "exact_answer_after_last_token"
+                            ):
+                                start = min(prompt_len, max(0, seq_len - 1))
+                                act_tensor = act_tensor[start : start + 1]
+
+                    elif self.activations_to_use == "prompt":
+                        act_tensor = act_tensor[:prompt_len]
+                    elif self.activations_to_use == "answer":
+                        act_tensor = act_tensor[prompt_len:]
+                    elif self.activations_to_use == "both":
+                        pass
+
+                    if act_tensor.shape[0] == 0:
+                        if self.pool_strategy in ("mean", "last"):
+                            pooled_act = torch.zeros(
+                                act_tensor.shape[1],
+                                device=act_tensor.device,
+                                dtype=act_tensor.dtype,
+                            )
+                        else:
+                            pooled_act = act_tensor
+                    else:
+                        if self.pool_strategy == "mean":
+                            pooled_act = act_tensor.mean(dim=0)
+                        elif self.pool_strategy == "last":
+                            pooled_act = act_tensor[-1]
+                        elif self.pool_strategy == "none":
+                            pooled_act = act_tensor
+                        else:
+                            raise ValueError(
+                                f"Unknown pool strategy: {self.pool_strategy}"
+                            )
+
+                    layer_acts.append(pooled_act.float())
+
+                if is_multi_layer:
+                    final_act = torch.stack(layer_acts, dim=0)
+                else:
+                    final_act = layer_acts[0]
+
+                dataset_samples.append(
+                    {
+                        "activations": final_act,
+                        "correct": is_correct,
+                        "is_multi_layer": is_multi_layer,
+                    }
+                )
+
+            del shard_samples
+
+        if not dataset_samples:
+            raise ValueError(
+                "No samples could be matched between activations and evaluation CSV."
+            )
+
+        print(
+            f"Loaded and mapped {len(dataset_samples)} samples for "
+            f"SelectedTokensActivationsDataModule ({self.activations_to_use})"
+        )
+
+        rng = random.Random(self.seed)
+        shuffled_samples = list(dataset_samples)
+        rng.shuffle(shuffled_samples)
+
+        split_idx = int(len(shuffled_samples) * self.train_split)
+        train_samples = shuffled_samples[:split_idx]
+        val_samples = shuffled_samples[split_idx:]
+
+        self.train_dataset = ActivationsDataset(train_samples)
+        self.val_dataset = ActivationsDataset(val_samples)
+
+        print(
+            f"Train split: {len(self.train_dataset)} samples, "
+            f"Val split: {len(self.val_dataset)} samples."
+        )

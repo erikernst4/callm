@@ -6,6 +6,7 @@ from callm.data.triviaqa.evaluator_data import EvaluatorDataModule
 from callm.data.triviaqa.untokenized_evaluator_data import (
     UntokenizedEvaluatorDataModule,
 )
+from callm.data.triviaqa.exact_answers_data import ExactAnswerExtractorDataModule
 
 __all__ = [
     "TriviaQADataModule",
@@ -14,4 +15,5 @@ __all__ = [
     "UntokenizedIsTrueDataModule",
     "EvaluatorDataModule",
     "UntokenizedEvaluatorDataModule",
+    "ExactAnswerExtractorDataModule",
 ]

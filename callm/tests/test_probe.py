@@ -406,3 +406,112 @@ class TestActivationsDataModuleSlicing:
             dm_both.setup()
         assert dm_both.train_dataset[0]["activations"].shape == (5, 8)
         assert torch.equal(dm_both.train_dataset[0]["activations"], mock_sample_tensor)
+
+
+class TestGetIndicesOfExactAnswer:
+    """Unit tests for get_indices_of_exact_answer."""
+
+    def test_exact_answer_token_shrinking(self):
+        from callm.utils import get_indices_of_exact_answer
+
+        class DummyTokenizer:
+            def decode(self, ids):
+                table = {
+                    1: "What ",
+                    2: "is ",
+                    3: "it?",
+                    4: " The ",
+                    5: "capital ",
+                    6: "is ",
+                    7: "Paris",
+                    8: ".",
+                }
+                return "".join(table.get(i, "") for i in ids)
+
+        tokenizer = DummyTokenizer()
+        input_output_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+        prompt_len = 3  # IDs [1, 2, 3] are prompt
+
+        indices = get_indices_of_exact_answer(
+            tokenizer, input_output_ids, "Paris", prompt_len
+        )
+        assert indices == [6]  # 0-indexed: index 6 corresponds to ID 7 ("Paris")
+
+    def test_missing_exact_answer_returns_none(self):
+        from callm.utils import get_indices_of_exact_answer
+
+        class DummyTokenizer:
+            def decode(self, ids):
+                return "The capital is Paris."
+
+        tokenizer = DummyTokenizer()
+        indices = get_indices_of_exact_answer(
+            tokenizer, [1, 2, 3, 4], "London", prompt_len=2
+        )
+        assert indices is None
+
+
+class TestSelectedTokensActivationsDataModule:
+    """Unit tests for SelectedTokensActivationsDataModule retention and window slicing."""
+
+    @patch("os.path.exists")
+    @patch("glob.glob")
+    @patch("torch.load")
+    @patch("callm.utils.get_tokenizer_for_model")
+    def test_100_percent_retention_and_window_strategies(
+        self, mock_get_tokenizer, mock_torch_load, mock_glob, mock_exists
+    ):
+        from callm.data.activations_data import SelectedTokensActivationsDataModule
+
+        mock_exists.return_value = True
+        mock_glob.return_value = ["fake_shard_0.pt"]
+
+        class DummyTokenizer:
+            def decode(self, ids):
+                return "My Fair Lady"
+
+            def encode(self, text, add_special_tokens=True):
+                return [1, 2]
+
+            def apply_chat_template(self, conversation, **kwargs):
+                return [1, 2, 3]
+
+        mock_get_tokenizer.return_value = DummyTokenizer()
+
+        csv_data = (
+            "question,gold_answers,correct,exact_answer,valid_exact_answer,raw_output\n"
+            "Q1,['My Fair Lady'],yes,My Fair Lady,Yes,My Fair Lady\n"
+            "Q2,['London'],no,NO ANSWER,No,Some long incorrect answer\n"
+        )
+
+        mock_sample_tensor_1 = torch.randn(6, 8)
+        mock_sample_tensor_2 = torch.randn(6, 8)
+
+        mock_torch_load.return_value = [
+            {
+                "sample_idx": 0,
+                "seq_len": 6,
+                "prompt_length": 3,
+                "activations": {0: mock_sample_tensor_1},
+            },
+            {
+                "sample_idx": 1,
+                "seq_len": 6,
+                "prompt_length": 3,
+                "activations": {0: mock_sample_tensor_2},
+            },
+        ]
+
+        with patch("builtins.open", mock_open(read_data=csv_data)):
+            dm = SelectedTokensActivationsDataModule(
+                activations_dir="fake",
+                evaluation_csv="fake.csv",
+                pool_strategy="none",
+                activations_to_use="exact_answer_first_token",
+                train_split=1.0,
+                model_name="dummy",
+            )
+            dm.setup()
+
+        # Check 100% sample retention: both samples must be retained
+        assert len(dm.train_dataset) == 2

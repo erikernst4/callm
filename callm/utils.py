@@ -141,3 +141,51 @@ def check_exact_match(pred_answer: str, gold_answers: list) -> bool:
         return True
 
     return False
+
+
+def get_indices_of_exact_answer(
+    tokenizer, input_output_ids, exact_answer: str, prompt_len: int
+):
+    """
+    Finds the range of token indices [lower, higher] in the prompt+answer sequence
+    corresponding to the exact_answer substring using shrinking token search.
+    """
+    if not exact_answer or not isinstance(exact_answer, str):
+        return None
+
+    exact_answer_clean = exact_answer.lower().strip()
+    if not exact_answer_clean or exact_answer_clean == "no answer":
+        return None
+
+    lower = prompt_len
+    higher = len(input_output_ids) - 1
+
+    if lower >= len(input_output_ids):
+        return None
+
+    full_generated_answer = tokenizer.decode(input_output_ids[lower:])
+    exact_answer_index = full_generated_answer.lower().find(exact_answer_clean)
+
+    if exact_answer_index == -1:
+        return None
+
+    true_exact_answer = full_generated_answer[
+        exact_answer_index : exact_answer_index + len(exact_answer_clean)
+    ]
+
+    while higher >= lower and true_exact_answer in tokenizer.decode(
+        input_output_ids[lower : higher + 1]
+    ):
+        higher -= 1
+    higher += 1
+
+    while lower <= higher and true_exact_answer in tokenizer.decode(
+        input_output_ids[lower : higher + 1]
+    ):
+        lower += 1
+    lower -= 1
+
+    if lower > higher:
+        return None
+
+    return list(range(lower, higher + 1))

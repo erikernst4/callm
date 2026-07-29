@@ -217,6 +217,21 @@ class CalibrationTrainer(Trainer):
 
         self.validate(model=extractor, datamodule=datamodule)
 
+    def extract_exact_answers(
+        self,
+        **kwargs,
+    ):
+        """Extract exact answer entities from LLM outputs using GCP LLM."""
+        model = kwargs.get("model")
+        datamodule = kwargs.get("datamodule")
+
+        if model is None:
+            raise ValueError("model is required for extract_exact_answers")
+        if datamodule is None:
+            raise ValueError("datamodule is required for extract_exact_answers")
+
+        self.validate(model=model, datamodule=datamodule)
+
 
 class CalibrationCLI(LightningCLI):
     """Extended LightningCLI that runs evaluation after validation."""
@@ -276,6 +291,13 @@ class CalibrationCLI(LightningCLI):
                 "val_dataloaders",
             },
             "extract_activations": {
+                "model",
+                "dataloaders",
+                "datamodule",
+                "train_dataloaders",
+                "val_dataloaders",
+            },
+            "extract_exact_answers": {
                 "model",
                 "dataloaders",
                 "datamodule",

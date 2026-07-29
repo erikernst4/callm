@@ -16,6 +16,9 @@ def cli_main():
             "extract_activations": {
                 "default_config_files": ["configs/config_extract_activations.yaml"]
             },
+            "extract_exact_answers": {
+                "default_config_files": ["configs/config_extract_exact_answers.yaml"]
+            },
             "parser_mode": "omegaconf",
         },
     )
