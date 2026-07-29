@@ -39,6 +39,7 @@ class ActivationsDataModule(LightningDataModule):
         train_split: float = 0.8,
         seed: int = 42,
         activations_to_use: str = "prompt",
+        max_samples: int | None = None,
     ):
         super().__init__()
         if activations_to_use not in ("prompt", "answer", "both"):
@@ -54,6 +55,7 @@ class ActivationsDataModule(LightningDataModule):
         self.train_split = train_split
         self.seed = seed
         self.activations_to_use = activations_to_use
+        self.max_samples = max_samples
 
         self.train_dataset = None
         self.val_dataset = None
@@ -315,28 +317,49 @@ class SelectedTokensActivationsDataModule(ActivationsDataModule):
 
     def __init__(
         self,
-        *args,
+        activations_dir: str,
+        evaluation_csv: str,
+        layer_idx: int | list[int] | str = -1,
+        batch_size: int = 64,
+        num_workers: int = 4,
+        pool_strategy: str = "mean",
+        train_split: float = 0.8,
+        seed: int = 42,
+        activations_to_use: str = "prompt",
         model_name: str = "Qwen/Qwen3.5-9B",
-        prompt: str = "callm.prompts.TRANSPARENT_PROMPT_ZERO_SHOT",
-        **kwargs,
+        prompt: str = "callm.prompts.base.TRANSPARENT_PROMPT_ZERO_SHOT",
+        max_samples: int | None = None,
     ):
-        activations_to_use = kwargs.get("activations_to_use", "prompt")
         if activations_to_use not in self.VALID_ACTIVATIONS_TO_USE:
             raise ValueError(
                 f"activations_to_use must be one of {self.VALID_ACTIVATIONS_TO_USE}. Got: {activations_to_use}"
             )
 
-        kwargs_for_parent = dict(kwargs)
-        if activations_to_use in (
-            "exact_answer",
-            "exact_answer_first_token",
-            "exact_answer_last_token",
-            "exact_answer_before_first_token",
-            "exact_answer_after_last_token",
-        ):
-            kwargs_for_parent["activations_to_use"] = "both"
+        parent_activations = (
+            "both"
+            if activations_to_use
+            in (
+                "exact_answer",
+                "exact_answer_first_token",
+                "exact_answer_last_token",
+                "exact_answer_before_first_token",
+                "exact_answer_after_last_token",
+            )
+            else activations_to_use
+        )
 
-        super().__init__(*args, **kwargs_for_parent)
+        super().__init__(
+            activations_dir=activations_dir,
+            evaluation_csv=evaluation_csv,
+            layer_idx=layer_idx,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pool_strategy=pool_strategy,
+            train_split=train_split,
+            seed=seed,
+            activations_to_use=parent_activations,
+            max_samples=max_samples,
+        )
         self.activations_to_use = activations_to_use
         self.model_name = model_name
         self.prompt = prompt
