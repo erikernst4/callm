@@ -81,26 +81,54 @@ class ExactAnswerExtractorModule(BaseLightningModule):
         return None, False
 
     def _find_gold_answer_in_output(self, gold_answers, raw_output):
-        """For correct answers, find the earliest verbatim gold answer substring in raw_output."""
+        """For correct answers, find the best verbatim gold answer substring in raw_output.
+
+        Prefers matches inside markdown bold (**...**), avoids matches inside parentheses ((...)),
+        and breaks remaining ties by longest match length and earliest appearance.
+        """
+        import re
+
         if not raw_output or not isinstance(raw_output, str):
             return None
 
         if isinstance(gold_answers, str):
             gold_answers = [gold_answers]
 
-        best_span = None
-        best_index = len(raw_output)
+        bold_spans = [
+            (m.start(0), m.end(0)) for m in re.finditer(r"\*\*([^*]+)\*\*", raw_output)
+        ]
 
+        paren_spans = []
+        stack = []
+        for i, c in enumerate(raw_output):
+            if c == "(":
+                stack.append(i)
+            elif c == ")" and stack:
+                start = stack.pop()
+                paren_spans.append((start, i + 1))
+
+        def is_inside(s, e, spans):
+            return any(sp_s <= s and e <= sp_e for sp_s, sp_e in spans)
+
+        matches = []
         for ans in gold_answers:
             if not ans or not isinstance(ans, str):
                 continue
             span, found = self._find_verbatim_substring(ans, raw_output)
             if found:
                 idx = raw_output.lower().find(span.lower())
-                if idx != -1 and idx < best_index:
-                    best_span = span
-                    best_index = idx
+                if idx != -1:
+                    start_idx = idx
+                    end_idx = idx + len(span)
+                    ib = is_inside(start_idx, end_idx, bold_spans)
+                    ip = is_inside(start_idx, end_idx, paren_spans)
+                    score = (1 if ib else 0, 0 if ip else 1, len(span), -start_idx)
+                    matches.append((span, score))
 
+        if not matches:
+            return None
+
+        best_span, _ = max(matches, key=lambda m: m[1])
         return best_span
 
     def _extract_via_gemini(self, prompt_text, raw_output):
