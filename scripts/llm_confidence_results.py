@@ -353,9 +353,8 @@ def compute_paired_bootstrap_pvalue(
     point_diff = point_a - point_b
 
     if point_diff > 0:
-        p_val = 2 * np.mean(diffs <= 0)
-    else:
-        p_val = 2 * np.mean(diffs >= 0)
+        extreme_values = diffs <= 0 if point_diff > 0 else diffs >= 0
+        p_val = np.mean(extreme_values)
 
     return min(1.0, float(p_val))
 
