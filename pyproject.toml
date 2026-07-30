@@ -26,6 +26,7 @@ dependencies = [
     "ecuas",
     "pyarrow<24.0.0",
     "timm>=1.0.28",
+    "tabulate>=0.10.0",
 ]
 
 [build-system]
