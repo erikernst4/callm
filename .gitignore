@@ -220,6 +220,7 @@ lightning_logs/
 scores/
 outputs/
 /data/
+results/
 
 # Remote
 scripts/pull_from_remote.sh
