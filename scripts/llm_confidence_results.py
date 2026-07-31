@@ -352,7 +352,7 @@ def compute_paired_bootstrap_pvalue(
     point_b = metric_fn(confidences_b, correctness_b)
     point_diff = point_a - point_b
 
-    if point_diff > 0:
+    if point_diff:
         extreme_values = diffs <= 0 if point_diff > 0 else diffs >= 0
         p_val = np.mean(extreme_values)
 
