@@ -17,6 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 from collections import OrderedDict, defaultdict
+from typing import Callable
 import tempfile
 
 import torch
@@ -29,7 +30,7 @@ import matplotlib.pyplot as plt
 # Add project root to path so we can import callm
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from ecuas import get_metric_from_id
+from ecuas import get_metric_from_id, ExpectedCalibrationError
 
 # ── Directory → (Method, LLM) mapping ──────────────────────────────────
 
@@ -42,7 +43,7 @@ LLMS = OrderedDict(
         ("Ministral-3-8B-Instruct-2512", "Ministral-3-8B-Instruct-2512"),
         ("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"),
         ("gemini-2.5-flash", "Gemini 2.5 Flash"),
-        ("gemini-2.5-pro", "Gemini 2.5 pro"),
+        ("gemini-2.5-pro", "Gemini 2.5 Pro"),
     ]
 )
 
@@ -248,7 +249,7 @@ def generate_table(
     )
     standalone_pdf_doc = "\n".join(standalone_pdf_lines)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(dir=".") as tmpdir:
         tex_path = os.path.join(tmpdir, "table.tex")
 
         # Write LaTeX file
@@ -277,6 +278,233 @@ def generate_table(
         )  # Move generated PDF to desired location
 
         # Write the LaTeX code for the table (without standalone document) to the output directory
+        with open(output_filename.with_suffix(".tex"), "w") as f:
+            f.write(tex_doc)
+
+
+def compute_bootstrap_ci(
+    confidences: torch.Tensor,
+    correctness: torch.Tensor,
+    metric_fn: Callable,
+    n_bootstraps: int = 1000,
+    ci_level: float = 0.95,
+    seed: int = 42,
+) -> tuple[float, float, float]:
+    point_val = metric_fn(confidences, correctness)
+    n = len(confidences)
+    if n == 0 or np.isnan(point_val):
+        return point_val, np.nan, np.nan
+
+    rng = np.random.default_rng(seed)
+    indices = rng.choice(n, size=(n_bootstraps, n), replace=True)
+    boot_vals = []
+    for b in range(n_bootstraps):
+        idx = indices[b]
+        conf_b = confidences[idx]
+        corr_b = correctness[idx]
+        try:
+            val_b = metric_fn(conf_b, corr_b)
+            if not np.isnan(val_b):
+                boot_vals.append(val_b)
+        except Exception:
+            pass
+
+    if len(boot_vals) == 0:
+        return point_val, np.nan, np.nan
+
+    alpha = (1.0 - ci_level) / 2.0
+    low = float(np.percentile(boot_vals, alpha * 100))
+    high = float(np.percentile(boot_vals, (1.0 - alpha) * 100))
+
+    return point_val, low, high
+
+
+def compute_paired_bootstrap_pvalue(
+    confidences_a: torch.Tensor,
+    correctness_a: torch.Tensor,
+    confidences_b: torch.Tensor,
+    correctness_b: torch.Tensor,
+    metric_fn: Callable,
+    n_bootstraps: int = 10000,
+    seed: int = 42,
+) -> float:
+    """Computes a paired bootstrap p-value for the difference between two methods."""
+    n = len(confidences_a)
+    if n == 0 or len(confidences_b) != n:
+        return np.nan
+
+    rng = np.random.default_rng(seed)
+    indices = rng.choice(n, size=(n_bootstraps, n), replace=True)
+
+    diffs = []
+    for b in range(n_bootstraps):
+        idx = indices[b]
+        val_a = metric_fn(confidences_a[idx], correctness_a[idx])
+        val_b = metric_fn(confidences_b[idx], correctness_b[idx])
+        if not np.isnan(val_a) and not np.isnan(val_b):
+            diffs.append(val_a - val_b)
+
+    if len(diffs) == 0:
+        return np.nan
+
+    diffs = np.array(diffs)
+    point_a = metric_fn(confidences_a, correctness_a)
+    point_b = metric_fn(confidences_b, correctness_b)
+    point_diff = point_a - point_b
+
+    if point_diff:
+        extreme_values = diffs <= 0 if point_diff > 0 else diffs >= 0
+        p_val = np.mean(extreme_values)
+
+    return min(1.0, float(p_val))
+
+
+def format_val_ci(
+    val_tuple: tuple[float, float, float],
+    is_best: bool,
+    precision: int = 3,
+) -> str:
+    point, low, high = val_tuple
+    if np.isnan(point):
+        return "-"
+
+    # Calculate pessimistic error margin
+    margin = max(abs(point - low), abs(high - point))
+
+    s_point = f"{point:.{precision}f}"
+    s_margin = f"{margin:.{precision}f}"
+
+    ci_str = r"_{\pm " + s_margin + r"}"
+    if is_best:
+        return r"$\textbf{" + s_point + r"}" + ci_str + r"$"
+    else:
+        return r"$" + s_point + ci_str + r"$"
+
+
+def find_best_values_ci(
+    llm_methods: dict, columns: list[str], directions: dict[str, bool]
+) -> dict[str, float]:
+    best = {}
+    for col in columns:
+        vals = [
+            llm_methods[m][col][0]
+            for m in METHODS.values()
+            if m in llm_methods
+            and col in llm_methods[m]
+            and not np.isnan(llm_methods[m][col][0])
+        ]
+        if vals:
+            best[col] = max(vals) if directions.get(col, False) else min(vals)
+    return best
+
+
+def generate_ci_table(
+    results: dict[str, dict[str, dict[str, tuple[float, float, float]]]],
+    metrics: list[dict],
+    output_filename: Path,
+) -> str:
+    col_spec = "ll|c|cccc|c|ccc"
+
+    lines = [
+        r"\begin{tabular}{" + col_spec + "}",
+        r"\toprule",
+        r"& & $\tilde d$ & \multicolumn{4}{c|}{$q_e$} & $\tilde d$, $q_e$ & \multicolumn{3}{c}{$\tilde d$, $q_e$} \\",
+        r"& & & & & & & & \multicolumn{3}{c}{ECUAS$_n$} \\",
+        r"\textbf{LLM} & \textbf{Method} & \textbf{ER} & \textbf{ECE} & \textbf{AUC} & \textbf{CE$_{q_e}$} & \textbf{BS$_{q_e}$} & \textbf{AURC} & \textbf{n=0} & \textbf{n=1} & \textbf{n=128} \\",
+        r"\midrule",
+    ]
+
+    for llm in LLMS.values():
+        if llm not in results:
+            continue
+        llm_methods = results[llm]
+        n_methods = sum(1 for m in METHODS.values() if m in llm_methods)
+        if n_methods == 0:
+            continue
+
+        best = find_best_values_ci(
+            llm_methods,
+            [m["id"] for m in metrics],
+            {m["id"]: m["higher_is_better"] for m in metrics},
+        )
+
+        first = True
+        for method in METHODS.values():
+            if method not in llm_methods:
+                continue
+
+            row_data = llm_methods[method]
+            row_prefix = (
+                r"\multirow{" + str(n_methods) + r"}{*}{" + llm + r"} & "
+                if first
+                else " & "
+            )
+            row_prefix += method
+
+            row_cells = []
+            for m in metrics:
+                col = m["id"]
+                if col in row_data and not np.isnan(row_data[col][0]):
+                    is_best = row_data[col][0] == best[col]
+                    row_cells.append(format_val_ci(row_data[col], is_best))
+                else:
+                    row_cells.append("-")
+
+            lines.append(row_prefix + " & " + " & ".join(row_cells) + r" \\")
+            first = False
+        lines.append(r"\hline")
+
+    lines.extend([r"\bottomrule", r"\end{tabular}"])
+
+    tex_lines = (
+        [
+            r"\begin{table}[h]",
+            r"\centering",
+            r"\resizebox{\columnwidth}{!}{%",
+        ]
+        + lines
+        + [
+            r"}",
+            r"\caption{Standard Calibration Metrics with 95\% Bootstrap Confidence Intervals}",
+            r"\label{tab:standard_ci}",
+            r"\end{table}",
+        ]
+    )
+    tex_doc = "\n".join(tex_lines)
+
+    standalone_pdf_lines = (
+        [
+            r"\documentclass{standalone}",
+            r"\usepackage{booktabs}",
+            r"\usepackage{multirow}",
+            r"\begin{document}",
+        ]
+        + lines
+        + [r"\end{document}"]
+    )
+    standalone_pdf_doc = "\n".join(standalone_pdf_lines)
+
+    with tempfile.TemporaryDirectory(dir=".") as tmpdir:
+        tex_path = os.path.join(tmpdir, "table.tex")
+
+        with open(tex_path, "w") as f:
+            f.write(standalone_pdf_doc)
+
+        try:
+            subprocess.run(
+                ["pdflatex", "-interaction=nonstopmode", "table.tex"],
+                cwd=tmpdir,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError:
+            pass
+
+        generated_pdf = os.path.join(tmpdir, "table.pdf")
+        if os.path.exists(generated_pdf):
+            os.replace(generated_pdf, output_filename.with_suffix(".pdf"))
+
         with open(output_filename.with_suffix(".tex"), "w") as f:
             f.write(tex_doc)
 
@@ -370,6 +598,9 @@ def main():
         type=str,
         default=f"{str(Path(__file__).parent.parent)}/scores/llm_confidences",
     )
+    parser.add_argument("--n-bootstraps", type=int, default=10000)
+    parser.add_argument("--ci-level", type=float, default=0.95)
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     logs_dir = Path(args.logs_dir)
@@ -377,17 +608,25 @@ def main():
     out_dir.mkdir(exist_ok=True, parents=True)
 
     table_results = defaultdict(lambda: defaultdict(dict))
+    table_ci_results = defaultdict(lambda: defaultdict(dict))
     gamma_results = defaultdict(lambda: defaultdict(dict))
     n_results = defaultdict(lambda: defaultdict(dict))
+    raw_data = defaultdict(dict)
 
     table_metrics = []
     for m in args.table_metrics:
         metric_info = get_metric_from_id(m)
+        func = metric_info["function"]
+        if "ece" in m:
+            nbins = 10
+            if "_nbins=" in m:
+                nbins = int(m.split("_nbins=")[-1])
+            func = ExpectedCalibrationError.create_shortcut_function(n_bins=nbins)
         table_metrics.append(
             {
                 "id": m,
                 "display": metric_info["display"],
-                "function": metric_info["function"],
+                "function": func,
                 "higher_is_better": metric_info["higher_is_better"],
             }
         )
@@ -409,9 +648,26 @@ def main():
         if len(confidences) == 0:
             continue
 
-        # Compute table metrics and update results
+        raw_data[llm][method] = (confidences, correctness)
+
+        # Compute standard table metrics
         table_results[llm][method].update(
             {m["id"]: m["function"](confidences, correctness) for m in table_metrics}
+        )
+
+        # Compute bootstrapped CI metrics
+        table_ci_results[llm][method].update(
+            {
+                m["id"]: compute_bootstrap_ci(
+                    confidences,
+                    correctness,
+                    m["function"],
+                    n_bootstraps=args.n_bootstraps,
+                    ci_level=args.ci_level,
+                    seed=args.seed,
+                )
+                for m in table_metrics
+            }
         )
 
         # Compute Gamma-CCAS metrics and update results
@@ -434,10 +690,47 @@ def main():
             }
         )
 
+    generate_table(table_results, table_metrics, out_dir / "table_standard")
     generate_table(table_results, table_metrics, out_dir / "confidence_results")
+    generate_ci_table(table_ci_results, table_metrics, out_dir / "table_ci")
+    generate_ci_table(
+        table_ci_results, table_metrics, out_dir / "confidence_results_ci"
+    )
     generate_gamma_ecuas_plots(gamma_results, args.gammas, out_dir)
     generate_ecuas_plots(n_results, args.ns, out_dir)
     print(f"Generated results in {out_dir}")
+
+    # Compute p-value for Gemini 2.5 Flash Lite: Sequence Posterior vs Verbalized for ECUAS_0
+    llm = "Gemini 2.5 Flash Lite"
+    if (
+        llm in raw_data
+        and "Sequence Posterior" in raw_data[llm]
+        and "Verbalized" in raw_data[llm]
+    ):
+        conf_seq, corr_seq = raw_data[llm]["Sequence Posterior"]
+        conf_verb, corr_verb = raw_data[llm]["Verbalized"]
+        ecuas_0_func = get_metric_from_id("conf_n-ecuas_n=0")["function"]
+
+        pval = compute_paired_bootstrap_pvalue(
+            confidences_a=conf_seq,
+            correctness_a=corr_seq,
+            confidences_b=conf_verb,
+            correctness_b=corr_verb,
+            metric_fn=ecuas_0_func,
+            n_bootstraps=args.n_bootstraps,
+            seed=args.seed,
+        )
+
+        pval_msg = (
+            f"\n--- Paired Bootstrap P-Value (n={args.n_bootstraps}) ---\n"
+            f"Comparison: {llm} | Sequence Posterior vs Verbalized\n"
+            f"Metric: ECUAS_0\n"
+            f"P-value: {pval}\n"
+            f"---------------------------------------------------\n"
+        )
+        print(pval_msg)
+        with open(out_dir / "pvalue_comparison.txt", "w") as f:
+            f.write(pval_msg)
 
 
 if __name__ == "__main__":
