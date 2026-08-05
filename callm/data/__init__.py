@@ -11,6 +11,7 @@ from callm.data.answers_data import AnswersDataModule  # noqa: F401
 # TriviaQA data modules
 from callm.data.triviaqa import (  # noqa: F401
     TriviaQADataModule,
+    CuratedTriviaQADataModule,
     UntokenizedTriviaQADataModule,
     IsTrueDataModule,
     UntokenizedIsTrueDataModule,
@@ -18,6 +19,7 @@ from callm.data.triviaqa import (  # noqa: F401
     UntokenizedEvaluatorDataModule,
     ExactAnswerExtractorDataModule,
 )
+
 
 # MMLU data modules
 from callm.data.mmlu import (  # noqa: F401
