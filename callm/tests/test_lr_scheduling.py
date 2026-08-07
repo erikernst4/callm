@@ -1,0 +1,62 @@
+import math
+import torch
+import torch.nn as nn
+from callm.models.lr_scheduling import WarmupExponentialLR, WarmupCosineAnnealingLR
+
+
+def test_warmup_exponential_lr():
+    model = nn.Linear(10, 2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+    scheduler = WarmupExponentialLR(optimizer, warmup_steps=10, gamma=0.5)
+
+    # In PyTorch, scheduler initializes at last_epoch=0 (after internal step)
+    # So the LR is for step 0. 0 / 10 is 0, bounded by 1e-6.
+    expected_lr_0 = 0.1 * 1e-6
+    assert math.isclose(scheduler.get_last_lr()[0], expected_lr_0, rel_tol=1e-5)
+
+    # Step through warmup (steps 1 to 10)
+    for i in range(1, 11):
+        optimizer.step()
+        scheduler.step()
+        expected_lr = 0.1 * (i / 10)
+        assert math.isclose(scheduler.get_last_lr()[0], expected_lr, rel_tol=1e-5)
+
+    # Step through decay (steps 11 to 15)
+    for i in range(1, 6):
+        optimizer.step()
+        scheduler.step()
+        expected_lr = 0.1 * (0.5**i)
+        assert math.isclose(scheduler.get_last_lr()[0], expected_lr, rel_tol=1e-5)
+
+
+def test_warmup_cosine_annealing_lr():
+    model = nn.Linear(10, 2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+    scheduler = WarmupCosineAnnealingLR(
+        optimizer, warmup_steps=10, max_steps=20, eta_min=0.01
+    )
+
+    expected_lr_0 = 0.1 * 1e-6
+    assert math.isclose(scheduler.get_last_lr()[0], expected_lr_0, rel_tol=1e-5)
+
+    # Step through warmup
+    for i in range(1, 11):
+        optimizer.step()
+        scheduler.step()
+        expected_lr = 0.1 * (i / 10)
+        assert math.isclose(scheduler.get_last_lr()[0], expected_lr, rel_tol=1e-5)
+
+    # Step through cosine decay
+    for i in range(1, 11):
+        optimizer.step()
+        scheduler.step()
+        progress = i / 10.0
+        cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+        expected_lr = 0.01 + (0.1 - 0.01) * cosine_decay
+        assert math.isclose(scheduler.get_last_lr()[0], expected_lr, rel_tol=1e-5)
+
+    # Beyond max_steps, it should stay at eta_min
+    for _ in range(3):
+        optimizer.step()
+        scheduler.step()
+        assert math.isclose(scheduler.get_last_lr()[0], 0.01, rel_tol=1e-5)
