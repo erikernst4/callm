@@ -232,6 +232,7 @@ class ActivationsDataModule(LightningDataModule):
         correct = torch.tensor([item["correct"] for item in batch], dtype=torch.long)
         first_act = batch[0]["activations"]
         is_multi_layer = batch[0].get("is_multi_layer", False)
+        seq_mask = None
 
         if not is_multi_layer:
             if first_act.ndim == 1:
@@ -243,6 +244,12 @@ class ActivationsDataModule(LightningDataModule):
                 activations = torch.nn.utils.rnn.pad_sequence(
                     activations_list, batch_first=True, padding_value=0.0
                 )
+                # Generate seq_mask: True = valid, False = padding
+                seq_lengths = [a.shape[0] for a in activations_list]
+                max_len = activations.shape[1]
+                seq_mask = torch.zeros(len(batch), max_len, dtype=torch.bool)
+                for i, length in enumerate(seq_lengths):
+                    seq_mask[i, :length] = True
             else:
                 raise ValueError(
                     f"Unexpected activation tensor shape: {first_act.shape}"
@@ -262,15 +269,24 @@ class ActivationsDataModule(LightningDataModule):
                 )  # (batch_size, max_seq_len, num_layers, hidden_dim)
                 # Permute back to (batch_size, num_layers, max_seq_len, hidden_dim)
                 activations = padded.permute(0, 2, 1, 3)
+                # Generate seq_mask: True = valid, False = padding
+                seq_lengths = [item["activations"].shape[1] for item in batch]
+                max_len = activations.shape[2]
+                seq_mask = torch.zeros(len(batch), max_len, dtype=torch.bool)
+                for i, length in enumerate(seq_lengths):
+                    seq_mask[i, :length] = True
             else:
                 raise ValueError(
                     f"Unexpected multi-layer activation tensor shape: {first_act.shape}"
                 )
 
-        return {
+        result = {
             "activations": activations,
             "correct": correct,
         }
+        if seq_mask is not None:
+            result["seq_mask"] = seq_mask
+        return result
 
     def train_dataloader(self):
         return DataLoader(

@@ -1,0 +1,44 @@
+# lightning.pytorch==2.6.5
+# Config for Experiment 3: Attentive Sequence Pooling
+# Uses pool_strategy: none to preserve full sequences for attentive pooling modules.
+seed_everything: 0
+trainer:
+  evaluate_correctness: false
+  accelerator: gpu
+  strategy: auto
+  devices: [1]
+  max_epochs: 100
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val_loss
+        patience: 5
+        mode: min
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val_loss
+        save_top_k: 1
+        mode: min
+model:
+  class_path: callm.models.ConfidenceAugmentedLLM
+  init_args:
+    model_dim: 4096
+    layer_idx: 14
+    lr: 0.001
+    lr_scheduler:
+      class_path: callm.models.WarmupExponentialLR
+      init_args:
+        warmup_steps: 100
+        gamma: 0.999
+data:
+  class_path: callm.data.ActivationsDataModule
+  init_args:
+    activations_dir: /home/eernst/doctorado/callm-dev/activations_cache/qwen_triviaqa/lightning_logs/version_6
+    evaluation_csv: /home/eernst/doctorado/callm-dev/activations_cache/qwen_triviaqa/lightning_logs/version_5_evaluation/version_9/evaluation_results.csv
+    layer_idx: 14
+    batch_size: 64
+    num_workers: 4
+    pool_strategy: none
+    activations_to_use: both
+    train_split: 0.8
+    seed: 42

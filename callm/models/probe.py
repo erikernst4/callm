@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from lightning.pytorch import LightningModule
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from callm.models.llm import LLM
@@ -77,22 +77,37 @@ class SingleLayerSelector(nn.Module):
 
 class Probe(nn.Module):
     """
-    A simple probe that gets single layer activations, mean pools across sequence,
-    and applies a linear layer + sigmoid to return the confidence directly.
+    A probe that gets single layer activations, pools across the sequence
+    dimension (via a configurable ``seq_pooling`` module), and applies a
+    linear layer + sigmoid to return the confidence directly.
     """
 
-    def __init__(self, model_dim: int, layer_pooling: nn.Module | None = None):
+    def __init__(
+        self,
+        model_dim: int,
+        layer_pooling: nn.Module | None = None,
+        seq_pooling: nn.Module | None = None,
+    ):
         super().__init__()
         self.model_dim = model_dim
         self.layer_pooling = layer_pooling
+        self.seq_pooling = (
+            seq_pooling  # None → fallback to plain mean (backward compat)
+        )
         self.linear = nn.Linear(model_dim, 1)
 
-    def forward(self, activations: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        activations: torch.Tensor,
+        seq_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """
         Args:
             activations: shape (#batch, #seq, #model_dim) or (#batch, #model_dim) if pre-pooled
                          or (#batch, num_layers, #seq, #model_dim) / (#batch, num_layers, #model_dim)
                          if layer_pooling is specified.
+            seq_mask: optional (batch, seq_len) bool mask — True = valid position.
+                      Used by attentive pooling modules to ignore padding.
         Returns:
             confidence: shape (#batch)
         """
@@ -100,8 +115,11 @@ class Probe(nn.Module):
             activations = self.layer_pooling(activations)
 
         if activations.ndim == 3:
-            # Raw sequence input: mean pool over sequence dimension
-            pooled = activations.mean(dim=1)  # (#batch, #model_dim)
+            if self.seq_pooling is not None:
+                pooled = self.seq_pooling(activations, mask=seq_mask)
+            else:
+                # Default mean pooling (backward compatible, no mask support)
+                pooled = activations.mean(dim=1)  # (#batch, #model_dim)
         elif activations.ndim == 2:
             # Pre-pooled input: already (#batch, #model_dim)
             pooled = activations
@@ -144,7 +162,12 @@ class ConfidenceAugmentedLLM(LightningModule):
         layer_idx: int | list[int] | str = -1,
         num_layers: int | None = None,
         layer_pooling: nn.Module | None = None,
+        seq_pooling: nn.Module | None = None,
         lr: float = 1e-3,
+        lr_scheduler: Callable[
+            [torch.optim.Optimizer], torch.optim.lr_scheduler.LRScheduler
+        ]
+        | None = None,
         probe_checkpoint: str | None = None,
         pool_strategy: str = "mean",
         activations_to_use: str = "answer",
@@ -153,6 +176,7 @@ class ConfidenceAugmentedLLM(LightningModule):
         self.llm = llm
         self.layer_idx = layer_idx
         self.lr = lr
+        self.lr_scheduler = lr_scheduler
         self.pool_strategy = pool_strategy
         self.activations_to_use = activations_to_use
 
@@ -197,7 +221,11 @@ class ConfidenceAugmentedLLM(LightningModule):
                 self.num_layers = layer_pooling.num_layers
 
         if probe is None:
-            self.probe = Probe(self.model_dim, layer_pooling=layer_pooling)
+            self.probe = Probe(
+                self.model_dim,
+                layer_pooling=layer_pooling,
+                seq_pooling=seq_pooling,
+            )
         else:
             self.probe = probe
 
@@ -446,7 +474,10 @@ class ConfidenceAugmentedLLM(LightningModule):
           the LLM is run to extract activations.
         """
         if "activations" in batch:
-            return self.probe(batch["activations"])
+            return self.probe(
+                batch["activations"],
+                seq_mask=batch.get("seq_mask"),
+            )
         else:
             return self(batch["input_ids"], batch["attention_mask"], generate=False)
 
@@ -454,6 +485,13 @@ class ConfidenceAugmentedLLM(LightningModule):
         confidence = self._get_confidence(batch)
         loss = self.loss_fn(confidence, batch["correct"].float())
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        if self._trainer is not None and len(self.trainer.optimizers) > 0:
+            self.log(
+                "lr",
+                self.trainer.optimizers[0].param_groups[0]["lr"],
+                on_step=True,
+                prog_bar=True,
+            )
         return loss
 
     def on_validation_epoch_start(self):
@@ -687,4 +725,14 @@ class ConfidenceAugmentedLLM(LightningModule):
 
     def configure_optimizers(self):
         # Only self.probe parameters are optimized
-        return torch.optim.AdamW(self.probe.parameters(), lr=self.lr)
+        optimizer = torch.optim.AdamW(self.probe.parameters(), lr=self.lr)
+        if self.lr_scheduler is not None:
+            scheduler = self.lr_scheduler(optimizer)
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "step",
+                },
+            }
+        return optimizer
