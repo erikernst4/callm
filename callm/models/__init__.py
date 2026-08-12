@@ -2,10 +2,13 @@ from .llm import LLM
 from .evaluator import EvaluatorModule
 from .gcp_llm import GCPLLM
 from .gcp_evaluator import GCPEvaluatorModule
-from .probe import ConfidenceAugmentedLLM, Probe
+from .probe import (
+    ConfidenceAugmentedLLM,
+    Probe,
+)
 from .activation_extractor import ActivationExtractor
 from .exact_answer_extractor import ExactAnswerExtractorModule
-from .pooling import (
+from .sequence_pooling import (
     MeanPooling,
     AttentivePooling,
     QueryAttentivePooling,
@@ -14,6 +17,12 @@ from .pooling import (
     TransformerPooling,
 )
 from .lr_scheduling import WarmupExponentialLR, WarmupCosineAnnealingLR
+from .layer_pooling import (
+    GlobalZNormWeightedAverage,
+    LayerwiseZNormWeightedAverage,
+    LayerNormWeightedAverage,
+    LayerWeightedAverage,
+)
 
 __all__ = [
     "LLM",
@@ -30,6 +39,10 @@ __all__ = [
     "MultiHeadAttentivePooling",
     "QueryMultiHeadAttentivePooling",
     "TransformerPooling",
+    "GlobalZNormWeightedAverage",
+    "LayerwiseZNormWeightedAverage",
+    "LayerNormWeightedAverage",
+    "LayerWeightedAverage",
     "WarmupExponentialLR",
     "WarmupCosineAnnealingLR",
 ]

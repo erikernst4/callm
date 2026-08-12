@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import csv
 import numpy as np
@@ -11,68 +12,12 @@ from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     from callm.models.llm import LLM
 
-
-class LayerWeightedAverage(nn.Module):
-    """
-    Learns a weight for each layer and computes the weighted average of
-    activations across the layer dimension.
-    """
-
-    def __init__(self, num_layers: int):
-        super().__init__()
-        self.num_layers = num_layers
-        self.layer_weights = nn.Parameter(torch.zeros(num_layers))
-
-    def forward(self, activations: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            activations: shape (#batch, num_layers, #seq, #model_dim) or (#batch, num_layers, #model_dim)
-        Returns:
-            weighted_activations: shape (#batch, #seq, #model_dim) or (#batch, #model_dim)
-        """
-        weights = torch.softmax(self.layer_weights, dim=0).to(dtype=activations.dtype)
-
-        if activations.ndim == 4:
-            weights = weights.view(1, self.num_layers, 1, 1)
-        elif activations.ndim == 3:
-            weights = weights.view(1, self.num_layers, 1)
-        else:
-            raise ValueError(
-                f"LayerWeightedAverage expected 3D or 4D input, got {activations.ndim}D"
-            )
-
-        return (activations * weights).sum(dim=1)
-
-    def get_weights(self) -> torch.Tensor:
-        """Returns the normalized (softmax) layer weights."""
-        return torch.softmax(self.layer_weights, dim=0)
-
-
-class SingleLayerSelector(nn.Module):
-    """
-    Selects activations from a single specified layer index.
-    """
-
-    def __init__(self, layer_idx: int, num_layers: int | None = None):
-        super().__init__()
-        self.layer_idx = layer_idx
-        self.num_layers = num_layers
-
-    def forward(self, activations: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            activations: shape (#batch, num_layers, #seq, #model_dim) or (#batch, num_layers, #model_dim)
-        Returns:
-            layer_activations: shape (#batch, #seq, #model_dim) or (#batch, #model_dim)
-        """
-        if activations.ndim not in (3, 4):
-            raise ValueError(
-                f"SingleLayerSelector expected 3D or 4D input, got {activations.ndim}D"
-            )
-
-        n_layers = activations.shape[1]
-        resolved_idx = self.layer_idx % n_layers
-        return activations[:, resolved_idx]
+from .layer_pooling import (
+    LayerWeightedAverage,
+    SingleLayerSelector,
+    GlobalZNormWeightedAverage,
+    LayerwiseZNormWeightedAverage,
+)
 
 
 class Probe(nn.Module):
@@ -241,6 +186,10 @@ class ConfidenceAugmentedLLM(LightningModule):
         # Storage for live evaluation outputs
         self._eval_outputs = []
 
+        # Layer weight snapshot tracking for visualization
+        self._weight_snapshots = []
+        self._weight_snapshot_interval = 50  # log every N training steps
+
     def _load_probe_checkpoint(self, probe_checkpoint: str):
         """
         Load probe weights from a trained ConfidenceAugmentedLLM checkpoint.
@@ -275,6 +224,45 @@ class ConfidenceAugmentedLLM(LightningModule):
         for p in self.probe.parameters():
             p.requires_grad = False
         print(f"Loaded probe weights from {probe_checkpoint}")
+
+    def on_fit_start(self):
+        """
+        Inject normalization statistics from the datamodule into the
+        layer_pooling module, if applicable.
+
+        Called automatically by Lightning before training begins.
+        """
+        layer_pooling = getattr(self.probe, "layer_pooling", None)
+        if layer_pooling is None or not hasattr(
+            layer_pooling, "set_normalization_stats"
+        ):
+            return
+
+        datamodule = getattr(self.trainer, "datamodule", None)
+        if datamodule is None:
+            return
+
+        layer_stats = getattr(datamodule, "layer_stats", None)
+        if layer_stats is None:
+            print(
+                "Warning: layer_pooling has set_normalization_stats() but "
+                "datamodule has no layer_stats. Normalization will use default "
+                "(zero-mean, unit-std) values."
+            )
+            return
+
+        if isinstance(layer_pooling, GlobalZNormWeightedAverage):
+            layer_pooling.set_normalization_stats(
+                layer_stats["global_mean"].to(self.device),
+                layer_stats["global_std"].to(self.device),
+            )
+            print("Injected global Z-normalization statistics into layer_pooling")
+        elif isinstance(layer_pooling, LayerwiseZNormWeightedAverage):
+            layer_pooling.set_normalization_stats(
+                layer_stats["layer_means"].to(self.device),
+                layer_stats["layer_stds"].to(self.device),
+            )
+            print("Injected layer-wise Z-normalization statistics into layer_pooling")
 
     def _select_layer_activations(self, hidden_states):
         """
@@ -492,7 +480,41 @@ class ConfidenceAugmentedLLM(LightningModule):
                 on_step=True,
                 prog_bar=True,
             )
+
+        # Snapshot layer weights for visualization
+        if self.global_step % self._weight_snapshot_interval == 0:
+            layer_pooling = getattr(self.probe, "layer_pooling", None)
+            if layer_pooling is not None and hasattr(layer_pooling, "get_weights"):
+                weights = layer_pooling.get_weights().detach().cpu().tolist()
+                self._weight_snapshots.append(
+                    {"step": self.global_step, "weights": weights}
+                )
+
         return loss
+
+    def on_fit_end(self):
+        """Save layer weight evolution to a JSON file for later visualization."""
+        if not self._weight_snapshots:
+            return
+
+        log_dir = self.trainer.log_dir or os.getcwd()
+        weights_file = os.path.join(log_dir, "layer_weights_history.json")
+        try:
+            # Include layer_idx mapping so we know which layers the weights correspond to
+            layer_indices = (
+                self.layer_idx
+                if isinstance(self.layer_idx, list)
+                else list(range(self.num_layers or 0))
+            )
+            data = {
+                "layer_indices": layer_indices,
+                "snapshots": self._weight_snapshots,
+            }
+            with open(weights_file, "w") as f:
+                json.dump(data, f, indent=2)
+            print(f"Layer weight history saved to {weights_file}")
+        except Exception as e:
+            print(f"Failed to save layer weight history: {e}")
 
     def on_validation_epoch_start(self):
         self.val_confidences = []

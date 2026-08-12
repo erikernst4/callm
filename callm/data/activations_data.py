@@ -59,10 +59,81 @@ class ActivationsDataModule(LightningDataModule):
 
         self.train_dataset = None
         self.val_dataset = None
+        self.layer_stats = None  # Populated in setup() for Z-norm layer pooling
 
     def prepare_data(self):
         # Activations are already extracted on disk
         pass
+
+    def compute_layer_statistics(self, dataset_samples: list) -> dict:
+        """
+        Compute per-layer and global mean/std over all multi-layer samples.
+
+        Uses Welford's online algorithm for numerical stability.
+        Only meaningful when ``is_multi_layer`` is True (multi-layer samples).
+
+        Returns:
+            dict with keys:
+            - ``global_mean``: Tensor of shape (model_dim,)
+            - ``global_std``:  Tensor of shape (model_dim,)
+            - ``layer_means``: Tensor of shape (num_layers, model_dim)
+            - ``layer_stds``:  Tensor of shape (num_layers, model_dim)
+        """
+        # Filter to multi-layer samples only
+        multi_samples = [s for s in dataset_samples if s.get("is_multi_layer", False)]
+        if not multi_samples:
+            return None
+
+        first_act = multi_samples[0]["activations"]
+        # first_act shape: (num_layers, model_dim) or (num_layers, seq_len, model_dim)
+        num_layers = first_act.shape[0]
+        if first_act.ndim == 2:
+            model_dim = first_act.shape[1]
+        else:
+            model_dim = first_act.shape[-1]
+
+        # Welford's online algorithm per layer
+        # For each layer, compute mean/var over all tokens across all samples
+        layer_count = torch.zeros(num_layers)
+        layer_mean = torch.zeros(num_layers, model_dim)
+        layer_m2 = torch.zeros(num_layers, model_dim)
+
+        for sample in multi_samples:
+            act = sample["activations"]  # (num_layers, dim) or (num_layers, seq, dim)
+            for layer_i in range(num_layers):
+                layer_act = act[layer_i]  # (dim,) or (seq, dim)
+                if layer_act.ndim == 1:
+                    layer_act = layer_act.unsqueeze(0)  # (1, dim)
+
+                for token_vec in layer_act:  # iterate over seq tokens
+                    layer_count[layer_i] += 1
+                    delta = token_vec - layer_mean[layer_i]
+                    layer_mean[layer_i] += delta / layer_count[layer_i]
+                    delta2 = token_vec - layer_mean[layer_i]
+                    layer_m2[layer_i] += delta * delta2
+
+        # Compute per-layer std
+        layer_var = layer_m2 / layer_count.unsqueeze(1).clamp(min=1)
+        layer_stds = torch.sqrt(layer_var)
+
+        # Compute global stats (mean of layer means, pooled std)
+        global_mean = layer_mean.mean(dim=0)
+        # Pooled variance: average of per-layer variances + variance of layer means
+        global_var = layer_var.mean(dim=0) + layer_mean.var(dim=0)
+        global_std = torch.sqrt(global_var)
+
+        stats = {
+            "global_mean": global_mean,
+            "global_std": global_std,
+            "layer_means": layer_mean,
+            "layer_stds": layer_stds,
+        }
+
+        print(
+            f"Computed layer statistics over {int(layer_count[0].item())} vectors/layer "
+            f"({len(multi_samples)} samples, {num_layers} layers, dim={model_dim})"
+        )
+        return stats
 
     def setup(self, stage: str = None):
         if not os.path.exists(self.evaluation_csv):
@@ -209,6 +280,9 @@ class ActivationsDataModule(LightningDataModule):
             f"Loaded and mapped {len(dataset_samples)} samples from "
             f"{self.activations_dir} and {self.evaluation_csv}"
         )
+
+        # Compute layer normalization statistics (for Z-norm layer pooling)
+        self.layer_stats = self.compute_layer_statistics(dataset_samples)
 
         # 4. Split into train and validation
         rng = random.Random(self.seed)
