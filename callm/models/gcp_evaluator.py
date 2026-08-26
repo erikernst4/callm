@@ -20,6 +20,8 @@ from google.genai import types
 class GCPEvaluatorModule(BaseLightningModule):
     """
     LightningModule for batched correctness evaluation using Google Cloud LLMs.
+    Supports incremental evaluation by honoring cached labels from previous evaluation CSVs
+    and exact matches, preventing redundant external API calls.
     """
 
     def __init__(
@@ -51,6 +53,7 @@ class GCPEvaluatorModule(BaseLightningModule):
     def validation_step(self, batch, batch_idx):
         """
         Evaluate correctness for a batch using GCP.
+        Skips API calls for exact matches and samples already labeled in previous runs.
         """
         exact_matches = batch["exact_match"]
         questions = batch["question"]
@@ -61,11 +64,16 @@ class GCPEvaluatorModule(BaseLightningModule):
         indices = batch["index"]
 
         prompts = batch.get("input")
+        cached_corrects = batch.get("cached_correct")
+        cached_evaluator_responses = batch.get("cached_evaluator_response")
 
         generated_responses = [None] * len(exact_matches)
 
         for i, is_exact in enumerate(exact_matches):
-            if not is_exact and prompts is not None and prompts[i]:
+            is_cached = cached_corrects is not None and cached_corrects[i] is not None
+
+            # Only call GCP if NOT an exact match and NOT already cached
+            if not is_exact and not is_cached and prompts is not None and prompts[i]:
                 contents = [
                     types.Content(
                         role="user", parts=[types.Part.from_text(text=prompts[i])]
@@ -87,6 +95,13 @@ class GCPEvaluatorModule(BaseLightningModule):
                         f"Error calling GCP evaluator inference for question: {questions[i]} / {e}"
                     )
                     generated_responses[i] = ""
+            elif is_cached:
+                generated_responses[i] = (
+                    cached_evaluator_responses[i]
+                    if cached_evaluator_responses
+                    and cached_evaluator_responses[i] is not None
+                    else ""
+                )
 
         # Store results
         for i in range(len(exact_matches)):
@@ -101,6 +116,9 @@ class GCPEvaluatorModule(BaseLightningModule):
                     "confidence": confidences[i],
                     "raw_output": raw_outputs[i],
                     "exact_match": exact_matches[i],
+                    "cached_correct": cached_corrects[i]
+                    if cached_corrects is not None
+                    else None,
                     "evaluator_response_raw": generated_responses[i],
                 }
             )
@@ -162,6 +180,11 @@ class GCPEvaluatorModule(BaseLightningModule):
             if result.get("exact_match"):
                 result["correct"] = True
                 result["evaluator_response"] = ""
+            elif result.get("cached_correct") is not None:
+                result["correct"] = bool(result["cached_correct"])
+                result["evaluator_response"] = (
+                    result.get("evaluator_response_raw") or ""
+                )
             else:
                 response = result.get("evaluator_response_raw", "")
                 response_lower = response.lower().strip() if response else ""
@@ -173,11 +196,10 @@ class GCPEvaluatorModule(BaseLightningModule):
         log_dir = self.trainer.log_dir or os.getcwd()
         results_file = os.path.join(log_dir, "evaluation_results.csv")
 
-        def short_output(txt: str, limit: int = 200) -> str:
+        def format_field(txt: str) -> str:
             if not txt:
                 return ""
-            truncated = txt[:limit] + ("..." if len(txt) > limit else "")
-            return truncated.replace("\n", "\\n")
+            return str(txt).replace("\n", "\\n")
 
         try:
             with open(results_file, "w", newline="", encoding="utf-8") as f:
@@ -202,13 +224,13 @@ class GCPEvaluatorModule(BaseLightningModule):
                     evaluator_resp = result.get("evaluator_response", "")
                     writer.writerow(
                         [
-                            short_output(result["question"]),
+                            format_field(result["question"]),
                             result["gold_answers"],
-                            short_output(result["pred_answer"]),
+                            format_field(result["pred_answer"]),
                             conf_str,
                             "Yes" if result["correct"] else "No",
-                            short_output(evaluator_resp),
-                            short_output(result["raw_output"]),
+                            format_field(evaluator_resp),
+                            format_field(result["raw_output"]),
                         ]
                     )
             print(f"\nGCP Evaluation results saved to {results_file}")
