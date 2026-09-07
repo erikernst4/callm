@@ -571,3 +571,83 @@ def test_layer_pooling_classes_with_init_strategies(pooling_cls, init_strat):
     assert weights.shape == (num_layers,)
     assert torch.allclose(weights.sum(), torch.tensor(1.0), atol=1e-5)
     assert (weights >= 0).all()
+
+
+@pytest.mark.parametrize(
+    "pooling_cls",
+    [
+        MeanPooling,
+        AttentivePooling,
+        QueryAttentivePooling,
+        MultiHeadAttentivePooling,
+        QueryMultiHeadAttentivePooling,
+        TransformerPooling,
+    ],
+)
+def test_probe_bfloat16_input_compatibility(pooling_cls):
+    """Test Probe handles bfloat16 input activations across all sequence pooling modules."""
+    model_dim = 64
+    seq_len = 12
+    batch_size = 3
+
+    probe = Probe(model_dim=model_dim, seq_pooling=pooling_cls(model_dim=model_dim))
+    act_bf16 = torch.randn(batch_size, seq_len, model_dim, dtype=torch.bfloat16)
+    seq_mask = torch.ones(batch_size, seq_len, dtype=torch.bool)
+    seq_mask[0, 8:] = False
+
+    out = probe(act_bf16, seq_mask=seq_mask)
+    assert out.shape == (batch_size,)
+    assert (out >= 0.0).all() and (out <= 1.0).all()
+
+
+def test_activations_datamodule_dtype_conversion():
+    """Test ActivationsDataModule._convert_dtype converts tensors properly."""
+    dm_f32 = ActivationsDataModule(
+        activations_dir="fake_dir",
+        evaluation_csv="fake_csv",
+        dtype="float32",
+    )
+    t = torch.randn(4, 16, dtype=torch.bfloat16)
+    assert dm_f32._convert_dtype(t).dtype == torch.float32
+
+    dm_bf16 = ActivationsDataModule(
+        activations_dir="fake_dir",
+        evaluation_csv="fake_csv",
+        dtype="bfloat16",
+    )
+    assert dm_bf16._convert_dtype(t).dtype == torch.bfloat16
+
+    dm_fp16 = ActivationsDataModule(
+        activations_dir="fake_dir",
+        evaluation_csv="fake_csv",
+        dtype="float16",
+    )
+    assert dm_fp16._convert_dtype(t).dtype == torch.float16
+
+    dm_auto = ActivationsDataModule(
+        activations_dir="fake_dir",
+        evaluation_csv="fake_csv",
+        dtype="auto",
+    )
+    assert dm_auto._convert_dtype(t).dtype == torch.bfloat16
+
+
+def test_collate_fn_with_bfloat16():
+    """Test collate_fn handles bfloat16 activations and produces valid batch."""
+    batch = [
+        {
+            "activations": torch.randn(10, 32, dtype=torch.bfloat16),
+            "correct": True,
+            "is_multi_layer": False,
+        },
+        {
+            "activations": torch.randn(15, 32, dtype=torch.bfloat16),
+            "correct": False,
+            "is_multi_layer": False,
+        },
+    ]
+    collated = ActivationsDataModule.collate_fn(batch)
+    assert collated["activations"].dtype == torch.bfloat16
+    assert collated["activations"].shape == (2, 15, 32)
+    assert collated["correct"].shape == (2,)
+    assert collated["seq_mask"].shape == (2, 15)

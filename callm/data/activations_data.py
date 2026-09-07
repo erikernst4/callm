@@ -40,6 +40,7 @@ class ActivationsDataModule(LightningDataModule):
         seed: int = 42,
         activations_to_use: str = "prompt",
         max_samples: int | None = None,
+        dtype: str = "float32",
     ):
         super().__init__()
         if activations_to_use not in ("prompt", "answer", "both"):
@@ -56,10 +57,29 @@ class ActivationsDataModule(LightningDataModule):
         self.seed = seed
         self.activations_to_use = activations_to_use
         self.max_samples = max_samples
+        self.dtype = dtype
 
         self.train_dataset = None
         self.val_dataset = None
         self.layer_stats = None  # Populated in setup() for Z-norm layer pooling
+
+    def _convert_dtype(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Convert tensor to the configured storage dtype."""
+        if isinstance(self.dtype, torch.dtype):
+            return tensor.to(self.dtype)
+        dtype_str = str(self.dtype).lower()
+        if dtype_str in ("bfloat16", "bf16"):
+            return tensor.bfloat16()
+        elif dtype_str in ("float16", "fp16", "half"):
+            return tensor.half()
+        elif dtype_str in ("float32", "fp32", "float"):
+            return tensor.float()
+        elif dtype_str in ("auto", "none", "preserve"):
+            return tensor
+        else:
+            raise ValueError(
+                f"Unsupported dtype: {self.dtype}. Choose from 'float32', 'bfloat16', 'float16', 'auto'."
+            )
 
     def prepare_data(self):
         # Activations are already extracted on disk
@@ -192,19 +212,24 @@ class ActivationsDataModule(LightningDataModule):
                 if num_layers == 0:
                     raise ValueError(f"Sample {idx} has no saved layer activations.")
 
+                def _resolve_single_layer(l_idx: int) -> int:
+                    if l_idx in sample["activations"]:
+                        return l_idx
+                    return layer_keys[l_idx % num_layers]
+
                 # Support single integer, list of integers, or "all"
                 if isinstance(self.layer_idx, int):
-                    resolved_layers = [self.layer_idx % num_layers]
+                    resolved_layer_keys = [_resolve_single_layer(self.layer_idx)]
                     is_multi_layer = False
                 elif isinstance(self.layer_idx, list):
-                    resolved_layers = [
-                        layer_i % num_layers for layer_i in self.layer_idx
+                    resolved_layer_keys = [
+                        _resolve_single_layer(layer_i) for layer_i in self.layer_idx
                     ]
                     is_multi_layer = True
                 elif (
                     isinstance(self.layer_idx, str) and self.layer_idx.lower() == "all"
                 ):
-                    resolved_layers = list(range(num_layers))
+                    resolved_layer_keys = list(layer_keys)
                     is_multi_layer = True
                 else:
                     raise ValueError(
@@ -213,8 +238,7 @@ class ActivationsDataModule(LightningDataModule):
 
                 # Retrieve and pool activations for the resolved layers
                 layer_acts = []
-                for layer_i in resolved_layers:
-                    resolved_layer_key = layer_keys[layer_i]
+                for resolved_layer_key in resolved_layer_keys:
                     act_tensor = sample["activations"][resolved_layer_key]
 
                     # Slice activations based on activations_to_use
@@ -253,7 +277,7 @@ class ActivationsDataModule(LightningDataModule):
                                 f"Unknown pool strategy: {self.pool_strategy}"
                             )
 
-                    layer_acts.append(pooled_act.float())
+                    layer_acts.append(self._convert_dtype(pooled_act))
 
                 if is_multi_layer:
                     # Stack along a new layer dimension (dim=0)
@@ -419,6 +443,7 @@ class SelectedTokensActivationsDataModule(ActivationsDataModule):
         model_name: str = "Qwen/Qwen3.5-9B",
         prompt: str = "callm.prompts.base.TRANSPARENT_PROMPT_ZERO_SHOT",
         max_samples: int | None = None,
+        dtype: str = "float32",
     ):
         if activations_to_use not in self.VALID_ACTIVATIONS_TO_USE:
             raise ValueError(
@@ -449,6 +474,7 @@ class SelectedTokensActivationsDataModule(ActivationsDataModule):
             seed=seed,
             activations_to_use=parent_activations,
             max_samples=max_samples,
+            dtype=dtype,
         )
         self.activations_to_use = activations_to_use
         self.model_name = model_name
@@ -545,18 +571,23 @@ class SelectedTokensActivationsDataModule(ActivationsDataModule):
                 if num_layers == 0:
                     raise ValueError(f"Sample {idx} has no saved layer activations.")
 
+                def _resolve_single_layer(l_idx: int) -> int:
+                    if l_idx in sample["activations"]:
+                        return l_idx
+                    return layer_keys[l_idx % num_layers]
+
                 if isinstance(self.layer_idx, int):
-                    resolved_layers = [self.layer_idx % num_layers]
+                    resolved_layer_keys = [_resolve_single_layer(self.layer_idx)]
                     is_multi_layer = False
                 elif isinstance(self.layer_idx, list):
-                    resolved_layers = [
-                        layer_i % num_layers for layer_i in self.layer_idx
+                    resolved_layer_keys = [
+                        _resolve_single_layer(layer_i) for layer_i in self.layer_idx
                     ]
                     is_multi_layer = True
                 elif (
                     isinstance(self.layer_idx, str) and self.layer_idx.lower() == "all"
                 ):
-                    resolved_layers = list(range(num_layers))
+                    resolved_layer_keys = list(layer_keys)
                     is_multi_layer = True
                 else:
                     raise ValueError(
@@ -564,8 +595,7 @@ class SelectedTokensActivationsDataModule(ActivationsDataModule):
                     )
 
                 layer_acts = []
-                for layer_i in resolved_layers:
-                    resolved_layer_key = layer_keys[layer_i]
+                for resolved_layer_key in resolved_layer_keys:
                     act_tensor = sample["activations"][resolved_layer_key]
                     prompt_len = sample.get("prompt_length", sample["seq_len"])
                     seq_len = act_tensor.shape[0]
@@ -726,7 +756,7 @@ class SelectedTokensActivationsDataModule(ActivationsDataModule):
                                 f"Unknown pool strategy: {self.pool_strategy}"
                             )
 
-                    layer_acts.append(pooled_act.float())
+                    layer_acts.append(self._convert_dtype(pooled_act))
 
                 if is_multi_layer:
                     final_act = torch.stack(layer_acts, dim=0)
