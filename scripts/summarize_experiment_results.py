@@ -55,6 +55,32 @@ def extract_best_metrics(metrics_csv: str) -> dict:
                 metric_name = "ecuas"
             metrics[metric_name] = float(best_row[col])
 
+    # Extract elapsed / training time
+    total_time = None
+    if "total_elapsed_time" in df.columns:
+        tot = df["total_elapsed_time"].dropna()
+        if not tot.empty:
+            total_time = float(tot.iloc[-1])
+    elif "train_elapsed_time" in df.columns:
+        tot = df["train_elapsed_time"].dropna()
+        if not tot.empty:
+            total_time = float(tot.iloc[-1])
+
+    # Check for training_time.json if not present in metrics.csv
+    json_path = os.path.join(os.path.dirname(metrics_csv), "training_time.json")
+    if total_time is None and os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                t_data = json.load(f)
+                total_time = float(
+                    t_data.get("total_elapsed_time_seconds", float("nan"))
+                )
+        except Exception:
+            pass
+
+    if total_time is not None:
+        metrics["elapsed_time_sec"] = total_time
+
     return metrics
 
 
@@ -175,16 +201,43 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
             "exact_answer_first_token",
             "exact_answer_last_token",
             "exact_answer_after_last_token",
+            "full_answer",
             "baseline",
             "global_znorm",
             "layerwise_znorm",
             "layernorm",
+            "attentive",
+            "multi_head_attentive",
+            "query_attentive",
+            "query_multi_head_attentive",
+            "transformer",
+            "mean",
             "single_layer",
         ]
-        scopes = sorted(
-            scopes,
-            key=lambda s: preferred_order.index(s) if s in preferred_order else 999,
-        )
+
+        known_inits_order = ["uniform", "normal", "reverse_chi", "random"]
+        known_methods_order = [
+            "baseline",
+            "global_znorm",
+            "layerwise_znorm",
+            "layernorm",
+        ]
+
+        def scope_sort_key(s: str):
+            for i_idx, init_k in enumerate(known_inits_order):
+                if s.startswith(init_k + "_"):
+                    rem = s[len(init_k) + 1 :]
+                    m_idx = (
+                        known_methods_order.index(rem)
+                        if rem in known_methods_order
+                        else 99
+                    )
+                    return (0, i_idx, m_idx, s)
+            if s in preferred_order:
+                return (1, preferred_order.index(s), s)
+            return (2, 0, 999, s)
+
+        scopes = sorted(scopes, key=scope_sort_key)
 
     if not scopes:
         print(f"No scope subdirectories found in {exp_dir}")
@@ -317,44 +370,143 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
         },
     ]
 
+    # Style mapping rules
+    known_inits = {
+        "uniform": {"marker": "o", "linestyle": "-", "name": "Uniform"},
+        "normal": {"marker": "s", "linestyle": "-", "name": "Normal"},
+        "reverse_chi": {"marker": "^", "linestyle": "-", "name": "Reverse Chi"},
+        "random": {"marker": "X", "linestyle": "-", "name": "Random"},
+    }
+
+    known_methods = {
+        "baseline": {"color": "#1f77b4", "name": "Baseline"},
+        "global_znorm": {"color": "#ff7f0e", "name": "Global Z-Norm"},
+        "layerwise_znorm": {"color": "#2ca02c", "name": "Layer-wise Z-Norm"},
+        "layernorm": {"color": "#d62728", "name": "LayerNorm"},
+    }
+
     known_styles = {
-        "prompt": {"color": "#1f77b4", "marker": "o", "label": "Prompt"},
-        "answer": {"color": "#d62728", "marker": "s", "label": "Answer"},
-        "both": {"color": "#2ca02c", "marker": "^", "label": "Prompt + Answer"},
+        "prompt": {
+            "color": "#1f77b4",
+            "marker": "o",
+            "linestyle": "-",
+            "label": "Prompt",
+        },
+        "answer": {
+            "color": "#d62728",
+            "marker": "s",
+            "linestyle": "-",
+            "label": "Answer",
+        },
+        "both": {
+            "color": "#2ca02c",
+            "marker": "^",
+            "linestyle": "-",
+            "label": "Prompt + Answer",
+        },
         "exact_answer": {
             "color": "#1f77b4",
             "marker": "o",
+            "linestyle": "-",
             "label": "Exact Answer (All)",
         },
         "exact_answer_first_token": {
             "color": "#ff7f0e",
             "marker": "s",
+            "linestyle": "-",
             "label": "First Token",
         },
         "exact_answer_last_token": {
             "color": "#2ca02c",
             "marker": "^",
+            "linestyle": "-",
             "label": "Last Token",
         },
         "exact_answer_before_first_token": {
             "color": "#d62728",
             "marker": "v",
+            "linestyle": "-",
             "label": "Token Before First",
         },
         "exact_answer_after_last_token": {
             "color": "#9467bd",
             "marker": "D",
+            "linestyle": "-",
             "label": "Token After Last",
         },
-        "baseline": {"color": "#1f77b4", "marker": "o", "label": "Baseline"},
-        "global_znorm": {"color": "#ff7f0e", "marker": "s", "label": "Global Z-Norm"},
+        "full_answer": {
+            "color": "#8c564b",
+            "marker": "p",
+            "linestyle": "-",
+            "label": "Full Answer",
+        },
+        "baseline": {
+            "color": "#1f77b4",
+            "marker": "o",
+            "linestyle": "-",
+            "label": "Baseline",
+        },
+        "global_znorm": {
+            "color": "#ff7f0e",
+            "marker": "s",
+            "linestyle": "-",
+            "label": "Global Z-Norm",
+        },
         "layerwise_znorm": {
             "color": "#2ca02c",
             "marker": "^",
+            "linestyle": "-",
             "label": "Layer-wise Z-Norm",
         },
-        "layernorm": {"color": "#d62728", "marker": "v", "label": "LayerNorm"},
-        "single_layer": {"color": "#9467bd", "marker": "D", "label": "Single Layer"},
+        "layernorm": {
+            "color": "#d62728",
+            "marker": "v",
+            "linestyle": "-",
+            "label": "LayerNorm",
+        },
+        "single_layer": {
+            "color": "#4b5563",
+            "marker": "D",
+            "linestyle": "-",
+            "label": "Single Layer",
+        },
+        # Attentive sequence pooling methods (Exp 3)
+        "attentive": {
+            "color": "#1f77b4",
+            "marker": "o",
+            "linestyle": "-",
+            "label": "Attentive",
+        },
+        "multi_head_attentive": {
+            "color": "#ff7f0e",
+            "marker": "s",
+            "linestyle": "-",
+            "label": "Multi-Head Attentive",
+        },
+        "query_attentive": {
+            "color": "#2ca02c",
+            "marker": "^",
+            "linestyle": "-",
+            "label": "Query Attentive",
+        },
+        "query_multi_head_attentive": {
+            "color": "#d62728",
+            "marker": "X",
+            "linestyle": "-",
+            "label": "Query Multi-Head Attentive",
+        },
+        "transformer": {
+            "color": "#9467bd",
+            "marker": "D",
+            "linestyle": "-",
+            "label": "Transformer",
+        },
+        "mean": {
+            "color": "#8c564b",
+            "marker": "v",
+            "linestyle": "-",
+            "label": "Mean Pooling",
+        },
     }
 
     default_colors = [
@@ -379,32 +531,19 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
         "o",  # Circle
         "s",  # Square
         "^",  # Triangle Up
-        "v",  # Triangle Down
+        "X",  # Filled X
         "D",  # Diamond
+        "v",  # Triangle Down
+        "P",  # Filled Plus
         "p",  # Pentagon
         "*",  # Star
-        "X",  # Filled X
-        "P",  # Filled Plus
         "h",  # Hexagon
         "<",  # Triangle Left
         ">",  # Triangle Right
         "d",  # Thin Diamond
         "H",  # Hexagon 2
     ]
-    default_linestyles = [
-        "-",  # Solid
-        "--",  # Dashed
-        "-.",  # Dash-dot
-        ":",  # Dotted
-    ]
-
-    # Generate all unique (color, marker, linestyle) combinations
-    color_marker_combos = [
-        (c, m, ls)
-        for ls in default_linestyles
-        for m in default_markers
-        for c in default_colors
-    ]
+    default_linestyles = ["-"]
 
     scope_styles = {}
     fallback_counter = 0
@@ -418,17 +557,53 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
                 "label": ks.get("label", scope),
             }
         else:
-            combo_color, combo_marker, combo_ls = color_marker_combos[
-                fallback_counter % len(color_marker_combos)
-            ]
-            fallback_counter += 1
-            formatted_label = scope.replace("znorm", "z_norm").replace("_", " ").title()
-            scope_styles[scope] = {
-                "color": combo_color,
-                "marker": combo_marker,
-                "linestyle": combo_ls,
-                "label": formatted_label,
-            }
+            # Check for compound scope: <init>_<method>
+            matched_compound = False
+            for init_k, init_info in known_inits.items():
+                if scope.startswith(init_k + "_"):
+                    rem = scope[len(init_k) + 1 :]
+                    if rem in known_methods:
+                        method_info = known_methods[rem]
+                        scope_styles[scope] = {
+                            "color": method_info["color"],
+                            "marker": init_info["marker"],
+                            "linestyle": init_info["linestyle"],
+                            "label": f"{init_info['name']}: {method_info['name']}",
+                        }
+                        matched_compound = True
+                        break
+                    else:
+                        formatted_rem = (
+                            rem.replace("znorm", "z_norm").replace("_", " ").title()
+                        )
+                        scope_styles[scope] = {
+                            "color": default_colors[
+                                fallback_counter % len(default_colors)
+                            ],
+                            "marker": init_info["marker"],
+                            "linestyle": init_info["linestyle"],
+                            "label": f"{init_info['name']}: {formatted_rem}",
+                        }
+                        fallback_counter += 1
+                        matched_compound = True
+                        break
+
+            if not matched_compound:
+                combo_color = default_colors[fallback_counter % len(default_colors)]
+                combo_marker = default_markers[fallback_counter % len(default_markers)]
+                combo_ls = default_linestyles[
+                    (fallback_counter // len(default_markers)) % len(default_linestyles)
+                ]
+                fallback_counter += 1
+                formatted_label = (
+                    scope.replace("znorm", "z_norm").replace("_", " ").title()
+                )
+                scope_styles[scope] = {
+                    "color": combo_color,
+                    "marker": combo_marker,
+                    "linestyle": combo_ls,
+                    "label": formatted_label,
+                }
 
     def layer_sort_key(val):
         if isinstance(val, (int, float, np.number)):
@@ -439,6 +614,7 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
             return (1, str(val))
 
     non_weighted_df = summary_df[~summary_df["is_weighted"]]
+    has_any_weighted = bool(summary_df["is_weighted"].any())
     all_numeric_layers = True
     if not non_weighted_df.empty:
         all_numeric_layers = all(
@@ -449,7 +625,7 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
 
     x_axis_label = "Layer Number" if all_numeric_layers else "Layer / Subset"
 
-    fig, axes = plt.subplots(3, 2, figsize=(16, 18))
+    fig, axes = plt.subplots(3, 2, figsize=(18, 20))
     axes = axes.flatten()
 
     for idx, cfg in enumerate(metrics_config):
@@ -468,6 +644,7 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
             marker = style["marker"]
             linestyle = style.get("linestyle", "-")
             label = style["label"]
+            curve_label = f"{label} (per-layer)" if has_any_weighted else label
 
             # Per-layer data
             scope_df = summary_df[
@@ -511,8 +688,8 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
                 marker=marker,
                 linestyle=linestyle,
                 linewidth=2,
-                markersize=6,
-                label=f"{label} (per-layer)",
+                markersize=7,
+                label=curve_label,
             )
 
             # Highlight best layer for this scope
@@ -597,7 +774,7 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
     for cfg in metrics_config:
         key = cfg["key"]
         fallback_key = cfg.get("fallback_key")
-        fig_ind, ax_ind = plt.subplots(figsize=(12, 6))
+        fig_ind, ax_ind = plt.subplots(figsize=(14, 7))
         has_ind_data = False
 
         for scope in scopes:
@@ -609,6 +786,7 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
             marker = style["marker"]
             linestyle = style.get("linestyle", "-")
             label = style["label"]
+            curve_label = f"{label} (per-layer)" if has_any_weighted else label
 
             scope_df = summary_df[
                 (summary_df["scope"] == scope) & (~summary_df["is_weighted"])
@@ -650,8 +828,8 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
                 marker=marker,
                 linestyle=linestyle,
                 linewidth=2,
-                markersize=6,
-                label=f"{label} (per-layer)",
+                markersize=7,
+                label=curve_label,
             )
 
             best_idx = cfg["find_best"](values)
@@ -690,7 +868,7 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
         if has_ind_data:
             if len(scopes) > 6:
                 ax_ind.legend(
-                    fontsize=9,
+                    fontsize=8.5,
                     loc="upper left",
                     bbox_to_anchor=(1.02, 1.0),
                     borderaxespad=0.0,
