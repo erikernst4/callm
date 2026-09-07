@@ -34,3 +34,9 @@ from callm.prompts.mmlu import (  # noqa: F401
     format_choices,
     answer_index_to_letter,
 )
+
+# Set __module__ and __qualname__ on all exported prompts for jsonargparse import path resolution
+for _name, _val in list(vars().items()):
+    if isinstance(_val, Prompt):
+        _val.__dict__["__module__"] = "callm.prompts"
+        _val.__dict__["__qualname__"] = _name

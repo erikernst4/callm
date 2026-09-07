@@ -80,3 +80,10 @@ GCP_CHAT_IS_TRUE_PROB_PROMPT = ChatPrompt(
     user="Question: {{ question }}\nProposed Answer: {{ answer }}\n\nIs the proposed answer correct?",
     gcp=True,
 )
+
+
+# Set __module__ and __qualname__ on prompt instances for jsonargparse import path resolution
+for _name, _val in list(vars().items()):
+    if isinstance(_val, Prompt):
+        _val.__dict__["__module__"] = "callm.prompts.triviaqa"
+        _val.__dict__["__qualname__"] = _name

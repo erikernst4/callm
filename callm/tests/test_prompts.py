@@ -34,19 +34,56 @@ def test_prompt_raises_on_missing_fields_with_strict_undefined():
         prompt(question="What is 2+2?")
 
 
-def test_jsonargparse_serialization():
+def test_jsonargparse_serialization_predefined_prompts():
     import jsonargparse
+    import callm.prompts as prompts
 
-    prompt = Prompt("Question: {{ question }}")
+    test_prompts = [
+        (
+            "callm.prompts.GCP_CHAT_MMLU_LABEL_PROB_PROMPT",
+            prompts.GCP_CHAT_MMLU_LABEL_PROB_PROMPT,
+        ),
+        (
+            "callm.prompts.CHAT_MMLU_LABEL_PROB_PROMPT",
+            prompts.CHAT_MMLU_LABEL_PROB_PROMPT,
+        ),
+        (
+            "callm.prompts.CHAT_MMLU_VERBALIZED_PROMPT",
+            prompts.CHAT_MMLU_VERBALIZED_PROMPT,
+        ),
+        (
+            "callm.prompts.CHAT_LABEL_PROB_PROMPT_ZERO_SHOT",
+            prompts.CHAT_LABEL_PROB_PROMPT_ZERO_SHOT,
+        ),
+    ]
+
+    for expected_path, prompt_obj in test_prompts:
+        parser = jsonargparse.ArgumentParser()
+        parser.add_subclass_arguments(Prompt, "prompt")
+        cfg = parser.parse_object({"prompt": prompt_obj})
+        dumped = parser.dump(cfg)
+        assert "Unable to serialize" not in dumped
+        assert expected_path in dumped
+
+        reloaded = parser.parse_string(dumped)
+        assert reloaded.prompt is prompt_obj
+
+
+def test_jsonargparse_datamodule_default_prompt():
+    import jsonargparse
+    import callm.prompts as prompts
+    from callm.data.mmlu.untokenized_mmlu import UntokenizedMMLUDataModule
+
     parser = jsonargparse.ArgumentParser()
-    parser.add_subclass_arguments(Prompt, "prompt")
-    cfg = parser.parse_object({"prompt": prompt})
-    dumped = parser.dump(cfg)
-    assert dumped
+    parser.add_class_arguments(UntokenizedMMLUDataModule, "data")
+    defaults = parser.get_defaults()
+    dumped = parser.dump(defaults)
 
-    chat_prompt = ChatPrompt(user="Question: {{ question }}")
-    parser_chat = jsonargparse.ArgumentParser()
-    parser_chat.add_subclass_arguments(Prompt, "prompt")
-    cfg_chat = parser_chat.parse_object({"prompt": chat_prompt})
-    dumped_chat = parser_chat.dump(cfg_chat)
-    assert dumped_chat
+    assert "Unable to serialize" not in dumped
+    assert "callm.prompts.GCP_CHAT_MMLU_LABEL_PROB_PROMPT" in dumped
+
+    reloaded = parser.parse_string(dumped)
+    inst = getattr(parser, "instantiate", getattr(parser, "instantiate_classes"))(
+        reloaded
+    )
+    assert inst.data.prompt is prompts.GCP_CHAT_MMLU_LABEL_PROB_PROMPT

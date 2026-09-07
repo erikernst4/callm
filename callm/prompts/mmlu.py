@@ -108,3 +108,10 @@ def format_choices(choices: list[str]) -> str:
 def answer_index_to_letter(index: int) -> str:
     """Convert answer index (0-3) to letter (A-D)."""
     return ["A", "B", "C", "D"][index]
+
+
+# Set __module__ and __qualname__ on prompt instances for jsonargparse import path resolution
+for _name, _val in list(vars().items()):
+    if isinstance(_val, ChatPrompt):
+        _val.__dict__["__module__"] = "callm.prompts.mmlu"
+        _val.__dict__["__qualname__"] = _name
