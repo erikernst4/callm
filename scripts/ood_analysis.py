@@ -77,7 +77,7 @@ def main(
     all_results = []
 
     for model in ["resnet20", "vgg19_bn", "repvgg_a2"]:
-        for dataset in ["cifar10", "cifar100"]:
+        for dataset in ["cifar10"]:
             net = torch.hub.load("checkpoints/chenyaofo/pytorch-cifar-models", f"{dataset}_{model}", pretrained=True, trust_repo=True, source="local")
             net = net.to(device)
 
@@ -90,32 +90,41 @@ def main(
             # Define the outputs directory for the current model, dataset, and shift severity
             outputs_dir = root_outputs_dir / model / dataset
             outputs_dir.mkdir(parents=True, exist_ok=True)
-            scores_path = outputs_dir / f"scores.csv"
             labels_path = outputs_dir / f"labels.csv"
 
             datamodule.setup(stage="test")
-            _, test_loader = datamodule.test_dataloader()
+            id_test_loader, ood_test_loader = datamodule.test_dataloader()
 
-            if scores_path.exists():
-                print(
-                    f"Scores already exist at {scores_path}. Skipping computation."
-                )
-                scores = pd.read_csv(scores_path, header=0, index_col=0)
-                test_labels_df = pd.read_csv(labels_path, header=0, index_col=0)
-            else:
-                test_labels = torch.cat([item[1] for item in test_loader], dim=0)
-                test_labels_df = pd.DataFrame(test_labels.numpy(), columns=["label"])
-
-                # Compute test scores
-                scores = compute_test_scores(net, device, test_loader)
-                scores.to_csv(scores_path, index=True)
-                test_labels_df.to_csv(labels_path, index=True)
+            for suffix, test_loader in [("ID", id_test_loader), ("OOD", ood_test_loader)]:
+                scores_path = outputs_dir / f"scores_{suffix}.csv"
+                
+                if scores_path.exists():
+                    print(
+                        f"Scores already exist at {scores_path}. Skipping computation."
+                    )
+                    scores = pd.read_csv(scores_path, header=0, index_col=0)
+                else:
+                    # Compute test scores
+                    scores = compute_test_scores(net, device, test_loader)
+                    scores.to_csv(scores_path, index=True)
+                    
+                labels_path = outputs_dir / f"labels_{suffix}.csv"
+                if labels_path.exists():
+                    print(
+                        f"Labels already exist at {labels_path}. Skipping computation."
+                    )
+                    test_labels_df = pd.read_csv(labels_path, header=0, index_col=0)
+                else:
+                    # Compute test labels
+                    test_labels = torch.cat([item[1] for item in test_loader], dim=0)
+                    test_labels_df = pd.DataFrame(test_labels.numpy(), columns=["label"])
+                    test_labels_df.to_csv(labels_path, index=True)
 
                 # Compute metrics and save results
-            results = compute_metrics(scores, test_labels_df, metrics=EVAL_METRICS)
-            results["model"] = model2display[model]
-            results["dataset"] = dataset2display[dataset]
-            all_results.append(results)
+                results = compute_metrics(scores, test_labels_df, metrics=EVAL_METRICS)
+                results["model"] = model2display[model]
+                results["dataset"] = dataset2display[dataset] + (f" ({suffix})" if suffix == "OOD" else "")
+                all_results.append(results)
 
     df_all_results = pd.concat(all_results, axis=0)
     df_all_results = df_all_results.pivot_table(
