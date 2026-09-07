@@ -39,3 +39,9 @@ from callm.prompts.correctness_evaluation import (  # noqa: F401
     SEMANTIC_EQUIVALENCE_PROMPT,
     SEMANTIC_EQUIVALENCE_PROMPT_FOR_FREE_ANSWERS,
 )
+
+# Set __module__ and __qualname__ on all exported prompts for jsonargparse import path resolution
+for _name, _val in list(vars().items()):
+    if isinstance(_val, Prompt):
+        _val.__dict__["__module__"] = "callm.prompts"
+        _val.__dict__["__qualname__"] = _name
