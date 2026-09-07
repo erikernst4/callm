@@ -1,0 +1,54 @@
+# Config for on-the-fly probe training with live LLM forward pass.
+# Uses pre-computed correctness labels and answer texts instead of
+# pre-saved activations, enabling scaling to 50k+ samples.
+seed_everything: 0
+trainer:
+  evaluate_correctness: false
+  accelerator: gpu
+  strategy: auto
+  devices: [1]
+  max_epochs: 100
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val_loss
+        patience: 5
+        mode: min
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val_loss
+        save_top_k: 1
+        mode: min
+model:
+  class_path: callm.models.ConfidenceAugmentedLLM
+  init_args:
+    llm:
+      class_path: callm.models.LLM
+      init_args:
+        model_name: Qwen/Qwen3.5-9B
+        train: false
+        return_logits: false
+        extractor:
+          class_path: callm.extractors.SequencePosteriorExtractor
+          init_args:
+            model_name: Qwen/Qwen3.5-9B
+        max_new_tokens: 200
+        flush_outputs_every_n_steps: -1
+        save_outputs: false
+    model_dim: 4096
+    layer_idx: 19
+    lr: 0.001
+    pool_strategy: mean
+    activations_to_use: both
+data:
+  class_path: callm.data.OnTheFlyActivationsDataModule
+  init_args:
+    llm_outputs_csv: null      # Set via CLI or script
+    evaluation_csv: null        # Set via CLI or script
+    model_name: Qwen/Qwen3.5-9B
+    prompt: callm.prompts.TRANSPARENT_PROMPT_ZERO_SHOT
+    batch_size: 2
+    num_workers: 0
+    train_split: 0.8
+    seed: 42
+    disable_thinking: true
