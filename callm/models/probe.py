@@ -56,6 +56,10 @@ class Probe(nn.Module):
         Returns:
             confidence: shape (#batch)
         """
+        # Ensure activations match probe parameters dtype (e.g. if loaded as bfloat16/float16)
+        if hasattr(self, "linear") and hasattr(self.linear, "weight"):
+            activations = activations.to(dtype=self.linear.weight.dtype)
+
         if self.layer_pooling is not None:
             activations = self.layer_pooling(activations)
 
@@ -264,6 +268,17 @@ class ConfidenceAugmentedLLM(LightningModule):
             )
             print("Injected layer-wise Z-normalization statistics into layer_pooling")
 
+    def on_save_checkpoint(self, checkpoint: dict):
+        """
+        Exclude frozen LLM weights from probe checkpoints to save disk space and I/O.
+        Only probe parameters are trained and need to be saved (~tens of KB instead of 18+ GB).
+        """
+        checkpoint["state_dict"] = {
+            k: v
+            for k, v in checkpoint["state_dict"].items()
+            if not k.startswith("llm.")
+        }
+
     def _select_layer_activations(self, hidden_states):
         """
         Select the appropriate layer(s) from hidden_states based on
@@ -454,20 +469,131 @@ class ConfidenceAugmentedLLM(LightningModule):
 
     def _get_confidence(self, batch):
         """
-        Get confidence from batch, supporting both cached and live modes.
+        Get confidence from batch, supporting cached, on-the-fly, and live modes.
 
         - Cached mode: batch contains ``"activations"`` key with pre-computed
           activations (already pooled or raw).
+        - On-the-fly mode: batch contains ``"prompt_lengths"`` — runs a single
+          non-generative LLM forward pass on pre-tokenized [prompt + answer]
+          inputs, slices activations, and feeds to probe.
         - Live mode: batch contains ``"input_ids"`` and ``"attention_mask"``;
-          the LLM is run to extract activations.
+          the LLM is run to extract activations (prompt-only).
         """
         if "activations" in batch:
             return self.probe(
                 batch["activations"],
                 seq_mask=batch.get("seq_mask"),
             )
+        elif "prompt_lengths" in batch:
+            return self._get_confidence_on_the_fly(batch)
         else:
             return self(batch["input_ids"], batch["attention_mask"], generate=False)
+
+    def _get_confidence_on_the_fly(self, batch):
+        """
+        Get confidence using on-the-fly LLM forward pass on pre-tokenized
+        [prompt + answer] sequences.
+
+        Runs a single non-generative forward pass, extracts hidden states,
+        slices to the configured region (prompt/answer/both), pools, and
+        feeds through the probe.
+
+        Args:
+            batch: dict with keys ``input_ids``, ``attention_mask``,
+                   ``prompt_lengths``, ``correct``
+        """
+        input_ids = batch["input_ids"]
+        attention_mask = batch["attention_mask"]
+        prompt_lengths = batch["prompt_lengths"]
+
+        # Single non-generative forward pass — no generation needed
+        with torch.no_grad():
+            hidden_states = self.llm(
+                input_ids,
+                attention_mask,
+                generate=False,
+                return_hidden_states=True,
+            )
+
+        if not isinstance(hidden_states, (list, tuple)):
+            hidden_states = (hidden_states,)
+
+        # For pool_strategy in ("mean", "last"): use existing extraction method
+        if self.pool_strategy in ("mean", "last"):
+            pooled = self._extract_and_pool_activations(
+                hidden_states, prompt_lengths, attention_mask
+            )
+            return self.probe(pooled)
+
+        # pool_strategy == "none": preserve sequence for attentive/seq pooling
+        activations = self._select_layer_activations(hidden_states)
+        if hasattr(self.probe, "linear") and hasattr(self.probe.linear, "weight"):
+            activations = activations.to(dtype=self.probe.linear.weight.dtype)
+
+        # Apply layer pooling if present (before per-sample slicing)
+        if self.probe.layer_pooling is not None and activations.ndim >= 3:
+            activations = self.probe.layer_pooling(activations)
+
+        # activations is now (batch, seq, dim) or (batch, dim)
+        if activations.ndim == 2:
+            # Already pooled (no sequence dimension)
+            pooled = activations.to(dtype=self.probe.linear.weight.dtype)
+            logits = self.probe.linear(pooled)
+            return torch.sigmoid(logits.squeeze(-1))
+
+        # Per-sample: strip padding and slice to prompt/answer/both
+        sliced_list = []
+        for i in range(activations.shape[0]):
+            valid_mask = attention_mask[i] == 1
+            sample_act = activations[i][valid_mask]
+            prompt_len = int(prompt_lengths[i].item())
+
+            if self.activations_to_use == "answer":
+                sample_act = sample_act[prompt_len:]
+            elif self.activations_to_use == "prompt":
+                sample_act = sample_act[:prompt_len]
+            # "both" keeps all valid tokens
+
+            if sample_act.shape[0] == 0:
+                sample_act = torch.zeros(
+                    1,
+                    sample_act.shape[-1],
+                    device=sample_act.device,
+                    dtype=sample_act.dtype,
+                )
+            sliced_list.append(sample_act)
+
+        # Pad variable-length sliced sequences and create seq_mask
+        padded = torch.nn.utils.rnn.pad_sequence(
+            sliced_list,
+            batch_first=True,
+            padding_value=0.0,
+        )
+        seq_lengths = [s.shape[0] for s in sliced_list]
+        max_len = padded.shape[1]
+        seq_mask = torch.zeros(
+            len(sliced_list),
+            max_len,
+            dtype=torch.bool,
+            device=padded.device,
+        )
+        for i, length in enumerate(seq_lengths):
+            seq_mask[i, :length] = True
+
+        # Apply seq_pooling (or fallback mean) + linear + sigmoid
+        if self.probe.seq_pooling is not None:
+            pooled = self.probe.seq_pooling(padded, mask=seq_mask)
+        else:
+            # Fallback: masked mean pooling
+            masked = padded * seq_mask.unsqueeze(-1).to(dtype=padded.dtype)
+            lengths = (
+                seq_mask.sum(dim=1, keepdim=True).clamp(min=1).to(dtype=padded.dtype)
+            )
+            pooled = masked.sum(dim=1) / lengths
+
+        pooled = pooled.to(dtype=self.probe.linear.weight.dtype)
+        logits = self.probe.linear(pooled)
+        return torch.sigmoid(logits.squeeze(-1))
 
     def training_step(self, batch, batch_idx):
         confidence = self._get_confidence(batch)

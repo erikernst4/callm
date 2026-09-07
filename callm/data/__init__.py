@@ -34,3 +34,4 @@ from callm.data.activations_data import (  # noqa: F401
     ActivationsDataModule,
     SelectedTokensActivationsDataModule,
 )
+from callm.data.on_the_fly_data import OnTheFlyActivationsDataModule  # noqa: F401
