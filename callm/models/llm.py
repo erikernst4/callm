@@ -25,6 +25,7 @@ class LLM(BaseLightningModule):
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
         max_new_tokens: int = 100,
+        raw_output_max_length: int | None = None,
     ):
         super().__init__(
             flush_outputs_every_n_steps=flush_outputs_every_n_steps,
@@ -50,6 +51,7 @@ class LLM(BaseLightningModule):
         self.extractor: BaseExtractor = extractor
         self.return_logits = return_logits
         self.max_new_tokens = max_new_tokens
+        self.raw_output_max_length = raw_output_max_length
 
     def forward(
         self,
@@ -228,12 +230,15 @@ class LLM(BaseLightningModule):
         log_dir = self.trainer.log_dir or os.getcwd()
         outputs_file = os.path.join(log_dir, "llm_outputs.csv")
 
-        def short_output(txt: str, limit: int = 200) -> str:
-            """Keep only first line, truncate if too long."""
+        def short_output(
+            txt: str, limit: int | None = self.raw_output_max_length
+        ) -> str:
+            """Escape newlines and optionally truncate long outputs."""
             if not txt:
                 return ""
-            truncated_text = txt[:limit] + ("..." if len(txt) > limit else "")
-            return truncated_text.replace("\n", "\\n")
+            if limit is not None:
+                txt = txt[:limit] + ("..." if len(txt) > limit else "")
+            return txt.replace("\n", "\\n")
 
         try:
             with open(outputs_file, "w", newline="", encoding="utf-8") as f:
