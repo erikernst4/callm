@@ -45,6 +45,7 @@ class CalibrationTrainer(Trainer):
         save_outputs: bool = None,
         resume_from: str = None,
         use_existing_csv: bool = False,
+        previous_eval_csv: str = None,
         **kwargs,
     ):
         """Run correctness evaluation on LLM outputs or recalculate metrics."""
@@ -127,12 +128,20 @@ class CalibrationTrainer(Trainer):
                 num_workers=num_workers,
                 resume_from=resume_from,
             )
-        elif evaluator_dm is not None and resume_from:
-            evaluator_dm_attributes = evaluator_dm.__dict__
-            evaluator_dm_attributes.update(
-                llm_outputs_path=llm_outputs_path, resume_from=resume_from
-            )
-            evaluator_dm = EvaluatorDataModule(**evaluator_dm_attributes)
+        elif evaluator_dm is not None:
+            if llm_outputs_path and (
+                not hasattr(evaluator_dm, "llm_outputs_path")
+                or not evaluator_dm.llm_outputs_path
+            ):
+                evaluator_dm.llm_outputs_path = llm_outputs_path
+            if resume_from:
+                evaluator_dm.resume_from = resume_from
+            if (
+                previous_eval_csv
+                and hasattr(evaluator_dm, "previous_eval_csv")
+                and not evaluator_dm.previous_eval_csv
+            ):
+                evaluator_dm.previous_eval_csv = previous_eval_csv
 
         if evaluator_model is None:
             evaluator_model = EvaluatorModule(
