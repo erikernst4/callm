@@ -33,6 +33,14 @@ class ExactAnswerExtractorDataModule(AnswersDataModule):
                     "predicted answer"
                 )
                 c_key = field_map.get("correct")
+                if c_key is None and i == 0:
+                    import warnings
+
+                    warnings.warn(
+                        f"No 'correct' column found in {self.llm_outputs_path}. "
+                        "All answers will default to incorrect ('no'). If you have an evaluation CSV, "
+                        "pass that instead to preserve correctness labels!"
+                    )
                 r_key = field_map.get("raw_output") or field_map.get("raw output")
                 conf_key = field_map.get("confidence")
 
