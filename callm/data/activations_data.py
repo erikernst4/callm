@@ -41,6 +41,7 @@ class ActivationsDataModule(LightningDataModule):
         activations_to_use: str = "prompt",
         max_samples: int | None = None,
         dtype: str = "float32",
+        val_size: int | None = None,
     ):
         super().__init__()
         if activations_to_use not in ("prompt", "answer", "both"):
@@ -58,6 +59,7 @@ class ActivationsDataModule(LightningDataModule):
         self.activations_to_use = activations_to_use
         self.max_samples = max_samples
         self.dtype = dtype
+        self.val_size = val_size
 
         self.train_dataset = None
         self.val_dataset = None
@@ -313,9 +315,27 @@ class ActivationsDataModule(LightningDataModule):
         shuffled_samples = list(dataset_samples)
         rng.shuffle(shuffled_samples)
 
-        split_idx = int(len(shuffled_samples) * self.train_split)
-        train_samples = shuffled_samples[:split_idx]
-        val_samples = shuffled_samples[split_idx:]
+        if self.val_size is not None:
+            # Fixed validation set: take last val_size samples as validation,
+            # then subsample from the remainder for training.
+            # This ensures the validation set is identical regardless of
+            # max_samples, enabling fair comparison across training set sizes.
+            if self.val_size >= len(shuffled_samples):
+                raise ValueError(
+                    f"val_size ({self.val_size}) must be smaller than total "
+                    f"samples ({len(shuffled_samples)})"
+                )
+            val_samples = shuffled_samples[-self.val_size :]
+            remaining = shuffled_samples[: -self.val_size]
+            if self.max_samples is not None:
+                train_samples = remaining[: self.max_samples]
+            else:
+                train_samples = remaining
+        else:
+            # Original behavior: ratio-based split
+            split_idx = int(len(shuffled_samples) * self.train_split)
+            train_samples = shuffled_samples[:split_idx]
+            val_samples = shuffled_samples[split_idx:]
 
         self.train_dataset = ActivationsDataset(train_samples)
         self.val_dataset = ActivationsDataset(val_samples)
