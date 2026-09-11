@@ -60,3 +60,23 @@ def test_warmup_cosine_annealing_lr():
         optimizer.step()
         scheduler.step()
         assert math.isclose(scheduler.get_last_lr()[0], 0.01, rel_tol=1e-5)
+
+
+def test_warmup_cosine_annealing_lr_raises_when_max_steps_none():
+    import pytest
+
+    model = nn.Linear(10, 2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+    scheduler = WarmupCosineAnnealingLR(
+        optimizer, warmup_steps=5, max_steps=None, eta_min=0.01
+    )
+
+    # Step through warmup without error (last_epoch goes from 0 to 4)
+    for _ in range(4):
+        optimizer.step()
+        scheduler.step()
+
+    # Step at warmup_steps (last_epoch=5) triggers cosine decay and should raise ValueError
+    with pytest.raises(ValueError, match="max_steps must be specified"):
+        optimizer.step()
+        scheduler.step()

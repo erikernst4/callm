@@ -51,6 +51,9 @@ class WarmupCosineAnnealingLR(LRScheduler):
         optimizer: Wrapped optimizer.
         warmup_steps: Number of initial linear warmup steps.
         max_steps: Total number of training steps (including warmup).
+                   If ``None``, must be set externally before training starts
+                   (e.g. auto-computed from the trainer's
+                   ``estimated_stepping_batches``).
         eta_min: Minimum learning rate. Default: 0.0.
         last_epoch: The index of last epoch/step. Default: -1.
     """
@@ -59,7 +62,7 @@ class WarmupCosineAnnealingLR(LRScheduler):
         self,
         optimizer: torch.optim.Optimizer,
         warmup_steps: int = 100,
-        max_steps: int = 1000,
+        max_steps: int | None = None,
         eta_min: float = 0.0,
         last_epoch: int = -1,
     ):
@@ -75,6 +78,11 @@ class WarmupCosineAnnealingLR(LRScheduler):
         if self.last_epoch < self.warmup_steps:
             pct = max(1e-6, float(self.last_epoch) / max(1, float(self.warmup_steps)))
             return [base_lr * pct for base_lr in self.base_lrs]
+
+        if self.max_steps is None:
+            raise ValueError(
+                "max_steps must be specified for WarmupCosineAnnealingLR once warmup completes."
+            )
 
         if self.last_epoch > self.max_steps:
             return [self.eta_min for _ in self.base_lrs]
