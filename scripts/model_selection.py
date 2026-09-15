@@ -65,6 +65,22 @@ def compute_chow_cost_12(scores, labels, u_M, zero=1e-8, rs=None):
     cost01 = _compute_chow(scores, labels, gamma) * np.power(u_M, 1/2) / 2 * alpha_n
     return cost01.mean().item()
 
+def highlight_best_per_column(table, metrics):
+    # Chow costs aren't produced via get_metric_from_id, so they default to lower-is-better.
+    higher_is_better = {
+        get_metric_from_id(metric)["display"]: get_metric_from_id(metric)["higher_is_better"]
+        for metric in metrics
+    }
+    table = table.astype(object)
+    for col in table.columns:
+        display = col[1]
+        values = table[col].astype(float)
+        best_value = values.max() if higher_is_better.get(display, False) else values.min()
+        table[col] = values.apply(
+            lambda v: f"\\textbf{{{v:.4f}}}" if v == best_value else f"{v:.4f}"
+        )
+    return table
+
 def main():
     dataset = "cifar100"
     metrics = ["cls_aurc", "cls_n-ecuas_n=0", "cls_n-ecuas_n=1"]
@@ -156,10 +172,20 @@ def main():
         ("Test", "Chow (n=0)"), ("Test", "Chow (n=1/4)"), ("Test", "Chow (n=1/2)"), ("Test", "Chow (n=1)")
     ]]
     table = table.round(4)
+    table = highlight_best_per_column(table, metrics)
     results_path = Path(f"outputs/model_selection/{dataset}/results.csv")
     results_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(results_path)
-    table.to_markdown(results_path.with_suffix(".md"))
+    # table.to_markdown(results_path.with_suffix(".md"))
+    table.to_latex(
+        results_path.with_suffix(".tex"),
+        index=True,
+        multirow=True,
+        multicolumn=True,
+        index_names=True,
+        column_format="l" * (len(table.columns) + 2),
+        escape=False,        
+    )
 
 
 if __name__ == "__main__":
