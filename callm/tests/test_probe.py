@@ -1,13 +1,12 @@
 import pytest
+import csv
+import functools
 import torch
 import torch.nn as nn
 from unittest.mock import Mock, patch, mock_open
-from callm.models.probe import (
-    Probe,
-    ConfidenceAugmentedLLM,
-    LayerWeightedAverage,
-    SingleLayerSelector,
-)
+from callm.models.probe import Probe
+from callm.models.llm import ConfidenceAugmentedLLM
+from callm.models.layer_pooling import LayerWeightedAverage, SingleLayerSelector
 
 
 class TestProbe:
@@ -275,6 +274,41 @@ class TestConfidenceAugmentedLLMMultiLayer:
         conf = model(input_ids, attention_mask, generate=False)
         assert conf.shape == (1,)
 
+    @pytest.mark.parametrize("pool_strategy", ["mean", "last", "none"])
+    def test_multi_layer_on_the_fly(self, mock_llm, pool_strategy):
+        model = ConfidenceAugmentedLLM(
+            llm=mock_llm, layer_idx=[0, 1], pool_strategy=pool_strategy
+        )
+        mock_llm.return_value = (torch.randn(2, 5, 8), torch.randn(2, 5, 8))
+        batch = {
+            "input_ids": torch.zeros(2, 5, dtype=torch.long),
+            "attention_mask": torch.tensor([[1, 1, 1, 1, 1], [0, 1, 1, 1, 1]]),
+            "prompt_lengths": torch.tensor([2, 3]),
+        }
+
+        conf = model._get_confidence(batch)
+        assert conf.shape == (2,)
+
+    def test_multi_layer_on_the_fly_mean_matches_none(self, mock_llm):
+        """Mean pooling via pool_strategy='mean' and via the probe's fallback agree."""
+        mock_llm.return_value = (torch.randn(2, 5, 8), torch.randn(2, 5, 8))
+        batch = {
+            "input_ids": torch.zeros(2, 5, dtype=torch.long),
+            "attention_mask": torch.tensor([[1, 1, 1, 1, 1], [0, 1, 1, 1, 1]]),
+            "prompt_lengths": torch.tensor([2, 3]),
+        }
+        mean_model = ConfidenceAugmentedLLM(
+            llm=mock_llm, layer_idx=[0, 1], pool_strategy="mean"
+        )
+        none_model = ConfidenceAugmentedLLM(
+            llm=mock_llm, layer_idx=[0, 1], pool_strategy="none"
+        )
+        none_model.probe.load_state_dict(mean_model.probe.state_dict())
+
+        assert torch.allclose(
+            mean_model._get_confidence(batch), none_model._get_confidence(batch)
+        )
+
 
 class TestActivationsDataModuleMultiLayer:
     """Unit tests for ActivationsDataModule multi-layer collation."""
@@ -515,3 +549,60 @@ class TestSelectedTokensActivationsDataModule:
 
         # Check 100% sample retention: both samples must be retained
         assert len(dm.train_dataset) == 2
+
+
+class TestConfidenceAugmentedLLMLiveEvaluation:
+    """Tests for the live evaluation path (generate → probe → metrics)."""
+
+    def test_validation_writes_outputs_and_metrics(self, tmp_path):
+        from callm.models.llm import LLM
+
+        mock_llm = Mock()
+        mock_llm.is_seq2seq = False
+        mock_llm.strip_prompt = functools.partial(LLM.strip_prompt, mock_llm)
+        mock_llm.tokenizer.decode.side_effect = lambda ids, **_: " ".join(
+            str(int(t)) for t in ids
+        )
+        mock_llm.extractor.extract_answer.side_effect = ["Paris", "Rome"]
+
+        prompt = torch.tensor([[1, 2], [3, 4]])
+        generated = torch.tensor([[1, 2, 7], [3, 4, 9]])
+        mock_llm.return_value = (generated, (torch.randn(2, 2, 8),))
+
+        model = ConfidenceAugmentedLLM(llm=mock_llm, model_dim=8, layer_idx=0)
+        model._trainer = Mock(log_dir=str(tmp_path))
+        model.log = Mock()
+
+        model.on_validation_epoch_start()
+        model.validation_step(
+            {
+                "input_ids": prompt,
+                "attention_mask": torch.ones_like(prompt),
+                "question": ["q1", "q2"],
+                "gold_answers": [["Paris"], ["Madrid"]],
+            },
+            0,
+        )
+        # Only the generated tokens (prompt stripped) are decoded
+        decoded = [c.args[0].tolist() for c in mock_llm.tokenizer.decode.call_args_list]
+        assert decoded == [[7], [9]]
+
+        model.on_validation_epoch_end()
+
+        logged = {c.args[0]: c.args[1] for c in model.log.call_args_list}
+        assert logged["val_accuracy"] == 0.5
+        assert {"val_ece", "val_brier_score", "val_auc", "val_ccas"} <= logged.keys()
+
+        with open(tmp_path / "llm_outputs.csv") as f:
+            rows = list(csv.reader(f))
+        assert rows[0] == [
+            "question",
+            "gold_answers",
+            "pred_answer",
+            "confidence",
+            "correct",
+            "raw_output",
+        ]
+        assert [r[4] for r in rows[1:]] == ["Yes", "No"]
+        with open(tmp_path / "metrics.csv") as f:
+            assert next(csv.reader(f))[0] == "val_accuracy"

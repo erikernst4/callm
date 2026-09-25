@@ -1,6 +1,7 @@
 import pytest
 import torch
 import functools
+from unittest.mock import Mock
 from callm.models.sequence_pooling import (
     MeanPooling,
     AttentivePooling,
@@ -9,10 +10,8 @@ from callm.models.sequence_pooling import (
     QueryMultiHeadAttentivePooling,
     TransformerPooling,
 )
-from callm.models.probe import (
-    Probe,
-    ConfidenceAugmentedLLM,
-)
+from callm.models.probe import Probe
+from callm.models.llm import ConfidenceAugmentedLLM
 from callm.models.layer_pooling import (
     GlobalZNormWeightedAverage,
     LayerwiseZNormWeightedAverage,
@@ -152,6 +151,7 @@ def test_confidence_augmented_llm_lr_scheduler():
         lr=1e-3,
         lr_scheduler=lr_scheduler_fn,
     )
+    model._trainer = Mock(estimated_stepping_batches=100)
 
     opt_config = model.configure_optimizers()
     assert isinstance(opt_config, dict)

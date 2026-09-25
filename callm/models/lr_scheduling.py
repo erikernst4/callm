@@ -26,6 +26,8 @@ class WarmupExponentialLR(LRScheduler):
         warmup_steps: int = 100,
         gamma: float = 0.98,
         last_epoch: int = -1,
+        max_steps: int
+        | None = None,  # unused; accepted for a uniform scheduler interface
     ):
         self.warmup_steps = warmup_steps
         self.gamma = gamma

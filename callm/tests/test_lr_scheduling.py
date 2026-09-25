@@ -80,3 +80,12 @@ def test_warmup_cosine_annealing_lr_raises_when_max_steps_none():
     with pytest.raises(ValueError, match="max_steps must be specified"):
         optimizer.step()
         scheduler.step()
+
+
+def test_schedulers_accept_max_steps():
+    """configure_optimizers passes max_steps to every scheduler."""
+    from callm.models.lr_scheduling import WarmupExponentialLR, WarmupCosineAnnealingLR
+
+    for cls in (WarmupExponentialLR, WarmupCosineAnnealingLR):
+        optimizer = torch.optim.AdamW([torch.nn.Parameter(torch.zeros(1))])
+        cls(optimizer, warmup_steps=5, max_steps=100)
