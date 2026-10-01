@@ -1,7 +1,11 @@
 from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset
-from callm.utils import get_tokenizer_for_model, subsample_dataset
+from callm.utils import (
+    get_tokenizer_for_model,
+    subsample_dataset,
+    get_skip_indices_from_chunks,
+)
 from callm.prompts import CHAT_LABEL_PROB_PROMPT_ZERO_SHOT, ChatPrompt, Prompt
 
 
@@ -18,6 +22,7 @@ class TriviaQADataModule(LightningDataModule):
         num_workers: int = 0,
         disable_thinking: bool = False,
         split: str = "validation",
+        resume_from: str = None,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -29,11 +34,20 @@ class TriviaQADataModule(LightningDataModule):
         self.num_workers = num_workers
         self.disable_thinking = disable_thinking
         self.split = split
+        self.resume_from = resume_from
+        self.skip_indices = set()
+
+    def _get_skip_indices(self) -> set[int]:
+        if not self.resume_from:
+            return set()
+        return get_skip_indices_from_chunks(
+            self.resume_from, prefix="activations_chunk"
+        )
 
     def prepare_data(self):
         load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
 
-    def setup(self, stage: str):
+    def setup(self, stage: str = None):
         # Initialize tokenizer if not already set (e.g., from model)
         if self.tokenizer is None:
             self.tokenizer = get_tokenizer_for_model(self.model_name)
@@ -42,6 +56,15 @@ class TriviaQADataModule(LightningDataModule):
 
         # Limit samples if requested
         dataset = subsample_dataset(dataset, self.max_samples, self.seed)
+
+        self.skip_indices = self._get_skip_indices()
+        if self.skip_indices:
+            keep_indices = [
+                i for i in range(len(dataset)) if i not in self.skip_indices
+            ]
+            dataset = dataset.select(keep_indices)
+        else:
+            keep_indices = list(range(len(dataset)))
 
         questions = dataset["question"]
         answers = []
@@ -113,7 +136,12 @@ class TriviaQADataModule(LightningDataModule):
             data.append(tokens)
 
         self.triviaQA_val = Dataset.from_dict(
-            {"data": data, "question": questions, "label": answers}
+            {
+                "data": data,
+                "question": questions,
+                "label": answers,
+                "sample_idx": keep_indices,
+            }
         ).with_format("torch")
 
     def train_dataloader(self):
@@ -132,12 +160,15 @@ class TriviaQADataModule(LightningDataModule):
             [item["data"]["attention_mask"].squeeze(0) for item in batch]
         )
 
-        return {
+        res = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "question": [item["question"] for item in batch],
             "label": [item["label"] for item in batch],
         }
+        if "sample_idx" in batch[0]:
+            res["sample_idx"] = [item["sample_idx"] for item in batch]
+        return res
 
     def val_dataloader(self):
         return DataLoader(

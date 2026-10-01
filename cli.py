@@ -212,6 +212,7 @@ class CalibrationTrainer(Trainer):
         output_dir: str = None,
         layer_indices: list[int] | None = None,
         save_dtype: str = "bfloat16",
+        resume_from: str = None,
         **kwargs,
     ):
         """Extract and save LLM activations for probe training."""
@@ -227,6 +228,15 @@ class CalibrationTrainer(Trainer):
             log_dir = self.default_root_dir or os.getcwd()
             output_dir = os.path.join(log_dir, "activations")
 
+        if resume_from:
+            if not hasattr(datamodule, "resume_from"):
+                raise ValueError(
+                    f"{type(datamodule).__name__} does not support resume_from; "
+                    "already extracted samples would be processed again."
+                )
+            if not datamodule.resume_from:
+                datamodule.resume_from = resume_from
+
         # Import locally to avoid circular imports
         from callm.models.activation_extractor import ActivationExtractor
 
@@ -235,6 +245,7 @@ class CalibrationTrainer(Trainer):
             output_dir=output_dir,
             layer_indices=layer_indices,
             save_dtype=save_dtype,
+            resume_from=resume_from,
         )
 
         self.validate(model=extractor, datamodule=datamodule)

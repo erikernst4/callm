@@ -2,6 +2,7 @@
 
 from unittest.mock import patch, Mock
 import torch
+from datasets import Dataset
 
 from callm.prompts import (
     ChatPrompt,
@@ -65,16 +66,14 @@ class TestTriviaQAChatTemplateKwargs:
     """Tests that TriviaQADataModule passes correct kwargs to apply_chat_template."""
 
     def _mock_dataset(self):
-        mock_dataset = Mock()
-        mock_dataset.__getitem__ = Mock(
-            side_effect=lambda key: {
+        return Dataset.from_dict(
+            {
                 "question": ["What is 2+2?"],
                 "answer": [
                     {"aliases": ["4", "four"], "normalized_aliases": ["4", "four"]}
                 ],
-            }[key]
+            }
         )
-        return mock_dataset
 
     @patch(
         "callm.data.triviaqa.triviaqa.subsample_dataset", side_effect=lambda d, *a: d

@@ -3,6 +3,7 @@ seed_everything: true
 output_dir: "./activations_cache/qwen_triviaqa"
 layer_indices: null
 save_dtype: "bfloat16"
+resume_from: null
 
 trainer:
   evaluate_correctness: false
@@ -41,3 +42,4 @@ data:
     num_workers: 24
     disable_thinking: true
     split: "train"
+    resume_from: ${resume_from}

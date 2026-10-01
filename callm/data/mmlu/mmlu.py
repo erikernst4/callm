@@ -8,7 +8,11 @@ A/B/C/D choices for confidence-augmented generation.
 from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset
-from callm.utils import get_tokenizer_for_model, subsample_dataset
+from callm.utils import (
+    get_tokenizer_for_model,
+    subsample_dataset,
+    get_skip_indices_from_chunks,
+)
 from callm.prompts import (
     ChatPrompt,
     Prompt,
@@ -24,33 +28,54 @@ class MMLUDataModule(LightningDataModule):
         batch_size: int = 32,
         model_name: str = "google/flan-t5-small",
         prompt: Prompt = CHAT_MMLU_LABEL_PROB_PROMPT,
+        split: str = "test",
         max_samples: int = None,
         seed: int = 42,
         num_workers: int = 0,
         disable_thinking: bool = False,
+        resume_from: str = None,
     ):
         super().__init__()
         self.batch_size = batch_size
         self.model_name = model_name
         self.tokenizer = None
         self.prompt = prompt
+        self.split = split
         self.max_samples = max_samples
         self.seed = seed
         self.num_workers = num_workers
         self.disable_thinking = disable_thinking
+        self.resume_from = resume_from
+        self.skip_indices = set()
+
+    def _get_skip_indices(self) -> set[int]:
+        if not self.resume_from:
+            return set()
+        return get_skip_indices_from_chunks(
+            self.resume_from, prefix="activations_chunk"
+        )
 
     def prepare_data(self):
         load_dataset("cais/mmlu", "all")
 
-    def setup(self, stage: str):
+    def setup(self, stage: str = None):
         # Initialize tokenizer if not already set
         if self.tokenizer is None:
             self.tokenizer = get_tokenizer_for_model(self.model_name)
 
-        dataset = load_dataset("cais/mmlu", "all")["test"]
+        dataset = load_dataset("cais/mmlu", "all")[self.split]
 
         # Limit samples if requested
         dataset = subsample_dataset(dataset, self.max_samples, self.seed)
+
+        self.skip_indices = self._get_skip_indices()
+        if self.skip_indices:
+            keep_indices = [
+                i for i in range(len(dataset)) if i not in self.skip_indices
+            ]
+            dataset = dataset.select(keep_indices)
+        else:
+            keep_indices = list(range(len(dataset)))
 
         questions = dataset["question"]
         choices_list = dataset["choices"]
@@ -128,6 +153,7 @@ class MMLUDataModule(LightningDataModule):
                 "question": questions,
                 "label": answers,
                 "choices": formatted_choices,
+                "sample_idx": keep_indices,
             }
         ).with_format("torch")
 
@@ -155,6 +181,8 @@ class MMLUDataModule(LightningDataModule):
         }
         if "choices" in batch[0]:
             res["choices"] = [item["choices"] for item in batch]
+        if "sample_idx" in batch[0]:
+            res["sample_idx"] = [item["sample_idx"] for item in batch]
         return res
 
     def val_dataloader(self):

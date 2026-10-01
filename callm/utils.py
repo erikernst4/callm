@@ -1,14 +1,18 @@
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
-from callm.config import CACHE_PATH, HF_TOKEN
 import os
 import re
+import glob
+import torch
 from datasets import Dataset
-from transformers import Glm4vForConditionalGeneration
 from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+    Glm4vForConditionalGeneration,
     Mistral3ForConditionalGeneration,
     FineGrainedFP8Config,
     MistralCommonBackend,
 )
+from callm.config import CACHE_PATH, HF_TOKEN
 
 
 def get_tokenizer_for_model(model_name: str, hf_token: str = None):
@@ -106,6 +110,75 @@ def get_last_llm_outputs_path(log_dir: str):
                 llm_outputs_path = candidate_path
                 print(f"Found LLM outputs in current log dir: {llm_outputs_path}")
     return llm_outputs_path
+
+
+def find_chunk_files(resume_dir: str, prefix: str = "activations_chunk") -> list[str]:
+    """Find chunk files in resume_dir or its lightning_logs subdirectories."""
+    if not resume_dir:
+        return []
+    if not os.path.exists(resume_dir):
+        raise ValueError(f"Resume path {resume_dir} does not exist.")
+
+    # 1. Direct search in directory
+    pattern = os.path.join(resume_dir, f"{prefix}_rank*.pt")
+    found_files = glob.glob(pattern)
+
+    # 2. Search in lightning_logs/version_*
+    if not found_files:
+        version_dirs = sorted(
+            glob.glob(os.path.join(resume_dir, "lightning_logs", "version_*")),
+            key=lambda x: int(os.path.basename(x).split("_")[-1])
+            if os.path.basename(x).split("_")[-1].isdigit()
+            else -1,
+        )
+        if version_dirs:
+            for v_dir in reversed(version_dirs):
+                files = glob.glob(os.path.join(v_dir, f"{prefix}_rank*.pt"))
+                if files:
+                    found_files = files
+                    break
+
+    def get_chunk_num(p: str) -> int:
+        match = re.search(rf"{prefix}_rank\d+_(\d+)\.pt", os.path.basename(p))
+        if match:
+            return int(match.group(1))
+        match = re.search(r"(\d+)\.pt$", os.path.basename(p))
+        return int(match.group(1)) if match else 0
+
+    return sorted(found_files, key=get_chunk_num)
+
+
+def get_skip_indices_from_chunks(
+    resume_dir: str, prefix: str = "activations_chunk"
+) -> set[int]:
+    """Get sample indices to skip by inspecting chunk files in resume_dir."""
+    skip_indices = set()
+    if not resume_dir:
+        return skip_indices
+
+    found_files = find_chunk_files(resume_dir, prefix=prefix)
+    if found_files:
+        print(f"Found {len(found_files)} temp chunk files to resume from.")
+        for fpath in found_files:
+            try:
+                try:
+                    chunk = torch.load(
+                        fpath, map_location="cpu", weights_only=False, mmap=True
+                    )
+                except TypeError:
+                    chunk = torch.load(fpath, map_location="cpu", weights_only=False)
+                for item in chunk:
+                    idx = item.get("sample_idx", item.get("index"))
+                    if idx is not None:
+                        skip_indices.add(idx)
+                del chunk
+            except Exception as e:
+                print(f"Skipping corrupted or unreadable chunk {fpath}: {e}")
+        print(f"Found {len(skip_indices)} indices to skip.")
+    else:
+        print(f"No temp chunk files found in {resume_dir}")
+
+    return skip_indices
 
 
 def subsample_dataset(dataset: Dataset, max_samples: int, seed: int = None):
