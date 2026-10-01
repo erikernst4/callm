@@ -442,6 +442,85 @@ class TestActivationsDataModuleSlicing:
         assert torch.equal(dm_both.train_dataset[0]["activations"], mock_sample_tensor)
 
 
+class TestActivationsDataModuleSeparateVal:
+    """Unit tests for training/validating on separate activation directories."""
+
+    @staticmethod
+    def _write_split(root, name, labels):
+        split_dir = root / name
+        split_dir.mkdir()
+        torch.save(
+            [
+                {
+                    "sample_idx": i,
+                    "seq_len": 1,
+                    "prompt_length": 1,
+                    "activations": {0: torch.full((1, 4), float(i))},
+                }
+                for i in range(len(labels))
+            ],
+            split_dir / "activations_0000.pt",
+        )
+        csv_path = root / f"{name}.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Question", "Correct"])
+            writer.writerows([[f"Q{i}", label] for i, label in enumerate(labels)])
+        return str(split_dir), str(csv_path)
+
+    def test_uses_all_train_and_all_val_samples(self, tmp_path):
+        from callm.data.activations_data import ActivationsDataModule
+
+        train_dir, train_csv = self._write_split(tmp_path, "train", ["Yes"] * 5)
+        val_dir, val_csv = self._write_split(tmp_path, "val", ["No", "No", "Yes"])
+
+        dm = ActivationsDataModule(
+            activations_dir=train_dir,
+            evaluation_csv=train_csv,
+            val_activations_dir=val_dir,
+            val_evaluation_csv=val_csv,
+            layer_idx=0,
+            activations_to_use="both",
+            num_workers=0,
+        )
+        dm.setup()
+
+        assert len(dm.train_dataset) == 5
+        assert all(s["correct"] for s in dm.train_dataset.samples)
+        assert [s["correct"] for s in dm.val_dataset.samples] == [False, False, True]
+        assert torch.equal(dm.val_dataset[2]["activations"], torch.full((4,), 2.0))
+
+    def test_max_samples_subsamples_train_only(self, tmp_path):
+        from callm.data.activations_data import ActivationsDataModule
+
+        train_dir, train_csv = self._write_split(tmp_path, "train", ["Yes"] * 5)
+        val_dir, val_csv = self._write_split(tmp_path, "val", ["No"] * 3)
+
+        dm = ActivationsDataModule(
+            activations_dir=train_dir,
+            evaluation_csv=train_csv,
+            val_activations_dir=val_dir,
+            val_evaluation_csv=val_csv,
+            layer_idx=0,
+            max_samples=2,
+            num_workers=0,
+        )
+        dm.setup()
+
+        assert len(dm.train_dataset) == 2
+        assert len(dm.val_dataset) == 3
+
+    def test_requires_both_val_args(self):
+        from callm.data.activations_data import ActivationsDataModule
+
+        with pytest.raises(ValueError, match="must be set together"):
+            ActivationsDataModule(
+                activations_dir="fake",
+                evaluation_csv="fake.csv",
+                val_activations_dir="fake_val",
+            )
+
+
 class TestGetIndicesOfExactAnswer:
     """Unit tests for get_indices_of_exact_answer."""
 

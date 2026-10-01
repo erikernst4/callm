@@ -42,8 +42,14 @@ class ActivationsDataModule(LightningDataModule):
         max_samples: int | None = None,
         dtype: str = "float32",
         val_size: int | None = None,
+        val_activations_dir: str | None = None,
+        val_evaluation_csv: str | None = None,
     ):
         super().__init__()
+        if (val_activations_dir is None) != (val_evaluation_csv is None):
+            raise ValueError(
+                "val_activations_dir and val_evaluation_csv must be set together."
+            )
         if activations_to_use not in ("prompt", "answer", "both"):
             raise ValueError(
                 f"activations_to_use must be one of 'prompt', 'answer', 'both'. Got: {activations_to_use}"
@@ -60,6 +66,8 @@ class ActivationsDataModule(LightningDataModule):
         self.max_samples = max_samples
         self.dtype = dtype
         self.val_size = val_size
+        self.val_activations_dir = val_activations_dir
+        self.val_evaluation_csv = val_evaluation_csv
 
         self.train_dataset = None
         self.val_dataset = None
@@ -157,15 +165,15 @@ class ActivationsDataModule(LightningDataModule):
         )
         return stats
 
-    def setup(self, stage: str = None):
-        if not os.path.exists(self.evaluation_csv):
-            raise FileNotFoundError(
-                f"Evaluation CSV not found at {self.evaluation_csv}"
-            )
+    def _load_samples(self, activations_dir: str, evaluation_csv: str) -> list:
+        """Load activation shards from activations_dir, pool them and join them
+        with the correctness labels of evaluation_csv by sample_idx."""
+        if not os.path.exists(evaluation_csv):
+            raise FileNotFoundError(f"Evaluation CSV not found at {evaluation_csv}")
 
         # 1. Load correctness labels from evaluation CSV
         correctness_map = {}
-        with open(self.evaluation_csv, "r", encoding="utf-8") as f:
+        with open(evaluation_csv, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             # Handle capitalization of Correct/correct
             correct_col = None
@@ -174,9 +182,7 @@ class ActivationsDataModule(LightningDataModule):
                     correct_col = col
                     break
             if correct_col is None:
-                raise ValueError(
-                    f"Could not find 'Correct' column in {self.evaluation_csv}"
-                )
+                raise ValueError(f"Could not find 'Correct' column in {evaluation_csv}")
 
             for i, row in enumerate(reader):
                 is_correct = row[correct_col].strip().lower() == "yes"
@@ -184,12 +190,10 @@ class ActivationsDataModule(LightningDataModule):
 
         # 2. Stream load activation shards and extract target layer(s) on-the-fly to save RAM
         shard_files = sorted(
-            glob.glob(os.path.join(self.activations_dir, "activations_*.pt"))
+            glob.glob(os.path.join(activations_dir, "activations_*.pt"))
         )
         if not shard_files:
-            raise FileNotFoundError(
-                f"No activation shards found in {self.activations_dir}"
-            )
+            raise FileNotFoundError(f"No activation shards found in {activations_dir}")
 
         dataset_samples = []
         for shard_file in tqdm(
@@ -304,8 +308,34 @@ class ActivationsDataModule(LightningDataModule):
 
         print(
             f"Loaded and mapped {len(dataset_samples)} samples from "
-            f"{self.activations_dir} and {self.evaluation_csv}"
+            f"{activations_dir} and {evaluation_csv}"
         )
+        return dataset_samples
+
+    def setup(self, stage: str = None):
+        dataset_samples = self._load_samples(self.activations_dir, self.evaluation_csv)
+
+        if self.val_activations_dir is not None:
+            # Separate validation set (e.g. a different dataset split): train on
+            # all samples from activations_dir, validate on val_activations_dir.
+            train_samples = dataset_samples
+            if self.max_samples is not None:
+                rng = random.Random(self.seed)
+                train_samples = rng.sample(
+                    train_samples, min(self.max_samples, len(train_samples))
+                )
+            val_samples = self._load_samples(
+                self.val_activations_dir, self.val_evaluation_csv
+            )
+            # Layer statistics only from training data to avoid leakage
+            self.layer_stats = self.compute_layer_statistics(train_samples)
+            self.train_dataset = ActivationsDataset(train_samples)
+            self.val_dataset = ActivationsDataset(val_samples)
+            print(
+                f"Train split: {len(self.train_dataset)} samples, "
+                f"Val split: {len(self.val_dataset)} samples."
+            )
+            return
 
         # Compute layer normalization statistics (for Z-norm layer pooling)
         self.layer_stats = self.compute_layer_statistics(dataset_samples)
