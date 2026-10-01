@@ -521,6 +521,115 @@ class TestActivationsDataModuleSeparateVal:
             )
 
 
+class TestActivationsDataModuleLazy:
+    """Unit tests for lazy (memory-mapped) loading of activation shards."""
+
+    @staticmethod
+    def _write_split(root, name, num_samples, num_shards=2):
+        split_dir = root / name
+        split_dir.mkdir()
+        gen = torch.Generator().manual_seed(0)
+        samples = []
+        for i in range(num_samples):
+            seq_len = 3 + i % 4
+            samples.append(
+                {
+                    "sample_idx": i,
+                    "seq_len": seq_len,
+                    "prompt_length": seq_len - 2,
+                    "activations": {
+                        layer: torch.randn(seq_len, 4, generator=gen).bfloat16()
+                        for layer in (12, 14)
+                    },
+                }
+            )
+        per_shard = -(-num_samples // num_shards)
+        for s in range(num_shards):
+            torch.save(
+                samples[s * per_shard : (s + 1) * per_shard],
+                split_dir / f"activations_{s:04d}.pt",
+            )
+        csv_path = root / f"{name}.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Question", "Correct"])
+            writer.writerows(
+                [[f"Q{i}", "Yes" if i % 3 else "No"] for i in range(num_samples)]
+            )
+        return str(split_dir), str(csv_path)
+
+    @staticmethod
+    def _items(dataset):
+        return [dataset[i] for i in range(len(dataset))]
+
+    @pytest.mark.parametrize(
+        "pool_strategy,activations_to_use,layer_idx",
+        [("none", "both", 14), ("mean", "answer", 12), ("none", "prompt", [12, 14])],
+    )
+    def test_lazy_matches_eager(
+        self, tmp_path, pool_strategy, activations_to_use, layer_idx
+    ):
+        from callm.data.activations_data import (
+            ActivationsDataModule,
+            LazyActivationsDataset,
+        )
+
+        train_dir, train_csv = self._write_split(tmp_path, "train", 10)
+        val_dir, val_csv = self._write_split(tmp_path, "val", 5)
+        kwargs = dict(
+            activations_dir=train_dir,
+            evaluation_csv=train_csv,
+            val_activations_dir=val_dir,
+            val_evaluation_csv=val_csv,
+            layer_idx=layer_idx,
+            pool_strategy=pool_strategy,
+            activations_to_use=activations_to_use,
+            dtype="bfloat16",
+            max_samples=7,
+            num_workers=0,
+        )
+        eager = ActivationsDataModule(**kwargs)
+        lazy = ActivationsDataModule(**kwargs, lazy=True)
+        eager.setup()
+        lazy.setup()
+
+        assert isinstance(lazy.train_dataset, LazyActivationsDataset)
+        assert lazy.layer_stats is None
+        for split in ("train_dataset", "val_dataset"):
+            expected = self._items(getattr(eager, split))
+            actual = self._items(getattr(lazy, split))
+            assert len(actual) == len(expected)
+            for a, e in zip(actual, expected):
+                assert a["correct"] == e["correct"]
+                assert a["is_multi_layer"] == e["is_multi_layer"]
+                assert torch.equal(a["activations"], e["activations"])
+
+    def test_lazy_ratio_split_and_collate(self, tmp_path):
+        from callm.data.activations_data import ActivationsDataModule
+
+        train_dir, train_csv = self._write_split(tmp_path, "train", 10)
+        kwargs = dict(
+            activations_dir=train_dir,
+            evaluation_csv=train_csv,
+            layer_idx=12,
+            pool_strategy="none",
+            activations_to_use="both",
+            train_split=0.6,
+            num_workers=0,
+        )
+        eager = ActivationsDataModule(**kwargs)
+        lazy = ActivationsDataModule(**kwargs, lazy=True)
+        eager.setup()
+        lazy.setup()
+
+        assert len(lazy.train_dataset) == 6 and len(lazy.val_dataset) == 4
+        lazy_batch = next(iter(lazy.val_dataloader()))
+        eager_batch = next(iter(eager.val_dataloader()))
+        assert torch.equal(lazy_batch["activations"], eager_batch["activations"])
+        assert torch.equal(lazy_batch["seq_mask"], eager_batch["seq_mask"])
+        assert torch.equal(lazy_batch["correct"], eager_batch["correct"])
+
+
 class TestGetIndicesOfExactAnswer:
     """Unit tests for get_indices_of_exact_answer."""
 

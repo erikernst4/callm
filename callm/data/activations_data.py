@@ -21,6 +21,38 @@ class ActivationsDataset(Dataset):
         return self.samples[idx]
 
 
+class LazyActivationsDataset(Dataset):
+    """Dataset that reads each sample from memory-mapped activation files on access.
+
+    ``entries`` holds ``(file_path, position, correct)`` tuples and
+    ``process_fn(sample)`` selects/slices/pools the raw sample. Only the pages of
+    the requested layers are read from disk, so datasets larger than RAM (e.g.
+    full token sequences) can be trained on. Opened files are cached per process
+    (i.e. per DataLoader worker).
+    """
+
+    def __init__(self, entries, process_fn):
+        self.samples = entries
+        self.process_fn = process_fn
+        self._files = {}
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        path, pos, correct = self.samples[idx]
+        if path not in self._files:
+            self._files[path] = torch.load(
+                path, map_location="cpu", weights_only=False, mmap=True
+            )
+        activations, is_multi_layer = self.process_fn(self._files[path][pos])
+        return {
+            "activations": activations,
+            "correct": correct,
+            "is_multi_layer": is_multi_layer,
+        }
+
+
 class ActivationsDataModule(LightningDataModule):
     """
     LightningDataModule that loads pre-computed activations from disk,
@@ -44,7 +76,16 @@ class ActivationsDataModule(LightningDataModule):
         val_size: int | None = None,
         val_activations_dir: str | None = None,
         val_evaluation_csv: str | None = None,
+        lazy: bool = False,
     ):
+        """
+        Args:
+            lazy: Read samples from memory-mapped activation files on access
+                instead of loading them all into RAM in setup(). Use it when
+                the selected activations do not fit in memory (e.g.
+                pool_strategy="none" over long sequences). Layer statistics for
+                Z-norm layer pooling are not computed in this mode.
+        """
         super().__init__()
         if (val_activations_dir is None) != (val_evaluation_csv is None):
             raise ValueError(
@@ -68,6 +109,7 @@ class ActivationsDataModule(LightningDataModule):
         self.val_size = val_size
         self.val_activations_dir = val_activations_dir
         self.val_evaluation_csv = val_evaluation_csv
+        self.lazy = lazy
 
         self.train_dataset = None
         self.val_dataset = None
@@ -201,96 +243,25 @@ class ActivationsDataModule(LightningDataModule):
             desc=f"Loading activation shards ({self.activations_to_use})",
         ):
             try:
+                # In lazy mode only the sample metadata is read here; tensors
+                # stay memory-mapped and are read by LazyActivationsDataset
                 shard_samples = torch.load(
-                    shard_file, map_location="cpu", weights_only=False
+                    shard_file, map_location="cpu", weights_only=False, mmap=self.lazy
                 )
             except Exception as e:
                 raise RuntimeError(f"Failed to load activation shard {shard_file}: {e}")
 
-            for sample in shard_samples:
+            for pos, sample in enumerate(shard_samples):
                 idx = sample["sample_idx"]
                 if idx not in correctness_map:
                     # If evaluation is incomplete or samples mismatched, skip
                     continue
 
-                layer_keys = sorted(list(sample["activations"].keys()))
-                num_layers = len(layer_keys)
-                if num_layers == 0:
-                    raise ValueError(f"Sample {idx} has no saved layer activations.")
+                if self.lazy:
+                    dataset_samples.append((shard_file, pos, correctness_map[idx]))
+                    continue
 
-                def _resolve_single_layer(l_idx: int) -> int:
-                    if l_idx in sample["activations"]:
-                        return l_idx
-                    return layer_keys[l_idx % num_layers]
-
-                # Support single integer, list of integers, or "all"
-                if isinstance(self.layer_idx, int):
-                    resolved_layer_keys = [_resolve_single_layer(self.layer_idx)]
-                    is_multi_layer = False
-                elif isinstance(self.layer_idx, list):
-                    resolved_layer_keys = [
-                        _resolve_single_layer(layer_i) for layer_i in self.layer_idx
-                    ]
-                    is_multi_layer = True
-                elif (
-                    isinstance(self.layer_idx, str) and self.layer_idx.lower() == "all"
-                ):
-                    resolved_layer_keys = list(layer_keys)
-                    is_multi_layer = True
-                else:
-                    raise ValueError(
-                        f"Unsupported type/value for layer_idx: {self.layer_idx}"
-                    )
-
-                # Retrieve and pool activations for the resolved layers
-                layer_acts = []
-                for resolved_layer_key in resolved_layer_keys:
-                    act_tensor = sample["activations"][resolved_layer_key]
-
-                    # Slice activations based on activations_to_use
-                    prompt_len = sample.get("prompt_length", sample["seq_len"])
-                    if self.activations_to_use == "prompt":
-                        act_tensor = act_tensor[:prompt_len]
-                    elif self.activations_to_use == "answer":
-                        act_tensor = act_tensor[prompt_len:]
-                    elif self.activations_to_use == "both":
-                        pass
-                    else:
-                        raise ValueError(
-                            f"Unknown activations_to_use: {self.activations_to_use}"
-                        )
-
-                    if act_tensor.shape[0] == 0:
-                        # Safe fallback for empty slices (e.g. empty answer or old cache)
-                        if self.pool_strategy in ("mean", "last"):
-                            pooled_act = torch.zeros(
-                                act_tensor.shape[1],
-                                device=act_tensor.device,
-                                dtype=act_tensor.dtype,
-                            )
-                        else:
-                            pooled_act = act_tensor
-                    else:
-                        # Apply pool strategy
-                        if self.pool_strategy == "mean":
-                            pooled_act = act_tensor.mean(dim=0)  # (hidden_dim)
-                        elif self.pool_strategy == "last":
-                            pooled_act = act_tensor[-1]  # (hidden_dim)
-                        elif self.pool_strategy == "none":
-                            pooled_act = act_tensor  # (seq_len, hidden_dim)
-                        else:
-                            raise ValueError(
-                                f"Unknown pool strategy: {self.pool_strategy}"
-                            )
-
-                    layer_acts.append(self._convert_dtype(pooled_act))
-
-                if is_multi_layer:
-                    # Stack along a new layer dimension (dim=0)
-                    final_act = torch.stack(layer_acts, dim=0)
-                else:
-                    final_act = layer_acts[0]
-
+                final_act, is_multi_layer = self._process_sample(sample)
                 dataset_samples.append(
                     {
                         "activations": final_act,
@@ -312,6 +283,86 @@ class ActivationsDataModule(LightningDataModule):
         )
         return dataset_samples
 
+    def _process_sample(self, sample: dict) -> tuple[torch.Tensor, bool]:
+        """Select the configured layer(s) of a raw sample, slice them by
+        activations_to_use and pool them. Returns (activations, is_multi_layer)."""
+        idx = sample["sample_idx"]
+        layer_keys = sorted(list(sample["activations"].keys()))
+        num_layers = len(layer_keys)
+        if num_layers == 0:
+            raise ValueError(f"Sample {idx} has no saved layer activations.")
+
+        def _resolve_single_layer(l_idx: int) -> int:
+            if l_idx in sample["activations"]:
+                return l_idx
+            return layer_keys[l_idx % num_layers]
+
+        # Support single integer, list of integers, or "all"
+        if isinstance(self.layer_idx, int):
+            resolved_layer_keys = [_resolve_single_layer(self.layer_idx)]
+            is_multi_layer = False
+        elif isinstance(self.layer_idx, list):
+            resolved_layer_keys = [
+                _resolve_single_layer(layer_i) for layer_i in self.layer_idx
+            ]
+            is_multi_layer = True
+        elif isinstance(self.layer_idx, str) and self.layer_idx.lower() == "all":
+            resolved_layer_keys = list(layer_keys)
+            is_multi_layer = True
+        else:
+            raise ValueError(f"Unsupported type/value for layer_idx: {self.layer_idx}")
+
+        # Retrieve and pool activations for the resolved layers
+        layer_acts = []
+        for resolved_layer_key in resolved_layer_keys:
+            act_tensor = sample["activations"][resolved_layer_key]
+
+            # Slice activations based on activations_to_use
+            prompt_len = sample.get("prompt_length", sample["seq_len"])
+            if self.activations_to_use == "prompt":
+                act_tensor = act_tensor[:prompt_len]
+            elif self.activations_to_use == "answer":
+                act_tensor = act_tensor[prompt_len:]
+            elif self.activations_to_use == "both":
+                pass
+            else:
+                raise ValueError(
+                    f"Unknown activations_to_use: {self.activations_to_use}"
+                )
+
+            if act_tensor.shape[0] == 0:
+                # Safe fallback for empty slices (e.g. empty answer or old cache)
+                if self.pool_strategy in ("mean", "last"):
+                    pooled_act = torch.zeros(
+                        act_tensor.shape[1],
+                        device=act_tensor.device,
+                        dtype=act_tensor.dtype,
+                    )
+                else:
+                    pooled_act = act_tensor
+            else:
+                # Apply pool strategy
+                if self.pool_strategy == "mean":
+                    pooled_act = act_tensor.mean(dim=0)  # (hidden_dim)
+                elif self.pool_strategy == "last":
+                    pooled_act = act_tensor[-1]  # (hidden_dim)
+                elif self.pool_strategy == "none":
+                    pooled_act = act_tensor  # (seq_len, hidden_dim)
+                else:
+                    raise ValueError(f"Unknown pool strategy: {self.pool_strategy}")
+
+            layer_acts.append(self._convert_dtype(pooled_act))
+
+        if is_multi_layer:
+            # Stack along a new layer dimension (dim=0)
+            return torch.stack(layer_acts, dim=0), True
+        return layer_acts[0], False
+
+    def _make_dataset(self, samples: list) -> Dataset:
+        if self.lazy:
+            return LazyActivationsDataset(samples, self._process_sample)
+        return ActivationsDataset(samples)
+
     def setup(self, stage: str = None):
         dataset_samples = self._load_samples(self.activations_dir, self.evaluation_csv)
 
@@ -328,9 +379,10 @@ class ActivationsDataModule(LightningDataModule):
                 self.val_activations_dir, self.val_evaluation_csv
             )
             # Layer statistics only from training data to avoid leakage
-            self.layer_stats = self.compute_layer_statistics(train_samples)
-            self.train_dataset = ActivationsDataset(train_samples)
-            self.val_dataset = ActivationsDataset(val_samples)
+            if not self.lazy:
+                self.layer_stats = self.compute_layer_statistics(train_samples)
+            self.train_dataset = self._make_dataset(train_samples)
+            self.val_dataset = self._make_dataset(val_samples)
             print(
                 f"Train split: {len(self.train_dataset)} samples, "
                 f"Val split: {len(self.val_dataset)} samples."
@@ -338,7 +390,8 @@ class ActivationsDataModule(LightningDataModule):
             return
 
         # Compute layer normalization statistics (for Z-norm layer pooling)
-        self.layer_stats = self.compute_layer_statistics(dataset_samples)
+        if not self.lazy:
+            self.layer_stats = self.compute_layer_statistics(dataset_samples)
 
         # 4. Split into train and validation
         rng = random.Random(self.seed)
@@ -367,8 +420,8 @@ class ActivationsDataModule(LightningDataModule):
             train_samples = shuffled_samples[:split_idx]
             val_samples = shuffled_samples[split_idx:]
 
-        self.train_dataset = ActivationsDataset(train_samples)
-        self.val_dataset = ActivationsDataset(val_samples)
+        self.train_dataset = self._make_dataset(train_samples)
+        self.val_dataset = self._make_dataset(val_samples)
 
         print(
             f"Train split: {len(self.train_dataset)} samples, "
