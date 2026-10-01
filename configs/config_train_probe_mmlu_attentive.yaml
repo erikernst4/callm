@@ -1,0 +1,53 @@
+# lightning.pytorch==2.6.5
+# Config for Experiment 11: attentive sequence pooling probes on MMLU.
+# Train on auxiliary_train, validate on the validation split, over the full
+# prompt + answer token sequence of a single layer (pool_strategy: none).
+# The full sequences (~148GB per layer for train) don't fit in RAM, so samples
+# are read lazily from the memory-mapped raw activation chunks (lazy: true).
+seed_everything: 0
+trainer:
+  evaluate_correctness: false
+  accelerator: gpu
+  strategy: auto
+  devices: [0]
+  max_epochs: 100
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val_loss
+        patience: 5
+        mode: min
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val_loss
+        save_top_k: 1
+        mode: min
+model:
+  class_path: callm.models.ConfidenceAugmentedLLM
+  init_args:
+    model_dim: 4096
+    layer_idx: 18
+    lr: 0.001
+    lr_scheduler:
+      class_path: callm.models.WarmupCosineAnnealingLR
+      init_args:
+        warmup_steps: 100
+        # 44,300 train samples / batch_size 64 = 693 steps/epoch * 100 epochs
+        max_steps: 69300
+        eta_min: 1.0e-06
+        last_epoch: -1
+data:
+  class_path: callm.data.ActivationsDataModule
+  init_args:
+    activations_dir: activations_cache/mmlu_auxiliary_train_50k/lightning_logs/version_1
+    evaluation_csv: activations_cache/mmlu_auxiliary_train_50k/evaluation_results.csv
+    val_activations_dir: activations_cache/mmlu_val
+    val_evaluation_csv: activations_cache/mmlu_val/lightning_logs/version_2/evaluation_results.csv
+    layer_idx: 18
+    batch_size: 64
+    num_workers: 8
+    pool_strategy: none
+    activations_to_use: both
+    seed: 42
+    dtype: bfloat16
+    lazy: true
