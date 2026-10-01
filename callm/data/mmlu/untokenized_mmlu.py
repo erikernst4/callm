@@ -21,6 +21,7 @@ class UntokenizedMMLUDataModule(LightningDataModule):
         self,
         batch_size: int = 32,
         prompt: Prompt = GCP_CHAT_MMLU_LABEL_PROB_PROMPT,
+        split: str = "test",
         max_samples: int = None,
         seed: int = 42,
         num_workers: int = 0,
@@ -30,6 +31,7 @@ class UntokenizedMMLUDataModule(LightningDataModule):
         super().__init__()
         self.batch_size = batch_size
         self.prompt = prompt
+        self.split = split
         self.max_samples = max_samples
         self.seed = seed
         self.num_workers = num_workers
@@ -38,7 +40,7 @@ class UntokenizedMMLUDataModule(LightningDataModule):
         load_dataset("cais/mmlu", "all")
 
     def setup(self, stage: str):
-        dataset = load_dataset("cais/mmlu", "all")["test"]
+        dataset = load_dataset("cais/mmlu", "all")[self.split]
 
         # Limit samples if requested
         dataset = subsample_dataset(dataset, self.max_samples, self.seed)

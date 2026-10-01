@@ -78,6 +78,42 @@ def test_mmlu_data_module_setup(mock_get_tokenizer, mock_load_dataset):
     assert hasattr(dm, "mmlu_val")
 
 
+@patch("callm.data.mmlu.mmlu.load_dataset")
+@patch("callm.data.mmlu.mmlu.get_tokenizer_for_model")
+def test_mmlu_data_module_custom_split(mock_get_tokenizer, mock_load_dataset):
+    """Test MMLUDataModule with custom split (e.g. validation)."""
+    import torch
+    from datasets import Dataset
+
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.apply_chat_template.return_value = {
+        "input_ids": torch.zeros(1, 5, dtype=torch.long),
+        "attention_mask": torch.ones(1, 5, dtype=torch.long),
+    }
+    mock_get_tokenizer.return_value = mock_tokenizer
+
+    mock_val_dataset = Dataset.from_dict(
+        {
+            "question": ["Q_val"],
+            "choices": [["a", "b", "c", "d"]],
+            "answer": [1],
+        }
+    )
+    mock_load_dataset.return_value = {"validation": mock_val_dataset}
+
+    dm = MMLUDataModule(
+        batch_size=1,
+        model_name="dummy/model",
+        prompt=CHAT_MMLU_LABEL_PROB_PROMPT,
+        split="validation",
+    )
+    dm.setup("validate")
+
+    assert len(dm.mmlu_val) == 1
+    assert dm.mmlu_val[0]["question"] == "Q_val"
+    assert dm.mmlu_val[0]["label"] == "B"
+
+
 @patch("callm.data.mmlu.untokenized_mmlu.load_dataset")
 def test_untokenized_mmlu_data_module_setup(mock_load_dataset):
     """Test UntokenizedMMLUDataModule setup."""
