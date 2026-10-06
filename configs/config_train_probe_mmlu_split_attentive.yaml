@@ -1,0 +1,58 @@
+# lightning.pytorch==2.6.5
+# Config for Experiment 12: split prompt/answer probes on MMLU with attentive pooling.
+# Same data and schedule as exp11 (config_train_probe_mmlu_attentive.yaml): raw token
+# sequences read lazily from the memory-mapped activation chunks. activations_to_use:
+# split returns the prompt and answer tokens separately, and SplitConfidenceAugmentedLLM
+# gives each part its own AttentivePooling before merging them according to `merge`.
+seed_everything: 0
+trainer:
+  evaluate_correctness: false
+  accelerator: gpu
+  strategy: auto
+  devices: [0]
+  max_epochs: 100
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val_loss
+        patience: 5
+        mode: min
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val_loss
+        save_top_k: 1
+        mode: min
+model:
+  class_path: callm.models.SplitConfidenceAugmentedLLM
+  init_args:
+    model_dim: 4096
+    merge: concat
+    layer_idx: 18
+    lr: 0.001
+    seq_pooling:
+      class_path: callm.models.AttentivePooling
+      init_args:
+        model_dim: 4096
+    lr_scheduler:
+      class_path: callm.models.WarmupCosineAnnealingLR
+      init_args:
+        warmup_steps: 100
+        # 44,300 train samples / batch_size 64 = 693 steps/epoch * 100 epochs
+        max_steps: 69300
+        eta_min: 1.0e-06
+        last_epoch: -1
+data:
+  class_path: callm.data.ActivationsDataModule
+  init_args:
+    activations_dir: activations_cache/mmlu_auxiliary_train_50k/lightning_logs/version_1
+    evaluation_csv: activations_cache/mmlu_auxiliary_train_50k/evaluation_results.csv
+    val_activations_dir: activations_cache/mmlu_val
+    val_evaluation_csv: activations_cache/mmlu_val/lightning_logs/version_2/evaluation_results.csv
+    layer_idx: 18
+    batch_size: 64
+    num_workers: 8
+    pool_strategy: none
+    activations_to_use: split
+    seed: 42
+    dtype: bfloat16
+    lazy: true

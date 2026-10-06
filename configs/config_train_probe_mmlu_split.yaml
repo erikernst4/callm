@@ -1,0 +1,44 @@
+# lightning.pytorch==2.6.5
+# Config for Experiment 12: split prompt/answer probes on MMLU (pre-pooled).
+# Expects <pooled_dir>/split from scripts/combine_pooled_scopes.py: each sample holds
+# the mean-pooled prompt and answer vectors per layer, which activations_to_use: split
+# returns separately. SplitConfidenceAugmentedLLM pools each part on its own and
+# merges them according to `merge` (concat, mean, mean_logits).
+seed_everything: 0
+trainer:
+  evaluate_correctness: false
+  accelerator: gpu
+  strategy: auto
+  devices: [0]
+  max_epochs: 100
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val_loss
+        patience: 5
+        mode: min
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val_loss
+        save_top_k: 1
+        mode: min
+model:
+  class_path: callm.models.SplitConfidenceAugmentedLLM
+  init_args:
+    model_dim: 4096
+    merge: concat
+    layer_idx: 12
+    lr: 0.001
+data:
+  class_path: callm.data.ActivationsDataModule
+  init_args:
+    activations_dir: activations_cache/mmlu_auxiliary_train_50k_pooled_mean/split
+    evaluation_csv: activations_cache/mmlu_auxiliary_train_50k/evaluation_results.csv
+    val_activations_dir: activations_cache/mmlu_val_pooled_mean/split
+    val_evaluation_csv: activations_cache/mmlu_val/lightning_logs/version_2/evaluation_results.csv
+    layer_idx: 12
+    batch_size: 64
+    num_workers: 4
+    pool_strategy: mean
+    activations_to_use: split
+    seed: 42
