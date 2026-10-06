@@ -80,6 +80,9 @@ class ActivationsDataModule(LightningDataModule):
     ):
         """
         Args:
+            activations_to_use: Tokens to use: "prompt", "answer", "both", or
+                "split" to return the prompt and answer activations separately
+                (as {"prompt": ..., "answer": ...}) for SplitConfidenceAugmentedLLM.
             lazy: Read samples from memory-mapped activation files on access
                 instead of loading them all into RAM in setup(). Use it when
                 the selected activations do not fit in memory (e.g.
@@ -91,9 +94,9 @@ class ActivationsDataModule(LightningDataModule):
             raise ValueError(
                 "val_activations_dir and val_evaluation_csv must be set together."
             )
-        if activations_to_use not in ("prompt", "answer", "both"):
+        if activations_to_use not in ("prompt", "answer", "both", "split"):
             raise ValueError(
-                f"activations_to_use must be one of 'prompt', 'answer', 'both'. Got: {activations_to_use}"
+                f"activations_to_use must be one of 'prompt', 'answer', 'both', 'split'. Got: {activations_to_use}"
             )
         self.activations_dir = activations_dir
         self.evaluation_csv = evaluation_csv
@@ -151,8 +154,12 @@ class ActivationsDataModule(LightningDataModule):
             - ``layer_means``: Tensor of shape (num_layers, model_dim)
             - ``layer_stds``:  Tensor of shape (num_layers, model_dim)
         """
-        # Filter to multi-layer samples only
-        multi_samples = [s for s in dataset_samples if s.get("is_multi_layer", False)]
+        # Filter to multi-layer samples only; split samples are not supported
+        multi_samples = [
+            s
+            for s in dataset_samples
+            if s.get("is_multi_layer", False) and not isinstance(s["activations"], dict)
+        ]
         if not multi_samples:
             return None
 
@@ -312,51 +319,71 @@ class ActivationsDataModule(LightningDataModule):
         else:
             raise ValueError(f"Unsupported type/value for layer_idx: {self.layer_idx}")
 
-        # Retrieve and pool activations for the resolved layers
-        layer_acts = []
-        for resolved_layer_key in resolved_layer_keys:
-            act_tensor = sample["activations"][resolved_layer_key]
-
-            # Slice activations based on activations_to_use
-            prompt_len = sample.get("prompt_length", sample["seq_len"])
-            if self.activations_to_use == "prompt":
-                act_tensor = act_tensor[:prompt_len]
-            elif self.activations_to_use == "answer":
-                act_tensor = act_tensor[prompt_len:]
-            elif self.activations_to_use == "both":
-                pass
+        prompt_len = sample.get("prompt_length", sample["seq_len"])
+        scopes = (
+            ("prompt", "answer")
+            if self.activations_to_use == "split"
+            else (self.activations_to_use,)
+        )
+        processed = {}
+        for scope in scopes:
+            layer_acts = [
+                self._slice_and_pool(sample["activations"][key], prompt_len, scope)
+                for key in resolved_layer_keys
+            ]
+            if is_multi_layer:
+                # Stack along a new layer dimension (dim=0)
+                processed[scope] = torch.stack(layer_acts, dim=0)
             else:
-                raise ValueError(
-                    f"Unknown activations_to_use: {self.activations_to_use}"
+                processed[scope] = layer_acts[0]
+
+        if self.activations_to_use == "split":
+            return processed, is_multi_layer
+        return processed[self.activations_to_use], is_multi_layer
+
+    def _slice_and_pool(
+        self, act_tensor: torch.Tensor, prompt_len: int, scope: str
+    ) -> torch.Tensor:
+        """Slice one layer's (seq_len, hidden_dim) activations to ``scope``
+        ("prompt", "answer" or "both"), pool them and convert the dtype."""
+        if scope == "prompt":
+            act_tensor = act_tensor[:prompt_len]
+        elif scope == "answer":
+            act_tensor = act_tensor[prompt_len:]
+        elif scope != "both":
+            raise ValueError(f"Unknown activations_to_use: {scope}")
+
+        if act_tensor.shape[0] == 0:
+            # Safe fallback for empty slices (e.g. empty answer or old cache)
+            if self.pool_strategy in ("mean", "last"):
+                pooled_act = torch.zeros(
+                    act_tensor.shape[1],
+                    device=act_tensor.device,
+                    dtype=act_tensor.dtype,
                 )
-
-            if act_tensor.shape[0] == 0:
-                # Safe fallback for empty slices (e.g. empty answer or old cache)
-                if self.pool_strategy in ("mean", "last"):
-                    pooled_act = torch.zeros(
-                        act_tensor.shape[1],
-                        device=act_tensor.device,
-                        dtype=act_tensor.dtype,
-                    )
-                else:
-                    pooled_act = act_tensor
+            elif self.activations_to_use == "split":
+                # Keep one zero token so the part's seq_mask is never all False
+                # (an all-masked attentive softmax would give NaN)
+                pooled_act = torch.zeros(
+                    1,
+                    act_tensor.shape[1],
+                    device=act_tensor.device,
+                    dtype=act_tensor.dtype,
+                )
             else:
-                # Apply pool strategy
-                if self.pool_strategy == "mean":
-                    pooled_act = act_tensor.mean(dim=0)  # (hidden_dim)
-                elif self.pool_strategy == "last":
-                    pooled_act = act_tensor[-1]  # (hidden_dim)
-                elif self.pool_strategy == "none":
-                    pooled_act = act_tensor  # (seq_len, hidden_dim)
-                else:
-                    raise ValueError(f"Unknown pool strategy: {self.pool_strategy}")
+                pooled_act = act_tensor
+        else:
+            # Apply pool strategy
+            if self.pool_strategy == "mean":
+                pooled_act = act_tensor.mean(dim=0)  # (hidden_dim)
+            elif self.pool_strategy == "last":
+                pooled_act = act_tensor[-1]  # (hidden_dim)
+            elif self.pool_strategy == "none":
+                pooled_act = act_tensor  # (seq_len, hidden_dim)
+            else:
+                raise ValueError(f"Unknown pool strategy: {self.pool_strategy}")
 
-            layer_acts.append(self._convert_dtype(pooled_act))
-
-        if is_multi_layer:
-            # Stack along a new layer dimension (dim=0)
-            return torch.stack(layer_acts, dim=0), True
-        return layer_acts[0], False
+        return self._convert_dtype(pooled_act)
 
     def _make_dataset(self, samples: list) -> Dataset:
         if self.lazy:
@@ -431,24 +458,49 @@ class ActivationsDataModule(LightningDataModule):
     @staticmethod
     def collate_fn(batch):
         correct = torch.tensor([item["correct"] for item in batch], dtype=torch.long)
-        first_act = batch[0]["activations"]
         is_multi_layer = batch[0].get("is_multi_layer", False)
+        result = {"correct": correct}
+
+        if isinstance(batch[0]["activations"], dict):
+            # Split mode: collate prompt and answer activations separately
+            for part in batch[0]["activations"]:
+                activations, seq_mask = ActivationsDataModule._collate_activations(
+                    [item["activations"][part] for item in batch], is_multi_layer
+                )
+                result[f"{part}_activations"] = activations
+                if seq_mask is not None:
+                    result[f"{part}_seq_mask"] = seq_mask
+            return result
+
+        activations, seq_mask = ActivationsDataModule._collate_activations(
+            [item["activations"] for item in batch], is_multi_layer
+        )
+        result["activations"] = activations
+        if seq_mask is not None:
+            result["seq_mask"] = seq_mask
+        return result
+
+    @staticmethod
+    def _collate_activations(acts: list, is_multi_layer: bool):
+        """Stack or pad a list of per-sample activations. Returns
+        (activations, seq_mask), with seq_mask None for pooled activations."""
+        first_act = acts[0]
         seq_mask = None
 
         if not is_multi_layer:
             if first_act.ndim == 1:
                 # Already pooled: stack into (batch_size, hidden_dim)
-                activations = torch.stack([item["activations"] for item in batch])
+                activations = torch.stack(acts)
             elif first_act.ndim == 2:
                 # Sequence: pad into (batch_size, max_seq_len, hidden_dim)
-                activations_list = [item["activations"] for item in batch]
+                activations_list = acts
                 activations = torch.nn.utils.rnn.pad_sequence(
                     activations_list, batch_first=True, padding_value=0.0
                 )
                 # Generate seq_mask: True = valid, False = padding
                 seq_lengths = [a.shape[0] for a in activations_list]
                 max_len = activations.shape[1]
-                seq_mask = torch.zeros(len(batch), max_len, dtype=torch.bool)
+                seq_mask = torch.zeros(len(acts), max_len, dtype=torch.bool)
                 for i, length in enumerate(seq_lengths):
                     seq_mask[i, :length] = True
             else:
@@ -459,21 +511,21 @@ class ActivationsDataModule(LightningDataModule):
             if first_act.ndim == 2:
                 # Multi-layer, pre-pooled: shape of each item is (num_layers, hidden_dim)
                 # Stack into (batch_size, num_layers, hidden_dim)
-                activations = torch.stack([item["activations"] for item in batch])
+                activations = torch.stack(acts)
             elif first_act.ndim == 3:
                 # Multi-layer, sequence: shape of each item is (num_layers, seq_len, hidden_dim)
                 # Pad sequence dimension (dim=1) across batch.
                 # To do this, permute each to (seq_len, num_layers, hidden_dim)
-                permuted_list = [item["activations"].permute(1, 0, 2) for item in batch]
+                permuted_list = [a.permute(1, 0, 2) for a in acts]
                 padded = torch.nn.utils.rnn.pad_sequence(
                     permuted_list, batch_first=True, padding_value=0.0
                 )  # (batch_size, max_seq_len, num_layers, hidden_dim)
                 # Permute back to (batch_size, num_layers, max_seq_len, hidden_dim)
                 activations = padded.permute(0, 2, 1, 3)
                 # Generate seq_mask: True = valid, False = padding
-                seq_lengths = [item["activations"].shape[1] for item in batch]
+                seq_lengths = [a.shape[1] for a in acts]
                 max_len = activations.shape[2]
-                seq_mask = torch.zeros(len(batch), max_len, dtype=torch.bool)
+                seq_mask = torch.zeros(len(acts), max_len, dtype=torch.bool)
                 for i, length in enumerate(seq_lengths):
                     seq_mask[i, :length] = True
             else:
@@ -481,13 +533,7 @@ class ActivationsDataModule(LightningDataModule):
                     f"Unexpected multi-layer activation tensor shape: {first_act.shape}"
                 )
 
-        result = {
-            "activations": activations,
-            "correct": correct,
-        }
-        if seq_mask is not None:
-            result["seq_mask"] = seq_mask
-        return result
+        return activations, seq_mask
 
     def train_dataloader(self):
         return DataLoader(

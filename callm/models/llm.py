@@ -11,7 +11,7 @@ from typing import Callable
 from callm.extractors import BaseExtractor
 from callm.utils import initialize_model, get_tokenizer_for_model, check_exact_match
 from callm.models.base import BaseLightningModule
-from callm.models.probe import Probe
+from callm.models.probe import Probe, SplitProbe
 from callm.models.layer_pooling import (
     LayerWeightedAverage,
     SingleLayerSelector,
@@ -1075,3 +1075,63 @@ class ConfidenceAugmentedLLM(LightningModule):
                 },
             }
         return optimizer
+
+
+class SplitConfidenceAugmentedLLM(ConfidenceAugmentedLLM):
+    """
+    Cached-mode ConfidenceAugmentedLLM that pools the prompt and answer
+    activations separately and merges them in a ``SplitProbe``.
+
+    Expects batches from ``ActivationsDataModule(activations_to_use="split")``
+    with keys ``prompt_activations`` and ``answer_activations`` (plus optional
+    ``prompt_seq_mask`` / ``answer_seq_mask``). ``layer_pooling`` and
+    ``seq_pooling`` are copied, so each part gets its own weights.
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        merge: str = "concat",
+        layer_idx: int | list[int] | str = -1,
+        num_layers: int | None = None,
+        layer_pooling: nn.Module | None = None,
+        seq_pooling: nn.Module | None = None,
+        lr: float = 1e-3,
+        lr_scheduler: Callable[
+            [torch.optim.Optimizer], torch.optim.lr_scheduler.LRScheduler
+        ]
+        | None = None,
+    ):
+        # The parent resolves the default layer pooling from layer_idx and
+        # builds a single-part Probe; reuse its pooling modules for both parts.
+        super().__init__(
+            llm=None,
+            model_dim=model_dim,
+            layer_idx=layer_idx,
+            num_layers=num_layers,
+            layer_pooling=layer_pooling,
+            seq_pooling=seq_pooling,
+            lr=lr,
+            lr_scheduler=lr_scheduler,
+        )
+        self.merge = merge
+        self.probe = SplitProbe(
+            self.model_dim,
+            merge=merge,
+            layer_pooling=self.probe.layer_pooling,
+            seq_pooling=self.probe.seq_pooling,
+        )
+
+    def _get_confidence(self, batch):
+        if "prompt_activations" not in batch or "answer_activations" not in batch:
+            raise ValueError(
+                "SplitConfidenceAugmentedLLM expects 'prompt_activations' and "
+                "'answer_activations' in the batch; use "
+                "ActivationsDataModule(activations_to_use='split')."
+            )
+        return self.probe(
+            batch["prompt_activations"],
+            batch["answer_activations"],
+            prompt_seq_mask=batch.get("prompt_seq_mask"),
+            answer_seq_mask=batch.get("answer_seq_mask"),
+        )

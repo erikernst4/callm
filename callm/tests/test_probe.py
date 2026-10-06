@@ -49,6 +49,19 @@ class TestProbe:
         confidence = probe(activations)
         assert torch.allclose(confidence, expected)
 
+    def test_probe_masked_mean_ignores_padding(self):
+        """Without seq_pooling, padded positions must not enter the mean."""
+        torch.manual_seed(0)
+        probe = Probe(model_dim=4)
+        lengths = [5, 2]
+        samples = [torch.randn(n, 4) for n in lengths]
+        padded = torch.nn.utils.rnn.pad_sequence(samples, batch_first=True)
+        seq_mask = torch.arange(padded.shape[1]) < torch.tensor(lengths)[:, None]
+
+        batched = probe(padded, seq_mask=seq_mask)
+        unbatched = torch.cat([probe(s.unsqueeze(0)) for s in samples])
+        assert torch.allclose(batched, unbatched)
+
 
 class TestConfidenceAugmentedLLM:
     """Unit tests for ConfidenceAugmentedLLM."""

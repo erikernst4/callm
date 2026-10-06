@@ -1,8 +1,8 @@
-from .llm import LLM, ConfidenceAugmentedLLM
+from .llm import LLM, ConfidenceAugmentedLLM, SplitConfidenceAugmentedLLM
 from .evaluator import EvaluatorModule
 from .gcp_llm import GCPLLM
 from .gcp_evaluator import GCPEvaluatorModule
-from .probe import Probe
+from .probe import Probe, SplitProbe
 from .activation_extractor import ActivationExtractor
 from .exact_answer_extractor import ExactAnswerExtractorModule
 from .sequence_pooling import (
@@ -27,7 +27,9 @@ __all__ = [
     "GCPLLM",
     "GCPEvaluatorModule",
     "ConfidenceAugmentedLLM",
+    "SplitConfidenceAugmentedLLM",
     "Probe",
+    "SplitProbe",
     "ActivationExtractor",
     "ExactAnswerExtractorModule",
     "MeanPooling",
