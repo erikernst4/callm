@@ -18,7 +18,7 @@ trainer:
         save_top_k: 1
         mode: min
 model:
-  class_path: callm.models.ConfidenceAugmentedLLM
+  class_path: callm.models.CachedActivationsConfidenceAugmentedLLM
   init_args:
     model_dim: 4096
     layer_idx: "all"

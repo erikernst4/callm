@@ -36,24 +36,26 @@ def _config_attr(config, *names):
 class ConfidenceAugmentedLLM(LightningModule):
     """
     LightningModule that trains a Probe to predict answer correctness from
-    LLM activations.
+    the activations of an LLM.
 
-    Two modes, chosen by the batch:
-    - **Cached mode** (``llm=None``): batches carry pre-computed activations
-      (key ``"activations"``), skipping the LLM entirely. Requires
-      ``model_dim`` to be specified explicitly.
-    - **On-the-fly mode** (``llm`` provided): batches carry pre-tokenized
-      [prompt + answer] sequences and ``"prompt_lengths"``; activations are
-      extracted with a single LLM forward pass.
+    Batches carry pre-tokenized [prompt + answer] sequences and
+    ``"prompt_lengths"`` (``OnTheFlyActivationsDataModule``). A single LLM
+    forward pass yields the hidden states, which are selected by
+    ``layer_idx``, sliced to ``activations_to_use`` and pooled with
+    ``pool_strategy`` before the probe.
 
-    End-to-end evaluation of a trained probe is ``LiveEvalConfidenceLLM``.
+    Subclasses:
+    - ``CachedActivationsConfidenceAugmentedLLM`` bypasses the LLM and trains
+      on pre-computed activations.
+    - ``LiveEvalConfidenceAugmentedLLM`` evaluates a trained probe end to end,
+      generating the answers first.
     """
 
     POOL_STRATEGIES = ("mean", "last", "none")
 
     def __init__(
         self,
-        llm: LLM | None = None,
+        llm: LLM,
         model_dim: int | None = None,
         probe: nn.Module | None = None,
         layer_idx: int | list[int] | str = -1,
@@ -65,7 +67,6 @@ class ConfidenceAugmentedLLM(LightningModule):
             [torch.optim.Optimizer], torch.optim.lr_scheduler.LRScheduler
         ]
         | None = None,
-        probe_checkpoint: str | None = None,
         pool_strategy: str = "mean",
         activations_to_use: str = "answer",
     ):
@@ -97,10 +98,6 @@ class ConfidenceAugmentedLLM(LightningModule):
             )
         else:
             self.probe = probe
-
-        # Load probe weights from a trained checkpoint if provided
-        if probe_checkpoint is not None:
-            self._load_probe_checkpoint(probe_checkpoint)
 
         # BCELoss because self.probe outputs confidence probabilities in [0, 1]
         self.loss_fn = nn.BCELoss()
@@ -333,31 +330,28 @@ class ConfidenceAugmentedLLM(LightningModule):
             return (hidden_states,)
         return hidden_states
 
-    def _get_confidence(self, batch):
-        """
-        Get confidence from batch, supporting cached and on-the-fly modes.
+    def _score_tokens(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        prompt_lengths: torch.Tensor,
+    ) -> torch.Tensor:
+        """Probe confidence for [prompt + answer] token sequences."""
+        hidden_states = self._run_llm_hidden_states(input_ids, attention_mask)
+        return self._probe_from_hidden_states(
+            hidden_states, prompt_lengths, attention_mask
+        )
 
-        - Cached mode: batch contains ``"activations"`` key with pre-computed
-          activations (already pooled or raw).
-        - On-the-fly mode: batch contains ``"prompt_lengths"`` — runs a single
-          non-generative LLM forward pass on pre-tokenized [prompt + answer]
-          inputs, slices activations, and feeds to probe.
-        """
-        if "activations" in batch:
-            return self.probe(
-                batch["activations"],
-                seq_mask=batch.get("seq_mask"),
+    def _get_confidence(self, batch):
+        if "prompt_lengths" not in batch:
+            raise ValueError(
+                "ConfidenceAugmentedLLM expects [prompt + answer] token batches "
+                "with 'prompt_lengths' (OnTheFlyActivationsDataModule); use "
+                "CachedActivationsConfidenceAugmentedLLM for pre-computed "
+                "activations."
             )
-        if "prompt_lengths" in batch:
-            hidden_states = self._run_llm_hidden_states(
-                batch["input_ids"], batch["attention_mask"]
-            )
-            return self._probe_from_hidden_states(
-                hidden_states, batch["prompt_lengths"], batch["attention_mask"]
-            )
-        raise ValueError(
-            "Batch must contain 'activations' (cached mode) or 'prompt_lengths' "
-            "(on-the-fly mode)."
+        return self._score_tokens(
+            batch["input_ids"], batch["attention_mask"], batch["prompt_lengths"]
         )
 
     def training_step(self, batch, batch_idx):
@@ -427,15 +421,14 @@ class ConfidenceAugmentedLLM(LightningModule):
         return optimizer
 
 
-class LiveEvalConfidenceLLM(ConfidenceAugmentedLLM):
+class LiveEvalConfidenceAugmentedLLM(ConfidenceAugmentedLLM):
     """
     End-to-end evaluation of a trained probe (``validate`` only).
 
-    For each batch of prompts the LLM generates an answer, a forward pass on
-    [prompt + answer] (built like the activations the probe was trained on,
-    see ``LLM.full_sequence``) yields the hidden states, and the probe scores
-    them with the same ``layer_idx``, ``activations_to_use`` and
-    ``pool_strategy`` as in training. Correctness is exact match against the
+    For each batch of prompts the LLM generates an answer; the
+    [prompt + answer] sequence (built like the activations the probe was
+    trained on, see ``LLM.full_sequence``) is then scored exactly as in
+    ``ConfidenceAugmentedLLM`` training. Correctness is exact match against the
     gold answers; ``llm_outputs.csv`` and ``metrics.csv`` are written to the
     trainer's log directory.
     """
@@ -461,10 +454,10 @@ class LiveEvalConfidenceLLM(ConfidenceAugmentedLLM):
             num_layers=num_layers,
             layer_pooling=layer_pooling,
             seq_pooling=seq_pooling,
-            probe_checkpoint=probe_checkpoint,
             pool_strategy=pool_strategy,
             activations_to_use=activations_to_use,
         )
+        self._load_probe_checkpoint(probe_checkpoint)
         self.outputs = []
 
     def _generate_and_score(
@@ -479,10 +472,9 @@ class LiveEvalConfidenceLLM(ConfidenceAugmentedLLM):
         full_ids, full_mask = self.llm.full_sequence(
             input_ids, attention_mask, generated_ids
         )
-        hidden_states = self._run_llm_hidden_states(full_ids, full_mask)
         with torch.no_grad():
-            confidence = self._probe_from_hidden_states(
-                hidden_states, attention_mask.sum(dim=1), full_mask
+            confidence = self._score_tokens(
+                full_ids, full_mask, attention_mask.sum(dim=1)
             )
         return generated_ids, confidence
 
@@ -555,9 +547,54 @@ class LiveEvalConfidenceLLM(ConfidenceAugmentedLLM):
         self.outputs = []
 
 
-class SplitConfidenceAugmentedLLM(ConfidenceAugmentedLLM):
+class CachedActivationsConfidenceAugmentedLLM(ConfidenceAugmentedLLM):
     """
-    Cached-mode ConfidenceAugmentedLLM that pools the prompt and answer
+    ConfidenceAugmentedLLM that bypasses the LLM: batches carry activations
+    pre-computed by ``ActivationExtractor`` (key ``"activations"``, plus an
+    optional ``"seq_mask"``), already sliced and pooled by
+    ``ActivationsDataModule``, and go straight to the probe.
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        probe: nn.Module | None = None,
+        layer_idx: int | list[int] | str = -1,
+        num_layers: int | None = None,
+        layer_pooling: nn.Module | None = None,
+        seq_pooling: nn.Module | None = None,
+        lr: float = 1e-3,
+        lr_scheduler: Callable[
+            [torch.optim.Optimizer], torch.optim.lr_scheduler.LRScheduler
+        ]
+        | None = None,
+    ):
+        super().__init__(
+            llm=None,
+            model_dim=model_dim,
+            probe=probe,
+            layer_idx=layer_idx,
+            num_layers=num_layers,
+            layer_pooling=layer_pooling,
+            seq_pooling=seq_pooling,
+            lr=lr,
+            lr_scheduler=lr_scheduler,
+        )
+
+    def _get_confidence(self, batch):
+        if "activations" not in batch:
+            raise ValueError(
+                "CachedActivationsConfidenceAugmentedLLM expects pre-computed "
+                "'activations' in the batch (ActivationsDataModule); use "
+                "ConfidenceAugmentedLLM to extract them from [prompt + answer] "
+                "tokens."
+            )
+        return self.probe(batch["activations"], seq_mask=batch.get("seq_mask"))
+
+
+class SplitConfidenceAugmentedLLM(CachedActivationsConfidenceAugmentedLLM):
+    """
+    CachedActivationsConfidenceAugmentedLLM that pools the prompt and answer
     activations separately and merges them in a ``SplitProbe``.
 
     Expects batches from ``ActivationsDataModule(activations_to_use="split")``
@@ -583,7 +620,6 @@ class SplitConfidenceAugmentedLLM(ConfidenceAugmentedLLM):
         # The parent resolves the default layer pooling from layer_idx and
         # builds a single-part Probe; reuse its pooling modules for both parts.
         super().__init__(
-            llm=None,
             model_dim=model_dim,
             layer_idx=layer_idx,
             num_layers=num_layers,

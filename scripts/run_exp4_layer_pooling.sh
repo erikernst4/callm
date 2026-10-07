@@ -135,7 +135,7 @@ for METHOD_CFG in "${METHODS[@]}"; do
         TARGET_DIR="${RESULTS_DIR}/${METHOD_NAME}/layer_${SUBSET_NAME}"
 
         # If the class has init args, we have to handle that.
-        # But our classes only take num_layers and model_dim, which ConfidenceAugmentedLLM
+        # But our classes only take num_layers and model_dim, which CachedActivationsConfidenceAugmentedLLM
         # passes automatically during instantiation in code, OR we just let Lightning CLI handle it.
         # Let's count layers for the subset:
         if [[ "$LAYER_IDX_VAL" == "all" ]]; then

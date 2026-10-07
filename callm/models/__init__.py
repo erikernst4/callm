@@ -1,7 +1,8 @@
 from .llm import LLM
 from .confidence_llm import (
+    CachedActivationsConfidenceAugmentedLLM,
     ConfidenceAugmentedLLM,
-    LiveEvalConfidenceLLM,
+    LiveEvalConfidenceAugmentedLLM,
     SplitConfidenceAugmentedLLM,
 )
 from .evaluator import EvaluatorModule
@@ -32,7 +33,8 @@ __all__ = [
     "GCPLLM",
     "GCPEvaluatorModule",
     "ConfidenceAugmentedLLM",
-    "LiveEvalConfidenceLLM",
+    "CachedActivationsConfidenceAugmentedLLM",
+    "LiveEvalConfidenceAugmentedLLM",
     "SplitConfidenceAugmentedLLM",
     "Probe",
     "SplitProbe",

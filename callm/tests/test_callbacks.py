@@ -233,7 +233,7 @@ def test_calibration_trainer_writes_layer_weights_history(tmp_path):
     from torch.utils.data import DataLoader
 
     from callm.callbacks import LayerWeightsHistoryCallback
-    from callm.models import ConfidenceAugmentedLLM
+    from callm.models import CachedActivationsConfidenceAugmentedLLM
 
     data = [
         {"activations": torch.randn(2, 4), "correct": torch.tensor(i % 2)}
@@ -247,7 +247,7 @@ def test_calibration_trainer_writes_layer_weights_history(tmp_path):
         enable_progress_bar=False,
     )
     assert any(isinstance(cb, LayerWeightsHistoryCallback) for cb in trainer.callbacks)
-    model = ConfidenceAugmentedLLM(model_dim=4, layer_idx=[7, 9])
+    model = CachedActivationsConfidenceAugmentedLLM(model_dim=4, layer_idx=[7, 9])
 
     trainer.fit(model, DataLoader(data, batch_size=2))
 

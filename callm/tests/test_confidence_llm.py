@@ -1,5 +1,5 @@
 """
-Characterization tests for ``ConfidenceAugmentedLLM`` hooks and helpers that
+Characterization tests for the ``ConfidenceAugmentedLLM`` classes' hooks and helpers that
 are not exercised by ``test_probe.py``.
 """
 
@@ -25,8 +25,9 @@ from callm.models.layer_pooling import (
     SingleLayerSelector,
 )
 from callm.models.confidence_llm import (
+    CachedActivationsConfidenceAugmentedLLM,
     ConfidenceAugmentedLLM,
-    LiveEvalConfidenceLLM,
+    LiveEvalConfidenceAugmentedLLM,
 )
 from callm.models.llm import LLM
 from callm.models.probe import Probe
@@ -48,7 +49,7 @@ def _mock_llm(**config):
 
 class TestInit:
     def test_model_dim_resolution(self):
-        assert ConfidenceAugmentedLLM(model_dim=3).model_dim == 3
+        assert CachedActivationsConfidenceAugmentedLLM(model_dim=3).model_dim == 3
         assert ConfidenceAugmentedLLM(llm=_mock_llm(hidden_size=5)).model_dim == 5
         assert ConfidenceAugmentedLLM(llm=_mock_llm(d_model=6)).model_dim == 6
         # Explicit model_dim wins over the LLM config
@@ -59,18 +60,20 @@ class TestInit:
         with pytest.raises(ValueError, match="Could not determine model dimension"):
             ConfidenceAugmentedLLM(llm=_mock_llm())
         with pytest.raises(ValueError, match="Either llm or model_dim"):
-            ConfidenceAugmentedLLM()
+            ConfidenceAugmentedLLM(llm=None)
 
     def test_default_layer_pooling(self):
-        model = ConfidenceAugmentedLLM(model_dim=DIM)
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM)
         assert model.probe.layer_pooling is None
         assert model.num_layers is None
 
-        model = ConfidenceAugmentedLLM(model_dim=DIM, layer_idx=[1, 2])
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM, layer_idx=[1, 2])
         assert isinstance(model.probe.layer_pooling, LayerWeightedAverage)
         assert model.num_layers == 2
 
-        model = ConfidenceAugmentedLLM(model_dim=DIM, layer_idx="ALL", num_layers=7)
+        model = CachedActivationsConfidenceAugmentedLLM(
+            model_dim=DIM, layer_idx="ALL", num_layers=7
+        )
         assert model.probe.layer_pooling.num_layers == 7
 
         model = ConfidenceAugmentedLLM(
@@ -79,22 +82,24 @@ class TestInit:
         assert model.num_layers == 9
 
         with pytest.raises(ValueError, match="num_layers"):
-            ConfidenceAugmentedLLM(model_dim=DIM, layer_idx="all")
+            CachedActivationsConfidenceAugmentedLLM(model_dim=DIM, layer_idx="all")
 
     def test_explicit_layer_pooling_sets_num_layers(self):
         pooling = LayerWeightedAverage(num_layers=5)
-        model = ConfidenceAugmentedLLM(model_dim=DIM, layer_pooling=pooling)
+        model = CachedActivationsConfidenceAugmentedLLM(
+            model_dim=DIM, layer_pooling=pooling
+        )
         assert model.probe.layer_pooling is pooling
         assert model.num_layers == 5
 
-        model = ConfidenceAugmentedLLM(
+        model = CachedActivationsConfidenceAugmentedLLM(
             model_dim=DIM, layer_pooling=SingleLayerSelector(1), num_layers=3
         )
         assert model.num_layers == 3
 
     def test_explicit_probe(self):
         probe = Probe(DIM)
-        model = ConfidenceAugmentedLLM(model_dim=DIM, probe=probe)
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM, probe=probe)
         assert model.probe is probe
 
 
@@ -120,7 +125,7 @@ class TestSelectLayerActivations:
     )
     def test_selection(self, kwargs, expected_layers):
         hidden_states = _hidden_states()
-        model = ConfidenceAugmentedLLM(model_dim=DIM, **kwargs)
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM, **kwargs)
         selected = model._select_layer_activations(hidden_states)
         if isinstance(expected_layers, int):
             assert selected is hidden_states[expected_layers]
@@ -183,13 +188,23 @@ class TestOnTheFlyPooling:
 
 
 class TestInvalidBatch:
-    def test_batch_without_activations_or_prompt_lengths(self):
+    def test_token_model_rejects_activation_batches(self):
         model = ConfidenceAugmentedLLM(llm=_mock_llm(hidden_size=DIM))
-        with pytest.raises(ValueError, match="activations.*prompt_lengths"):
+        with pytest.raises(
+            ValueError, match="prompt_lengths.*CachedActivationsConfidenceAugmentedLLM"
+        ):
+            model.training_step(
+                {"activations": torch.randn(1, DIM), "correct": torch.tensor([1])}, 0
+            )
+
+    def test_cached_model_rejects_token_batches(self):
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM)
+        with pytest.raises(ValueError, match="'activations'.*ConfidenceAugmentedLLM"):
             model.training_step(
                 {
                     "input_ids": torch.zeros(1, 2, dtype=torch.long),
                     "attention_mask": torch.ones(1, 2),
+                    "prompt_lengths": torch.tensor([1]),
                     "correct": torch.tensor([1]),
                 },
                 0,
@@ -207,7 +222,7 @@ class TestLiveEval:
 
     @staticmethod
     def _checkpoint(tmp_path, **kwargs):
-        trained = ConfidenceAugmentedLLM(model_dim=DIM, **kwargs)
+        trained = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM, **kwargs)
         path = tmp_path / "probe.ckpt"
         torch.save(
             {
@@ -237,7 +252,7 @@ class TestLiveEval:
         sequences = torch.tensor([[0, 2, 7, 8], [3, 4, 9, 6]])
         hidden = _hidden_states(seq=4)
         llm.side_effect = [Mock(sequences=sequences), hidden]
-        model = LiveEvalConfidenceLLM(
+        model = LiveEvalConfidenceAugmentedLLM(
             llm=llm,
             probe_checkpoint=self._checkpoint(tmp_path, layer_idx=1),
             layer_idx=1,
@@ -264,7 +279,7 @@ class TestLiveEval:
         llm = self._llm(is_seq2seq=True)
         prompt, mask = torch.tensor([[1, 2]]), torch.tensor([[1, 1]])
         llm.side_effect = [torch.tensor([[0, 5]]), _hidden_states(batch=1, seq=2)]
-        model = LiveEvalConfidenceLLM(
+        model = LiveEvalConfidenceAugmentedLLM(
             llm=llm, probe_checkpoint=self._checkpoint(tmp_path), layer_idx=0
         )
 
@@ -276,7 +291,7 @@ class TestLiveEval:
         assert torch.allclose(confidence, model.probe.classify(torch.zeros(1, DIM)))
 
     def test_probe_is_loaded_and_frozen(self, tmp_path):
-        model = LiveEvalConfidenceLLM(
+        model = LiveEvalConfidenceAugmentedLLM(
             llm=self._llm(), probe_checkpoint=self._checkpoint(tmp_path), layer_idx=0
         )
         assert not any(p.requires_grad for p in model.probe.parameters())
@@ -292,7 +307,7 @@ class TestLiveEval:
             torch.tensor([[1, 2, 7], [3, 4, 9]]),
             _hidden_states(batch=2, seq=3),
         ]
-        model = LiveEvalConfidenceLLM(
+        model = LiveEvalConfidenceAugmentedLLM(
             llm=llm, probe_checkpoint=self._checkpoint(tmp_path), layer_idx=0
         )
         model._trainer = Mock(log_dir=str(tmp_path))
@@ -359,7 +374,7 @@ class TestTrainingHooks:
         return json.loads(path.read_text()) if path.exists() else None
 
     def test_weight_snapshots_written_on_fit_end(self, tmp_path):
-        model = ConfidenceAugmentedLLM(model_dim=DIM, layer_idx=[3, 5])
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM, layer_idx=[3, 5])
         data = self._run_weight_history(
             model, tmp_path, torch.randn(2, 2, DIM), steps=[0, 1, 50, 100]
         )
@@ -370,16 +385,18 @@ class TestTrainingHooks:
         }
 
     def test_weight_snapshots_layer_indices_for_all(self, tmp_path):
-        model = ConfidenceAugmentedLLM(model_dim=DIM, layer_idx="all", num_layers=3)
+        model = CachedActivationsConfidenceAugmentedLLM(
+            model_dim=DIM, layer_idx="all", num_layers=3
+        )
         data = self._run_weight_history(model, tmp_path, torch.randn(2, 3, DIM))
         assert data["layer_indices"] == [0, 1, 2]
 
     def test_no_snapshots_without_layer_weights(self, tmp_path):
-        model = ConfidenceAugmentedLLM(model_dim=DIM)
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM)
         assert self._run_weight_history(model, tmp_path, torch.randn(2, DIM)) is None
 
     def test_training_step_logs_lr(self, tmp_path):
-        model = ConfidenceAugmentedLLM(model_dim=DIM, lr=0.25)
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM, lr=0.25)
         self._attach(model, tmp_path)
         model._trainer.optimizers = [model.configure_optimizers()]
         model.training_step(
@@ -411,7 +428,9 @@ class TestTrainingHooks:
     )
     def test_znorm_stats_injected(self, tmp_path, pooling_cls, stats, buffers):
         pooling = pooling_cls(num_layers=2, model_dim=DIM)
-        model = ConfidenceAugmentedLLM(model_dim=DIM, layer_pooling=pooling)
+        model = CachedActivationsConfidenceAugmentedLLM(
+            model_dim=DIM, layer_pooling=pooling
+        )
         self._attach(model, tmp_path, datamodule=Mock(layer_stats=stats))
 
         model.on_fit_start()
@@ -422,7 +441,9 @@ class TestTrainingHooks:
 
     def test_znorm_without_stats_or_datamodule(self, tmp_path):
         pooling = GlobalZNormWeightedAverage(num_layers=2, model_dim=DIM)
-        model = ConfidenceAugmentedLLM(model_dim=DIM, layer_pooling=pooling)
+        model = CachedActivationsConfidenceAugmentedLLM(
+            model_dim=DIM, layer_pooling=pooling
+        )
         self._attach(model, tmp_path, datamodule=Mock(layer_stats=None))
         model.on_fit_start()
         self._attach(model, tmp_path, datamodule=None)
@@ -430,7 +451,7 @@ class TestTrainingHooks:
         assert not pooling._stats_set
 
     def test_on_fit_start_ignores_plain_pooling(self, tmp_path):
-        model = ConfidenceAugmentedLLM(model_dim=DIM, layer_idx=[0, 1])
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM, layer_idx=[0, 1])
         self._attach(model, tmp_path, datamodule=Mock(layer_stats={}))
         model.on_fit_start()  # no set_normalization_stats → no-op
 
@@ -438,7 +459,7 @@ class TestTrainingHooks:
 class TestCachedValidationMetrics:
     def test_logs_probe_metrics_and_resets(self, tmp_path):
         torch.manual_seed(0)
-        model = ConfidenceAugmentedLLM(model_dim=DIM)
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM)
         model.log = Mock()
         model.on_validation_epoch_start()
         correct = torch.tensor([1, 0, 1, 1])
@@ -470,7 +491,7 @@ class TestCachedValidationMetrics:
         assert model.val_confidences == [] and model.val_correctness == []
 
     def test_no_outputs_logs_nothing(self):
-        model = ConfidenceAugmentedLLM(model_dim=DIM)
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM)
         model.log = Mock()
         model.on_validation_epoch_end()
         model.log.assert_not_called()
@@ -478,22 +499,23 @@ class TestCachedValidationMetrics:
 
 class TestCheckpoints:
     def test_save_drops_llm_weights(self):
-        model = ConfidenceAugmentedLLM(model_dim=DIM)
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM)
         checkpoint = {"state_dict": {"llm.w": 1, "probe.linear.weight": 2}}
         model.on_save_checkpoint(checkpoint)
         assert checkpoint == {"state_dict": {"probe.linear.weight": 2}}
 
     @pytest.mark.parametrize("wrapped", [True, False])
     def test_load_probe_checkpoint(self, tmp_path, wrapped):
-        trained = ConfidenceAugmentedLLM(model_dim=DIM, layer_idx=[0, 1])
+        trained = CachedActivationsConfidenceAugmentedLLM(
+            model_dim=DIM, layer_idx=[0, 1]
+        )
         state = {f"probe.{k}": v for k, v in trained.probe.state_dict().items()}
         state["llm.ignored"] = torch.zeros(1)
         path = tmp_path / "probe.ckpt"
         torch.save({"state_dict": state} if wrapped else state, path)
 
-        model = ConfidenceAugmentedLLM(
-            model_dim=DIM, layer_idx=[0, 1], probe_checkpoint=str(path)
-        )
+        model = CachedActivationsConfidenceAugmentedLLM(model_dim=DIM, layer_idx=[0, 1])
+        model._load_probe_checkpoint(str(path))
 
         for k, v in trained.probe.state_dict().items():
             assert torch.equal(model.probe.state_dict()[k], v)
@@ -504,13 +526,17 @@ class TestCheckpoints:
         path = tmp_path / "bad.ckpt"
         torch.save({"state_dict": {"llm.w": torch.zeros(1)}}, path)
         with pytest.raises(ValueError, match="No 'probe.\\*' keys"):
-            ConfidenceAugmentedLLM(model_dim=DIM, probe_checkpoint=str(path))
+            CachedActivationsConfidenceAugmentedLLM(
+                model_dim=DIM
+            )._load_probe_checkpoint(str(path))
 
 
 class TestConfigureOptimizers:
     def test_with_scheduler(self):
         scheduler = Mock(return_value="scheduler")
-        model = ConfidenceAugmentedLLM(model_dim=DIM, lr_scheduler=scheduler)
+        model = CachedActivationsConfidenceAugmentedLLM(
+            model_dim=DIM, lr_scheduler=scheduler
+        )
         model._trainer = Mock(estimated_stepping_batches=123)
 
         config = model.configure_optimizers()

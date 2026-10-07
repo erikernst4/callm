@@ -11,7 +11,7 @@ from callm.models.sequence_pooling import (
     TransformerPooling,
 )
 from callm.models.probe import Probe
-from callm.models.confidence_llm import ConfidenceAugmentedLLM
+from callm.models.confidence_llm import CachedActivationsConfidenceAugmentedLLM
 from callm.models.layer_pooling import (
     GlobalZNormWeightedAverage,
     LayerwiseZNormWeightedAverage,
@@ -145,7 +145,7 @@ def test_confidence_augmented_llm_lr_scheduler():
     lr_scheduler_fn = functools.partial(
         WarmupExponentialLR, warmup_steps=10, gamma=0.95
     )
-    model = ConfidenceAugmentedLLM(
+    model = CachedActivationsConfidenceAugmentedLLM(
         model_dim=32,
         seq_pooling=seq_pooling,
         lr=1e-3,
