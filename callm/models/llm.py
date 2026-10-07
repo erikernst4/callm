@@ -4,13 +4,22 @@ import torch
 import torch.nn as nn
 import json
 import os
-import csv
-import numpy as np
 from lightning.pytorch import LightningModule
 from typing import Callable
 from callm.extractors import BaseExtractor
 from callm.utils import initialize_model, get_tokenizer_for_model, check_exact_match
 from callm.models.base import BaseLightningModule
+from callm.models.outputs import (
+    compute_metrics,
+    format_confidence,
+    format_gold_answers,
+    get_gold_answers,
+    letter_match,
+    log_answer_metrics,
+    probe_metrics,
+    write_csv,
+    write_llm_outputs_csv,
+)
 from callm.models.probe import Probe, SplitProbe
 from callm.models.layer_pooling import (
     LayerWeightedAverage,
@@ -18,76 +27,6 @@ from callm.models.layer_pooling import (
     GlobalZNormWeightedAverage,
     LayerwiseZNormWeightedAverage,
 )
-from ecuas import (
-    ExpectedCalibrationError,
-    ConfidenceBrierScore,
-    ConfidenceCrossEntropy,
-    ConfidenceAUCScore,
-    ConfidenceECUAS,
-    CCAS,
-)
-
-
-def _get_gold_answers(batch: dict) -> list:
-    """Gold answers from ``gold_answers`` or ``label``, or ``None`` per question."""
-    if "gold_answers" in batch:
-        return batch["gold_answers"]
-    if "label" in batch:
-        return batch["label"]
-    return [None for _ in range(len(batch["question"]))]
-
-
-def _write_csv(path: str, header: list, rows: list[list], description: str):
-    """Write ``header`` + ``rows`` to ``path``, reporting success or failure."""
-    try:
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
-            writer.writerows(rows)
-        print(f"{description} saved to {path}")
-    except Exception as e:
-        print(f"Failed to save {description}: {e}")
-
-
-def _log_calibration_metrics(
-    module: LightningModule, confidences: np.ndarray, correctness: np.ndarray
-) -> dict[str, float]:
-    """
-    Log accuracy and calibration metrics for ``module`` and save them to
-    ``metrics.csv`` in the trainer's log directory.
-    """
-    # Log accuracy on all samples
-    accuracy = float(correctness.mean()) if len(correctness) > 0 else 0.0
-    module.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
-
-    metrics_results = {"val_accuracy": accuracy}
-
-    confidences_t = torch.tensor(confidences, dtype=torch.float32)
-    correctness_t = torch.tensor(correctness, dtype=torch.float32)
-
-    # NaN confidences are handled internally by the metrics (fallback to 0.5)
-    metrics = {
-        "val_ece": ExpectedCalibrationError(n_bins=10),
-        "val_brier_score": ConfidenceBrierScore(),
-        "val_cross_entropy": ConfidenceCrossEntropy(),
-        "val_auc": ConfidenceAUCScore(),
-        "val_ccas": CCAS(),
-    }
-
-    for name, metric in metrics.items():
-        metric.update(confidences_t, correctness_t)
-        value = float(metric.compute())
-        module.log(name, value, prog_bar=True, sync_dist=True)
-        metrics_results[name] = value
-
-    log_dir = module.trainer.log_dir or os.getcwd()
-    _write_csv(
-        os.path.join(log_dir, "metrics.csv"),
-        list(metrics_results.keys()),
-        [list(metrics_results.values())],
-        "Metrics",
-    )
-    return metrics_results
 
 
 class LLM(BaseLightningModule):
@@ -205,7 +144,7 @@ class LLM(BaseLightningModule):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
         questions = batch["question"]
-        gold_answers = _get_gold_answers(batch)
+        gold_answers = get_gold_answers(batch)
         choices = batch.get("choices", [None for _ in range(len(questions))])
 
         with torch.no_grad():
@@ -268,111 +207,27 @@ class LLM(BaseLightningModule):
         """
         Decode outputs, extract answers/confidence, and save to CSV.
         If the datamodule does not require semantic equivalence checking,
-        compute correctness and calibration metrics directly.
+        compute correctness by exact match and calibration metrics directly.
         """
-        # Decode all output IDs and extract answers/confidence
         for out in outputs:
-            raw_output = self.tokenizer.decode(
+            out["raw_output"] = self.tokenizer.decode(
                 out["output_ids"], skip_special_tokens=True
             )
-            out["raw_output"] = raw_output
-
-            # Extract answer and confidence
-            pred_answer, confidence = self.extractor(
-                raw_output, out.get("logits"), out["output_ids"]
-            )
-            out["pred_answer"] = pred_answer
-            out["confidence"] = confidence
-
-        # Save outputs to CSV for evaluator
-        log_dir = self.log_dir
-        outputs_file = os.path.join(log_dir, "llm_outputs.csv")
-
-        def short_output(
-            txt: str, limit: int | None = self.raw_output_max_length
-        ) -> str:
-            """Escape newlines and optionally truncate long outputs."""
-            if not txt:
-                return ""
-            if limit is not None:
-                txt = txt[:limit] + ("..." if len(txt) > limit else "")
-            return txt.replace("\n", "\\n")
-
-        has_choices = any("choices" in out for out in outputs)
-        headers = ["question", "gold_answers"]
-        if has_choices:
-            headers.append("choices")
-        headers.extend(["pred_answer", "confidence", "raw_output"])
-
-        rows = []
-        for out in outputs:
-            # Format gold_answers as a string representation
-            gold_str = "|".join(out["gold_answers"]) if out["gold_answers"] else ""
-            conf_str = (
-                f"{out['confidence']:.6f}"
-                if out["confidence"] is not None
-                and not (
-                    isinstance(out["confidence"], float)
-                    and out["confidence"] != out["confidence"]
-                )
-                else "nan"
+            out["pred_answer"], out["confidence"] = self.extractor(
+                out["raw_output"], out.get("logits"), out["output_ids"]
             )
 
-            row = [out["question"], gold_str]
-            if has_choices:
-                row.append(out.get("choices", ""))
-            row.extend(
-                [
-                    out["pred_answer"],
-                    conf_str,
-                    short_output(out["raw_output"]),
-                ]
-            )
-            rows.append(row)
-        _write_csv(outputs_file, headers, rows, "LLM outputs")
+        write_llm_outputs_csv(
+            outputs,
+            os.path.join(self.log_dir, "llm_outputs.csv"),
+            self.raw_output_max_length,
+        )
 
-        # If the datamodule does not require semantic equivalence,
-        # compute correctness and metrics directly
         datamodule = self.trainer.datamodule
         if not getattr(datamodule, "requires_semantic_equivalence", False):
-            self._calculate_metrics_direct()
-
-    def _calculate_metrics_direct(self):
-        """
-        Compute correctness by exact string match and calculate
-        calibration metrics. Used when semantic equivalence checking
-        is not required (e.g. MMLU multiple-choice).
-        """
-        # Determine correctness by exact match
-        for out in self.outputs:
-            pred = (out["pred_answer"] or "").strip().upper()
-            gold = out["gold_answers"]
-            if isinstance(gold, list):
-                out["correct"] = any(pred == g.strip().upper() for g in gold)
-            else:
-                out["correct"] = pred == (gold or "").strip().upper()
-
-        all_confidences = []
-        all_correctness = []
-        for out in self.outputs:
-            try:
-                conf = float(out["confidence"])
-            except (ValueError, TypeError):
-                conf = float("nan")
-            all_confidences.append(conf)
-            all_correctness.append(out["correct"])
-
-        all_confidences = np.array(all_confidences)
-        all_correctness = np.array(all_correctness)
-
-        n_invalid = np.isnan(all_confidences).sum()
-        if n_invalid > 0:
-            print(
-                f"Warning: {n_invalid} samples have invalid confidence (NaN). "
-                "Using fallback confidence of 0.5 for these samples."
-            )
-
-        _log_calibration_metrics(self, all_confidences, all_correctness)
+            for out in outputs:
+                out["correct"] = letter_match(out["pred_answer"], out["gold_answers"])
+            log_answer_metrics(self, outputs)
 
 
 class ConfidenceAugmentedLLM(LightningModule):
@@ -904,7 +759,7 @@ class ConfidenceAugmentedLLM(LightningModule):
             input_ids = batch["input_ids"]
             attention_mask = batch["attention_mask"]
             questions = batch["question"]
-            gold_answers = _get_gold_answers(batch)
+            gold_answers = get_gold_answers(batch)
 
             with torch.no_grad():
                 generated_ids, confidence = self.forward(
@@ -957,20 +812,13 @@ class ConfidenceAugmentedLLM(LightningModule):
         if not self.val_confidences or not self.val_correctness:
             return
 
-        confidences = torch.cat(self.val_confidences, dim=0).float()
-        correctness = torch.cat(self.val_correctness, dim=0).float()
-
-        metrics = {
-            "val_ece": ExpectedCalibrationError(n_bins=10),
-            "val_cross_entropy": ConfidenceCrossEntropy(),
-            "val_auc": ConfidenceAUCScore(),
-            "val_ecuas_0": ConfidenceECUAS(n=0),
-            "val_ecuas_1": ConfidenceECUAS(n=1),
-            "val_ecuas_128": ConfidenceECUAS(n=128),
-        }
-        for name, metric in metrics.items():
-            metric.update(confidences, correctness)
-            self.log(name, metric.compute(), prog_bar=True, sync_dist=True)
+        results = compute_metrics(
+            torch.cat(self.val_confidences, dim=0).float(),
+            torch.cat(self.val_correctness, dim=0).float(),
+            probe_metrics(),
+        )
+        for name, value in results.items():
+            self.log(name, value, prog_bar=True, sync_dist=True)
 
         self.val_confidences.clear()
         self.val_correctness.clear()
@@ -981,44 +829,16 @@ class ConfidenceAugmentedLLM(LightningModule):
         evaluation outputs.  Saves ``llm_outputs.csv`` and ``metrics.csv``
         to the trainer's log directory.
         """
-        # Determine correctness by exact match
         for out in self._eval_outputs:
-            pred = out["pred_answer"] or ""
             gold = out["gold_answers"]
-            if isinstance(gold, list):
-                out["correct"] = check_exact_match(pred, gold)
-            else:
-                out["correct"] = check_exact_match(pred, [gold] if gold else [])
+            if not isinstance(gold, list):
+                gold = [gold] if gold else []
+            out["correct"] = check_exact_match(out["pred_answer"] or "", gold)
 
-        all_confidences = np.array(
-            [float(out["confidence"]) for out in self._eval_outputs]
-        )
-        all_correctness = np.array([out["correct"] for out in self._eval_outputs])
-        metrics_results = _log_calibration_metrics(
-            self, all_confidences, all_correctness
-        )
+        metrics_results = log_answer_metrics(self, self._eval_outputs)
 
-        # Save llm_outputs.csv
-        log_dir = self.trainer.log_dir or os.getcwd()
-        rows = []
-        for out in self._eval_outputs:
-            gold_str = (
-                "|".join(out["gold_answers"])
-                if isinstance(out["gold_answers"], list)
-                else str(out["gold_answers"] or "")
-            )
-            rows.append(
-                [
-                    out["question"],
-                    gold_str,
-                    out["pred_answer"],
-                    f"{out['confidence']:.6f}",
-                    "Yes" if out["correct"] else "No",
-                    out["raw_output"],
-                ]
-            )
-        _write_csv(
-            os.path.join(log_dir, "llm_outputs.csv"),
+        write_csv(
+            os.path.join(self.trainer.log_dir or os.getcwd(), "llm_outputs.csv"),
             [
                 "question",
                 "gold_answers",
@@ -1027,7 +847,17 @@ class ConfidenceAugmentedLLM(LightningModule):
                 "correct",
                 "raw_output",
             ],
-            rows,
+            [
+                [
+                    out["question"],
+                    format_gold_answers(out["gold_answers"]),
+                    out["pred_answer"],
+                    format_confidence(out["confidence"]),
+                    "Yes" if out["correct"] else "No",
+                    out["raw_output"],
+                ]
+                for out in self._eval_outputs
+            ],
             "LLM outputs",
         )
 

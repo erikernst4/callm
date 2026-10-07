@@ -6,19 +6,15 @@ semantically equivalent to ground truth answers.
 """
 
 import torch
-import numpy as np
 import os
-import csv
 
 from callm.utils import initialize_model, get_tokenizer_for_model
-from ecuas import (
-    ExpectedCalibrationError,
-    ConfidenceBrierScore,
-    ConfidenceCrossEntropy,
-    ConfidenceAUCScore,
-    CCAS,
-)
 from callm.models.base import BaseLightningModule
+from callm.models.outputs import (
+    log_answer_metrics,
+    read_evaluation_results,
+    write_evaluation_results_csv,
+)
 
 
 class EvaluatorModule(BaseLightningModule):
@@ -175,51 +171,12 @@ class EvaluatorModule(BaseLightningModule):
 
         self.calculate_metrics()
 
-        # Save final results
-        log_dir = self.log_dir
-        results_file = os.path.join(log_dir, "evaluation_results.csv")
-
-        def short_output(txt: str, limit: int = 200) -> str:
-            if not txt:
-                return ""
-            truncated = txt[:limit] + ("..." if len(txt) > limit else "")
-            return truncated.replace("\n", "\\n")
-
-        try:
-            with open(results_file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(
-                    [
-                        "Question",
-                        "Gold Answers",
-                        "Predicted Answer",
-                        "Confidence",
-                        "Correct",
-                        "Evaluator Response",
-                        "Raw Output",
-                    ]
-                )
-                for result in outputs:
-                    conf_str = (
-                        f"{float(result['confidence']):.6f}"
-                        if result["confidence"] not in ["nan", ""]
-                        else "nan"
-                    )
-                    evaluator_resp = result.get("evaluator_response", "")
-                    writer.writerow(
-                        [
-                            short_output(result["question"]),
-                            result["gold_answers"],
-                            short_output(result["pred_answer"]),
-                            conf_str,
-                            "Yes" if result["correct"] else "No",
-                            short_output(evaluator_resp),
-                            short_output(result["raw_output"]),
-                        ]
-                    )
-            print(f"\nEvaluation results saved to {results_file}")
-        except Exception as e:
-            print(f"Failed to save evaluation results: {e}")
+        write_evaluation_results_csv(
+            outputs,
+            os.path.join(self.log_dir, "evaluation_results.csv"),
+            text_limit=200,
+            description="Evaluation results",
+        )
 
     def load_evaluation_results_from_csv(self, csv_path: str):
         """
@@ -228,71 +185,7 @@ class EvaluatorModule(BaseLightningModule):
         The CSV is expected to have columns: 'Confidence' and 'Correct'.
         'Correct' should be 'Yes' or 'No'.
         """
-        if not os.path.exists(csv_path):
-            raise FileNotFoundError(f"CSV file not found: {csv_path}")
-
-        self.outputs = []
-        with open(csv_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    confidence = float(row["Confidence"])
-                except (ValueError, KeyError):
-                    confidence = float("nan")
-
-                is_correct = row.get("Correct", "").strip().lower() == "yes"
-
-                self.outputs.append(
-                    {
-                        "confidence": confidence,
-                        "correct": is_correct,
-                        # Other fields are not strictly necessary for calculate_metrics
-                        # but we can keep them for completeness if needed.
-                        "question": row.get("Question", ""),
-                        "gold_answers": row.get("Gold Answers", ""),
-                        "pred_answer": row.get("Predicted Answer", ""),
-                    }
-                )
-        print(f"Loaded {len(self.outputs)} results from {csv_path}")
+        self.outputs = read_evaluation_results(csv_path)
 
     def calculate_metrics(self):
-        all_confidences = []
-        all_correctness = []
-        for result in self.outputs:
-            try:
-                conf = float(result["confidence"])
-            except (ValueError, TypeError):
-                conf = float("nan")
-            all_confidences.append(conf)
-            all_correctness.append(result["correct"])
-
-        all_confidences = np.array(all_confidences)
-        all_correctness = np.array(all_correctness)
-
-        n_invalid = np.isnan(all_confidences).sum()
-        if n_invalid > 0:
-            print(
-                f"\nWarning: {n_invalid} samples have invalid confidence (NaN). "
-                "Using fallback confidence of 0.5 for these samples."
-            )
-
-        confidences = torch.tensor(all_confidences, dtype=torch.float32)
-        correctness = torch.tensor(all_correctness, dtype=torch.float32)
-
-        accuracy = float(correctness.mean()) if len(correctness) > 0 else 0.0
-
-        # Calculate metrics using torchmetrics classes
-        # NaN confidences are handled internally by the metrics (fallback to 0.5)
-        metrics = {
-            "val_ece": ExpectedCalibrationError(n_bins=10),
-            "val_brier_score": ConfidenceBrierScore(),
-            "val_cross_entropy": ConfidenceCrossEntropy(),
-            "val_auc": ConfidenceAUCScore(),
-            "val_ccas": CCAS(),
-        }
-
-        for name, metric in metrics.items():
-            metric.update(confidences, correctness)
-            self.log(name, metric.compute(), prog_bar=True, sync_dist=True)
-
-        self.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
+        log_answer_metrics(self, self.outputs, save_csv=False)

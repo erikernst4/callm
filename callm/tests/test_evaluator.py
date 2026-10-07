@@ -204,36 +204,25 @@ class TestEvaluatorModule:
             # Check metrics logged
             assert evaluator.log.called
 
-            # Check correctness via CSV output
-            # We expect header + 2 rows
-            assert mock_csv_instance.writerow.call_count == 3
+            # Check correctness via CSV output: header + 2 rows
+            assert mock_csv_instance.writerow.call_count == 1
+            rows = mock_csv_instance.writerows.call_args[0][0]
+            assert len(rows) == 2
 
-            # Check content of rows
-            # Row 1 (Header)
-            # Row 2 (Item 0) -> Correct=Yes, Evaluator Response="" (since exact match)
-            args0 = mock_csv_instance.writerow.call_args_list[1][0][0]
-            assert args0[4] == "Yes"  # 5th column is Correct
-            # 6th col is Evaluator Response (exact match has no output_ids, so empty string in my implementation?
-            # Wait, exact match doesn't go through decoding block in my code.
-            # Let's check my code:
-            # if result.get("exact_match"): result["correct"] = True
-            # else: ... decode ... result["evaluator_response"] = response
-            # So exact match might miss "evaluator_response" key entirely if not set elsewhere?
-            # get("evaluator_response", "") handles it.
-            assert args0[5] == ""
+            # Item 0 is an exact match: Correct=Yes, no evaluator response
+            assert rows[0][4] == "Yes"  # 5th column is Correct
+            assert rows[0][5] == ""
 
-            # Row 3 (Item 1) -> Correct=No (since we mocked decode="No")
-            # Evaluator Response="No"
-            args1 = mock_csv_instance.writerow.call_args_list[2][0][0]
-            assert args1[4] == "No"
-            assert args1[5] == "No"
+            # Item 1 -> Correct=No (since we mocked decode="No")
+            assert rows[1][4] == "No"
+            assert rows[1][5] == "No"
 
             # We expect calls for accuracy, ece, brier, etc.
             logged_metrics = [call.args[0] for call in evaluator.log.call_args_list]
             assert "val_accuracy" in logged_metrics
 
             assert "val_ece" in logged_metrics
-            assert "val_ccas" in logged_metrics
+            assert "val_ecuas_0" in logged_metrics
 
             # Check file saved
             mock_file.assert_called()

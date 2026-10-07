@@ -7,9 +7,9 @@ substring matching (for correct answers) or GCP LLM inference (for incorrect one
 """
 
 import os
-import csv
 
 from callm.models.base import BaseLightningModule
+from callm.models.outputs import format_confidence, format_text, write_csv
 
 from google import genai
 from google.genai import types
@@ -236,58 +236,32 @@ class ExactAnswerExtractorModule(BaseLightningModule):
             f"\nExtraction stats: {valid_count}/{total} valid, {no_answer_count} NO ANSWER"
         )
 
-        log_dir = self.log_dir
-        results_file = os.path.join(log_dir, "evaluation_results_exact.csv")
-
-        def short_output(txt: str, limit: int = 200) -> str:
-            if not txt:
-                return ""
-            truncated = txt[:limit] + ("..." if len(txt) > limit else "")
-            return truncated.replace("\n", "\\n")
-
-        try:
-            with open(results_file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(
-                    [
-                        "Question",
-                        "Gold Answers",
-                        "Predicted Answer",
-                        "Confidence",
-                        "Correct",
-                        "Gemini Output",
-                        "Exact Answer",
-                        "Valid Exact Answer",
-                        "Raw Output",
-                    ]
-                )
-                for result in outputs:
-                    conf_str = (
-                        f"{float(result['confidence']):.6f}"
-                        if result["confidence"] not in ["nan", "", None]
-                        else "nan"
-                    )
-
-                    gold_str = result["gold_answers"]
-                    if isinstance(gold_str, list):
-                        gold_str = str(gold_str)
-
-                    writer.writerow(
-                        [
-                            (result["question"] or "").replace("\n", "\\n"),
-                            gold_str,
-                            (result["pred_answer"] or "").replace("\n", "\\n"),
-                            conf_str,
-                            "Yes" if result["correct"] else "No",
-                            (result.get("gemini_output", "") or "").replace(
-                                "\n", "\\n"
-                            ),
-                            result.get("exact_answer", ""),
-                            "Yes" if result.get("valid_exact_answer") else "No",
-                            (result["raw_output"] or "").replace("\n", "\\n"),
-                        ]
-                    )
-
-            print(f"\nExact answer results saved to {results_file}")
-        except Exception as e:
-            print(f"Failed to save exact answer results: {e}")
+        write_csv(
+            os.path.join(self.log_dir, "evaluation_results_exact.csv"),
+            [
+                "Question",
+                "Gold Answers",
+                "Predicted Answer",
+                "Confidence",
+                "Correct",
+                "Gemini Output",
+                "Exact Answer",
+                "Valid Exact Answer",
+                "Raw Output",
+            ],
+            [
+                [
+                    format_text(result["question"]),
+                    result["gold_answers"],
+                    format_text(result["pred_answer"]),
+                    format_confidence(result["confidence"]),
+                    "Yes" if result["correct"] else "No",
+                    format_text(result.get("gemini_output")),
+                    result.get("exact_answer", ""),
+                    "Yes" if result.get("valid_exact_answer") else "No",
+                    format_text(result["raw_output"]),
+                ]
+                for result in outputs
+            ],
+            "Exact answer results",
+        )

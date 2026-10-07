@@ -29,7 +29,7 @@ ANSWER_METRICS = {
     "val_brier_score": ConfidenceBrierScore,
     "val_cross_entropy": ConfidenceCrossEntropy,
     "val_auc": ConfidenceAUCScore,
-    "val_ccas": lambda: ConfidenceECUAS(n=0),
+    "val_ecuas_0": lambda: ConfidenceECUAS(n=0),
 }
 
 

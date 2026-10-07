@@ -1,15 +1,10 @@
-import torch
-import numpy as np
 import os
-import csv
-from ecuas import (
-    ExpectedCalibrationError,
-    ConfidenceBrierScore,
-    ConfidenceCrossEntropy,
-    ConfidenceAUCScore,
-    CCAS,
-)
 from callm.models.base import BaseLightningModule
+from callm.models.outputs import (
+    log_answer_metrics,
+    read_evaluation_results,
+    write_evaluation_results_csv,
+)
 
 from google import genai
 from google.genai import types
@@ -157,113 +152,21 @@ class GCPEvaluatorModule(BaseLightningModule):
 
         self.calculate_metrics()
 
-        log_dir = self.log_dir
-        results_file = os.path.join(log_dir, "evaluation_results.csv")
-
-        def format_field(txt: str) -> str:
-            if not txt:
-                return ""
-            return str(txt).replace("\n", "\\n")
-
-        try:
-            with open(results_file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(
-                    [
-                        "Question",
-                        "Gold Answers",
-                        "Predicted Answer",
-                        "Confidence",
-                        "Correct",
-                        "Evaluator Response",
-                        "Raw Output",
-                    ]
-                )
-                for result in outputs:
-                    conf_str = (
-                        f"{float(result['confidence']):.6f}"
-                        if result["confidence"] not in ["nan", "", None]
-                        else "nan"
-                    )
-                    evaluator_resp = result.get("evaluator_response", "")
-                    writer.writerow(
-                        [
-                            format_field(result["question"]),
-                            result["gold_answers"],
-                            format_field(result["pred_answer"]),
-                            conf_str,
-                            "Yes" if result["correct"] else "No",
-                            format_field(evaluator_resp),
-                            format_field(result["raw_output"]),
-                        ]
-                    )
-            print(f"\nGCP Evaluation results saved to {results_file}")
-        except Exception as e:
-            print(f"Failed to save GCP evaluation results: {e}")
+        write_evaluation_results_csv(
+            outputs,
+            os.path.join(self.log_dir, "evaluation_results.csv"),
+            text_limit=None,
+            description="GCP Evaluation results",
+        )
 
     def load_evaluation_results_from_csv(self, csv_path: str):
-        if not os.path.exists(csv_path):
-            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+        """
+        Load evaluation results from a CSV file.
 
-        self.outputs = []
-        with open(csv_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    confidence = float(row["Confidence"])
-                except (ValueError, KeyError):
-                    confidence = float("nan")
-
-                is_correct = row.get("Correct", "").strip().lower() == "yes"
-
-                self.outputs.append(
-                    {
-                        "confidence": confidence,
-                        "correct": is_correct,
-                        "question": row.get("Question", ""),
-                        "gold_answers": row.get("Gold Answers", ""),
-                        "pred_answer": row.get("Predicted Answer", ""),
-                    }
-                )
-        print(f"Loaded {len(self.outputs)} results from {csv_path}")
+        The CSV is expected to have columns: 'Confidence' and 'Correct'.
+        'Correct' should be 'Yes' or 'No'.
+        """
+        self.outputs = read_evaluation_results(csv_path)
 
     def calculate_metrics(self):
-        all_confidences = []
-        all_correctness = []
-        for result in self.outputs:
-            try:
-                conf = float(result["confidence"])
-            except (ValueError, TypeError):
-                conf = float("nan")
-            all_confidences.append(conf)
-            all_correctness.append(result["correct"])
-
-        all_confidences = np.array(all_confidences)
-        all_correctness = np.array(all_correctness)
-
-        n_invalid = np.isnan(all_confidences).sum()
-        if n_invalid > 0:
-            print(
-                f"\nWarning: {n_invalid} samples have invalid confidence (NaN). "
-                "Using fallback confidence of 0.5 for these samples."
-            )
-
-        confidences = torch.tensor(all_confidences, dtype=torch.float32)
-        correctness = torch.tensor(all_correctness, dtype=torch.float32)
-
-        accuracy = float(correctness.mean()) if len(correctness) > 0 else 0.0
-
-        # NaN confidences are handled internally by the metrics (fallback to 0.5)
-        metrics = {
-            "val_ece": ExpectedCalibrationError(n_bins=10),
-            "val_brier_score": ConfidenceBrierScore(),
-            "val_cross_entropy": ConfidenceCrossEntropy(),
-            "val_auc": ConfidenceAUCScore(),
-            "val_ccas": CCAS(),
-        }
-
-        for name, metric in metrics.items():
-            metric.update(confidences, correctness)
-            self.log(name, metric.compute(), prog_bar=True, sync_dist=True)
-
-        self.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
+        log_answer_metrics(self, self.outputs, save_csv=False)

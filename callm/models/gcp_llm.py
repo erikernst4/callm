@@ -1,16 +1,8 @@
 import os
-import csv
 import torch
-import numpy as np
 from callm.extractors import BaseExtractor
 from callm.models.base import BaseLightningModule
-from ecuas import (
-    ExpectedCalibrationError,
-    ConfidenceBrierScore,
-    ConfidenceCrossEntropy,
-    ConfidenceAUCScore,
-    CCAS,
-)
+from callm.models.outputs import letter_match, log_answer_metrics, write_llm_outputs_csv
 
 from google import genai
 from google.genai import types
@@ -185,152 +177,25 @@ class GCPLLM(BaseLightningModule):
 
     def process_outputs(self, outputs: list[dict]):
         """
-        Decode outputs, extract answers/confidence, and save to CSV.
+        Extract answers/confidence, and save to CSV.
         If the datamodule does not require semantic equivalence checking,
-        compute correctness and calibration metrics directly.
+        compute correctness by exact match and calibration metrics directly.
         """
-        # Extract answer and confidence using the same BaseExtractor logic
         for out in outputs:
-            raw_output = out.get("raw_output", "")
-
             # BaseExtractor can take logits when return_logits is True
             # if the specific extractor knows how to use them
-            pred_answer, confidence = self.extractor(
-                raw_output, out.get("logits"), out.get("output_ids")
+            out["pred_answer"], out["confidence"] = self.extractor(
+                out.get("raw_output", ""), out.get("logits"), out.get("output_ids")
             )
-            out["pred_answer"] = pred_answer
-            out["confidence"] = confidence
 
-        log_dir = self.log_dir
-        outputs_file = os.path.join(log_dir, "llm_outputs.csv")
+        write_llm_outputs_csv(
+            outputs,
+            os.path.join(self.log_dir, "llm_outputs.csv"),
+            raw_output_max_length=200,
+        )
 
-        def short_output(txt: str, limit: int = 200) -> str:
-            if not txt:
-                return ""
-            truncated_text = txt[:limit] + ("..." if len(txt) > limit else "")
-            return truncated_text.replace("\n", "\\n")
-
-        try:
-            with open(outputs_file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                has_choices = any("choices" in out for out in outputs)
-                headers = [
-                    "question",
-                    "gold_answers",
-                ]
-                if has_choices:
-                    headers.append("choices")
-                headers.extend(
-                    [
-                        "pred_answer",
-                        "confidence",
-                        "raw_output",
-                    ]
-                )
-                writer.writerow(headers)
-
-                for out in outputs:
-                    gold_str = (
-                        "|".join(out["gold_answers"]) if out["gold_answers"] else ""
-                    )
-                    conf_str = (
-                        f"{out['confidence']:.6f}"
-                        if out["confidence"] is not None
-                        and not (
-                            isinstance(out["confidence"], float)
-                            and out["confidence"] != out["confidence"]
-                        )
-                        else "nan"
-                    )
-
-                    row = [out["question"], gold_str]
-                    if has_choices:
-                        row.append(out.get("choices", ""))
-                    row.extend(
-                        [
-                            out["pred_answer"],
-                            conf_str,
-                            short_output(out["raw_output"]),
-                        ]
-                    )
-                    writer.writerow(row)
-            print(f"\nGCP LLM outputs saved to {outputs_file}")
-        except Exception as e:
-            print(f"Failed to save GCP LLM outputs: {e}")
-
-        # If the datamodule does not require semantic equivalence,
-        # compute correctness and metrics directly
         datamodule = self.trainer.datamodule
         if not getattr(datamodule, "requires_semantic_equivalence", False):
-            self._calculate_metrics_direct()
-
-    def _calculate_metrics_direct(self):
-        """
-        Compute correctness by exact string match and calculate
-        calibration metrics. Used when semantic equivalence checking
-        is not required (e.g. MMLU multiple-choice).
-        """
-        # Determine correctness by exact match
-        for out in self.outputs:
-            pred = (out["pred_answer"] or "").strip().upper()
-            gold = out["gold_answers"]
-            if isinstance(gold, list):
-                out["correct"] = any(pred == g.strip().upper() for g in gold)
-            else:
-                out["correct"] = pred == (gold or "").strip().upper()
-
-        all_confidences = []
-        all_correctness = []
-        for out in self.outputs:
-            try:
-                conf = float(out["confidence"])
-            except (ValueError, TypeError):
-                conf = float("nan")
-            all_confidences.append(conf)
-            all_correctness.append(out["correct"])
-
-        all_confidences = np.array(all_confidences)
-        all_correctness = np.array(all_correctness)
-
-        # Log accuracy on all samples
-        accuracy = float(all_correctness.mean()) if len(all_correctness) > 0 else 0.0
-        self.log("val_accuracy", accuracy, prog_bar=True, sync_dist=True)
-
-        metrics_results = {"val_accuracy": accuracy}
-
-        n_invalid = np.isnan(all_confidences).sum()
-        if n_invalid > 0:
-            print(
-                f"Warning: {n_invalid} samples have invalid confidence (NaN). "
-                "Using fallback confidence of 0.5 for these samples."
-            )
-
-        confidences = torch.tensor(all_confidences, dtype=torch.float32)
-        correctness = torch.tensor(all_correctness, dtype=torch.float32)
-
-        # NaN confidences are handled internally by the metrics (fallback to 0.5)
-        metrics = {
-            "val_ece": ExpectedCalibrationError(n_bins=10),
-            "val_brier_score": ConfidenceBrierScore(),
-            "val_cross_entropy": ConfidenceCrossEntropy(),
-            "val_auc": ConfidenceAUCScore(),
-            "val_ccas": CCAS(),
-        }
-
-        for name, metric in metrics.items():
-            metric.update(confidences, correctness)
-            value = float(metric.compute())
-            self.log(name, value, prog_bar=True, sync_dist=True)
-            metrics_results[name] = value
-
-        # Save metrics to CSV in the log directory
-        log_dir = self.trainer.log_dir or os.getcwd()
-        metrics_file = os.path.join(log_dir, "metrics.csv")
-        try:
-            with open(metrics_file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(list(metrics_results.keys()))
-                writer.writerow(list(metrics_results.values()))
-            print(f"Metrics saved to {metrics_file}")
-        except Exception as e:
-            print(f"Failed to save metrics: {e}")
+            for out in outputs:
+                out["correct"] = letter_match(out["pred_answer"], out["gold_answers"])
+            log_answer_metrics(self, outputs)

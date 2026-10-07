@@ -20,7 +20,7 @@ from ecuas import (
     ConfidenceBrierScore,
     ConfidenceCrossEntropy,
     ConfidenceAUCScore,
-    CCAS,
+    ConfidenceECUAS,
 )
 
 
@@ -84,7 +84,7 @@ def compute_metrics(rows):
         "brier_score": ConfidenceBrierScore(),
         "cross_entropy": ConfidenceCrossEntropy(),
         "auc": ConfidenceAUCScore(),
-        "ccas": CCAS(),
+        "ecuas_0": ConfidenceECUAS(n=0),
     }
 
     for name, metric in metric_classes.items():
@@ -142,7 +142,7 @@ def main():
             print(f"  Brier:    {results['brier_score']:.4f}")
             print(f"  CE:       {results['cross_entropy']:.4f}")
             print(f"  AUC:      {results['auc']:.4f}")
-            print(f"  ECUAS:    {results['ccas']:.4f}")
+            print(f"  ECUAS:    {results['ecuas_0']:.4f}")
 
         # Save metrics.csv in the experiment directory
         exp_dir = os.path.dirname(csv_path)
@@ -155,7 +155,7 @@ def main():
                     "val_brier_score": results["brier_score"],
                     "val_cross_entropy": results["cross_entropy"],
                     "val_auc": results["auc"],
-                    "val_ccas": results["ccas"],
+                    "val_ecuas_0": results["ecuas_0"],
                 }
             )
         try:
@@ -181,9 +181,9 @@ def main():
         brier_str = f"{r['brier_score']:.4f}" if "brier_score" in r else "N/A"
         ce_str = f"{r['cross_entropy']:.4f}" if "cross_entropy" in r else "N/A"
         auc_str = f"{r['auc']:.4f}" if "auc" in r else "N/A"
-        ccas_str = f"{r['ccas']:.4f}" if "ccas" in r else "N/A"
+        ecuas_str = f"{r['ecuas_0']:.4f}" if "ecuas_0" in r else "N/A"
         print(
-            f"{r['experiment']:<50} {acc_str:>7} {ece_str:>7} {brier_str:>7} {ce_str:>7} {auc_str:>7} {ccas_str:>7}"
+            f"{r['experiment']:<50} {acc_str:>7} {ece_str:>7} {brier_str:>7} {ce_str:>7} {auc_str:>7} {ecuas_str:>7}"
         )
     print("=" * 90)
 

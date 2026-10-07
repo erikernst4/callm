@@ -792,7 +792,7 @@ class TestConfidenceAugmentedLLMLiveEvaluation:
 
         logged = {c.args[0]: c.args[1] for c in model.log.call_args_list}
         assert logged["val_accuracy"] == 0.5
-        assert {"val_ece", "val_brier_score", "val_auc", "val_ccas"} <= logged.keys()
+        assert {"val_ece", "val_brier_score", "val_auc", "val_ecuas_0"} <= logged.keys()
 
         with open(tmp_path / "llm_outputs.csv") as f:
             rows = list(csv.reader(f))
