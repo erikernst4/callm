@@ -60,6 +60,13 @@ class LLM(BaseLightningModule):
         elif self.model.config.pad_token_id is None:
             self.model.config.pad_token_id = self.model.config.eos_token_id
 
+        # Causal models get an explicit pad_token_id for generate()
+        self.pad_token_id = None
+        if not self.is_seq2seq:
+            self.pad_token_id = getattr(self.model.config, "pad_token_id", None)
+            if self.pad_token_id is None:
+                self.pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
+
         if not train:
             self.model.eval()
             for param in self.model.parameters():
@@ -81,13 +88,7 @@ class LLM(BaseLightningModule):
         Forward pass of LLM to generate text and/or return hidden states.
         """
         if not generate:
-            outputs = self.model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            return outputs.hidden_states
+            return self._hidden_states(input_ids, attention_mask)
 
         generation_kwargs = {
             "input_ids": input_ids,
@@ -97,32 +98,43 @@ class LLM(BaseLightningModule):
             "output_scores": self.return_logits,
             "return_dict_in_generate": self.return_logits,
         }
-
-        # For causal models, ensure pad_token_id is set to avoid issues
-        if not self.is_seq2seq:
-            if (
-                hasattr(self.model.config, "pad_token_id")
-                and self.model.config.pad_token_id is not None
-            ):
-                generation_kwargs["pad_token_id"] = self.model.config.pad_token_id
-            elif (
-                hasattr(self.tokenizer, "pad_token_id")
-                and self.tokenizer.pad_token_id is not None
-            ):
-                generation_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
+        if self.pad_token_id is not None:
+            generation_kwargs["pad_token_id"] = self.pad_token_id
 
         generated_ids = self.model.generate(**generation_kwargs)
 
         if return_hidden_states:
-            outputs = self.model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            return generated_ids, outputs.hidden_states
-
+            return generated_ids, self._hidden_states(input_ids, attention_mask)
         return generated_ids
+
+    def _hidden_states(self, input_ids, attention_mask):
+        """Hidden states of all layers for a non-generative forward pass."""
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        return outputs.hidden_states
+
+    @staticmethod
+    def _generated_token_log_probs(
+        scores: tuple[torch.Tensor, ...], generated_tokens: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        (batch, steps) log-probability of the generated token at each decoding
+        step, given per-step ``scores`` of shape (batch, vocab). Only these are
+        kept instead of the full logits to save memory and disk I/O.
+        """
+        return torch.cat(
+            [
+                torch.log_softmax(step_scores, dim=-1).gather(
+                    -1, generated_tokens[:, step, None]
+                )
+                for step, step_scores in enumerate(scores)
+            ],
+            dim=1,
+        )
 
     def strip_prompt(
         self, output_ids: torch.Tensor, input_ids: torch.Tensor
@@ -138,7 +150,7 @@ class LLM(BaseLightningModule):
     def validation_step(self, batch, batch_idx):
         """
         Validation step: generate output IDs only.
-        Decoding and extraction are deferred to on_validation_epoch_end.
+        Decoding and extraction are deferred to process_outputs.
         """
         # Batch has pre-stacked tensors and questions from collate_fn
         input_ids = batch["input_ids"]
@@ -157,47 +169,26 @@ class LLM(BaseLightningModule):
             output_sequences = generation_output
             output_scores = None
 
-        for i, (question, gold_answer_list, choice, generated_tokens) in enumerate(
-            zip(
-                questions,
-                gold_answers,
-                choices,
-                self.strip_prompt(output_sequences, input_ids),
+        generated = self.strip_prompt(output_sequences, input_ids)
+        log_probs = None
+        if self.return_logits and output_scores:
+            log_probs = self._generated_token_log_probs(
+                output_scores, torch.stack(generated)
             )
+
+        for i, (question, gold_answer_list, choice) in enumerate(
+            zip(questions, gold_answers, choices)
         ):
             out = {
-                "output_ids": generated_tokens,
+                "output_ids": generated[i],
                 "question": question,
                 "gold_answers": gold_answer_list,
             }
             if choice is not None:
                 out["choices"] = choice
-            if self.return_logits and output_scores is not None:
-                # OPTIMIZATION: Store only the log probability of the generated token
-                # instead of the full logits tensor (size [seq_len, vocab_size]).
-                # This drastically reduces memory usage and disk I/O.
-
-                # generated_tokens has shape [seq_len] (single sequence)
-                # We need to verify alignment.
-                # output_scores has length = number of generated tokens.
-
-                scores_list = []
-
-                for step_idx, step_score_tensor in enumerate(output_scores):
-                    # step_score_tensor: [batch_size, vocab_size]
-                    # Get score for this sample (index i)
-                    token_logits = step_score_tensor[i]  # [vocab_size]
-
-                    log_probs = torch.log_softmax(token_logits, dim=-1)
-
-                    # Store only the log prob of the chosen token
-                    # equivalent to max log prob since we use greedy decoding
-                    token_id = generated_tokens[step_idx]
-                    scores_list.append(log_probs[token_id])
-
-                if scores_list:
-                    out["logits"] = torch.stack(scores_list)  # [generated_seq_len]
-
+            if log_probs is not None:
+                # clone so flushing does not serialize the whole batch storage
+                out["logits"] = log_probs[i].clone()  # [generated_seq_len]
             self.outputs.append(out)
 
         self._maybe_flush()
