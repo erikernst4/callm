@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from unittest.mock import Mock, patch, mock_open
 from callm.models.probe import Probe
-from callm.models.llm import ConfidenceAugmentedLLM
+from callm.models.confidence_llm import ConfidenceAugmentedLLM
 from callm.models.layer_pooling import LayerWeightedAverage, SingleLayerSelector
 
 

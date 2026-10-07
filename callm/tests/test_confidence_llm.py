@@ -21,7 +21,7 @@ from callm.models.layer_pooling import (
     LayerwiseZNormWeightedAverage,
     SingleLayerSelector,
 )
-from callm.models.llm import ConfidenceAugmentedLLM
+from callm.models.confidence_llm import ConfidenceAugmentedLLM
 from callm.models.probe import Probe
 
 DIM = 4

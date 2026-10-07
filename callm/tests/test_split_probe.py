@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from callm.data.activations_data import ActivationsDataModule, LazyActivationsDataset
-from callm.models.llm import SplitConfidenceAugmentedLLM
+from callm.models.confidence_llm import SplitConfidenceAugmentedLLM
 from callm.models.probe import SplitProbe
 from callm.models.sequence_pooling import AttentivePooling
 

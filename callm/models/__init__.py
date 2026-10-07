@@ -1,4 +1,5 @@
-from .llm import LLM, ConfidenceAugmentedLLM, SplitConfidenceAugmentedLLM
+from .llm import LLM
+from .confidence_llm import ConfidenceAugmentedLLM, SplitConfidenceAugmentedLLM
 from .evaluator import EvaluatorModule
 from .gcp_llm import GCPLLM
 from .gcp_evaluator import GCPEvaluatorModule

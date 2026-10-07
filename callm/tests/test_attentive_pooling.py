@@ -11,7 +11,7 @@ from callm.models.sequence_pooling import (
     TransformerPooling,
 )
 from callm.models.probe import Probe
-from callm.models.llm import ConfidenceAugmentedLLM
+from callm.models.confidence_llm import ConfidenceAugmentedLLM
 from callm.models.layer_pooling import (
     GlobalZNormWeightedAverage,
     LayerwiseZNormWeightedAverage,
