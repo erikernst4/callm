@@ -66,10 +66,10 @@ class LLM(BaseLightningModule):
         input_ids,
         attention_mask,
         generate: bool = True,
-        return_hidden_states: bool = False,
     ):
         """
-        Forward pass of LLM to generate text and/or return hidden states.
+        Generate answers (``generate=True``) or return the hidden states of
+        all layers for the given tokens (``generate=False``).
         """
         if not generate:
             return self._hidden_states(input_ids, attention_mask)
@@ -85,11 +85,7 @@ class LLM(BaseLightningModule):
         if self.pad_token_id is not None:
             generation_kwargs["pad_token_id"] = self.pad_token_id
 
-        generated_ids = self.model.generate(**generation_kwargs)
-
-        if return_hidden_states:
-            return generated_ids, self._hidden_states(input_ids, attention_mask)
-        return generated_ids
+        return self.model.generate(**generation_kwargs)
 
     def _hidden_states(self, input_ids, attention_mask):
         """Hidden states of all layers for a non-generative forward pass."""
@@ -126,6 +122,30 @@ class LLM(BaseLightningModule):
         """Per-sample generated tokens, dropping the echoed prompt for causal models."""
         input_length = 0 if self.is_seq2seq else input_ids.shape[1]
         return [ids[input_length:] for ids in output_ids]
+
+    def full_sequence(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        generated_ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Token ids and attention mask of [prompt + answer], for the forward pass
+        that extracts activations of a generated answer.
+
+        For causal models ``generated_ids`` already is [prompt | answer]; the
+        mask keeps the prompt's (possibly left-padded) mask and appends ones
+        for the generated tokens. Seq2seq models use the encoder input only.
+        """
+        if self.is_seq2seq:
+            return input_ids, attention_mask
+        answer_mask = torch.ones(
+            attention_mask.shape[0],
+            generated_ids.shape[1] - input_ids.shape[1],
+            device=attention_mask.device,
+            dtype=attention_mask.dtype,
+        )
+        return generated_ids, torch.cat([attention_mask, answer_mask], dim=1)
 
     def training_step(self, batch, batch_idx):
         # Not implemented for this task

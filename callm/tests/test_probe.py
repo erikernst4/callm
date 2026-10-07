@@ -1,6 +1,5 @@
 import pytest
 import csv
-import functools
 import torch
 import torch.nn as nn
 from unittest.mock import Mock, patch, mock_open
@@ -86,45 +85,6 @@ class TestConfidenceAugmentedLLM:
         assert model.probe.model_dim == 8
         assert isinstance(model.loss_fn, nn.BCELoss)
 
-    def test_forward_with_generate_true(self, mock_llm):
-        model = ConfidenceAugmentedLLM(llm=mock_llm, layer_idx=-1)
-
-        # Mock LLM forward output: (generated_ids, hidden_states)
-        generated_ids = torch.tensor([[1, 2, 3]])
-        # Mock hidden states tuple: 2 layers, shape (1, 5, 8)
-        mock_hidden_states = (torch.randn(1, 5, 8), torch.randn(1, 5, 8))
-        mock_llm.return_value = (generated_ids, mock_hidden_states)
-
-        input_ids = torch.tensor([[4, 5]])
-        attention_mask = torch.tensor([[1, 1]])
-
-        gen_ids, conf = model(input_ids, attention_mask, generate=True)
-
-        assert torch.equal(gen_ids, generated_ids)
-        assert conf.shape == (1,)
-        # LLM should be called with generate=True and return_hidden_states=True
-        mock_llm.assert_called_once_with(
-            input_ids, attention_mask, generate=True, return_hidden_states=True
-        )
-
-    def test_forward_with_generate_false(self, mock_llm):
-        model = ConfidenceAugmentedLLM(llm=mock_llm, layer_idx=0)
-
-        # Mock LLM forward output: hidden_states tuple
-        mock_hidden_states = (torch.randn(2, 4, 8),)
-        mock_llm.return_value = mock_hidden_states
-
-        input_ids = torch.tensor([[1, 2]])
-        attention_mask = torch.tensor([[1, 1]])
-
-        conf = model(input_ids, attention_mask, generate=False)
-
-        assert conf.shape == (2,)
-        # LLM should be called with generate=False and return_hidden_states=True
-        mock_llm.assert_called_once_with(
-            input_ids, attention_mask, generate=False, return_hidden_states=True
-        )
-
     def test_training_step(self, mock_llm):
         model = ConfidenceAugmentedLLM(llm=mock_llm, layer_idx=0)
 
@@ -133,8 +93,9 @@ class TestConfidenceAugmentedLLM:
         mock_llm.return_value = mock_hidden_states
 
         batch = {
-            "input_ids": torch.tensor([[1, 2], [3, 4]]),
-            "attention_mask": torch.tensor([[1, 1], [1, 1]]),
+            "input_ids": torch.tensor([[1, 2, 5, 6], [3, 4, 7, 8]]),
+            "attention_mask": torch.ones(2, 4, dtype=torch.long),
+            "prompt_lengths": torch.tensor([2, 2]),
             "correct": torch.tensor([1, 0]),
         }
 
@@ -149,8 +110,9 @@ class TestConfidenceAugmentedLLM:
         mock_llm.return_value = mock_hidden_states
 
         batch = {
-            "input_ids": torch.tensor([[1, 2], [3, 4]]),
-            "attention_mask": torch.tensor([[1, 1], [1, 1]]),
+            "input_ids": torch.tensor([[1, 2, 5, 6], [3, 4, 7, 8]]),
+            "attention_mask": torch.ones(2, 4, dtype=torch.long),
+            "prompt_lengths": torch.tensor([2, 2]),
             "correct": torch.tensor([1, 0]),
         }
 
@@ -273,19 +235,6 @@ class TestConfidenceAugmentedLLMMultiLayer:
         model = ConfidenceAugmentedLLM(llm=mock_llm, layer_idx="all", lr=1e-2)
         assert model.num_layers == 12
         assert isinstance(model.probe.layer_pooling, LayerWeightedAverage)
-
-    def test_multi_layer_forward_with_list(self, mock_llm):
-        model = ConfidenceAugmentedLLM(llm=mock_llm, layer_idx=[0, 1])
-
-        # Mock hidden states tuple: 2 layers, shape (1, 5, 8)
-        mock_hidden_states = (torch.randn(1, 5, 8), torch.randn(1, 5, 8))
-        mock_llm.return_value = mock_hidden_states
-
-        input_ids = torch.tensor([[4, 5]])
-        attention_mask = torch.tensor([[1, 1]])
-
-        conf = model(input_ids, attention_mask, generate=False)
-        assert conf.shape == (1,)
 
     @pytest.mark.parametrize("pool_strategy", ["mean", "last", "none"])
     def test_multi_layer_on_the_fly(self, mock_llm, pool_strategy):
@@ -750,60 +699,3 @@ class TestSelectedTokensActivationsDataModule:
 
         # Check 100% sample retention: both samples must be retained
         assert len(dm.train_dataset) == 2
-
-
-class TestConfidenceAugmentedLLMLiveEvaluation:
-    """Tests for the live evaluation path (generate → probe → metrics)."""
-
-    def test_validation_writes_outputs_and_metrics(self, tmp_path):
-        from callm.models.llm import LLM
-
-        mock_llm = Mock()
-        mock_llm.is_seq2seq = False
-        mock_llm.strip_prompt = functools.partial(LLM.strip_prompt, mock_llm)
-        mock_llm.tokenizer.decode.side_effect = lambda ids, **_: " ".join(
-            str(int(t)) for t in ids
-        )
-        mock_llm.extractor.extract_answer.side_effect = ["Paris", "Rome"]
-
-        prompt = torch.tensor([[1, 2], [3, 4]])
-        generated = torch.tensor([[1, 2, 7], [3, 4, 9]])
-        mock_llm.return_value = (generated, (torch.randn(2, 2, 8),))
-
-        model = ConfidenceAugmentedLLM(llm=mock_llm, model_dim=8, layer_idx=0)
-        model._trainer = Mock(log_dir=str(tmp_path))
-        model.log = Mock()
-
-        model.on_validation_epoch_start()
-        model.validation_step(
-            {
-                "input_ids": prompt,
-                "attention_mask": torch.ones_like(prompt),
-                "question": ["q1", "q2"],
-                "gold_answers": [["Paris"], ["Madrid"]],
-            },
-            0,
-        )
-        # Only the generated tokens (prompt stripped) are decoded
-        decoded = [c.args[0].tolist() for c in mock_llm.tokenizer.decode.call_args_list]
-        assert decoded == [[7], [9]]
-
-        model.on_validation_epoch_end()
-
-        logged = {c.args[0]: c.args[1] for c in model.log.call_args_list}
-        assert logged["val_accuracy"] == 0.5
-        assert {"val_ece", "val_brier_score", "val_auc", "val_ecuas_0"} <= logged.keys()
-
-        with open(tmp_path / "llm_outputs.csv") as f:
-            rows = list(csv.reader(f))
-        assert rows[0] == [
-            "question",
-            "gold_answers",
-            "pred_answer",
-            "confidence",
-            "correct",
-            "raw_output",
-        ]
-        assert [r[4] for r in rows[1:]] == ["Yes", "No"]
-        with open(tmp_path / "metrics.csv") as f:
-            assert next(csv.reader(f))[0] == "val_accuracy"

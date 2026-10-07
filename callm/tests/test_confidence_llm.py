@@ -3,6 +3,8 @@ Characterization tests for ``ConfidenceAugmentedLLM`` hooks and helpers that
 are not exercised by ``test_probe.py``.
 """
 
+import csv
+import functools
 import json
 from unittest.mock import Mock
 
@@ -22,7 +24,11 @@ from callm.models.layer_pooling import (
     LayerwiseZNormWeightedAverage,
     SingleLayerSelector,
 )
-from callm.models.confidence_llm import ConfidenceAugmentedLLM
+from callm.models.confidence_llm import (
+    ConfidenceAugmentedLLM,
+    LiveEvalConfidenceLLM,
+)
+from callm.models.llm import LLM
 from callm.models.probe import Probe
 
 DIM = 4
@@ -176,42 +182,158 @@ class TestOnTheFlyPooling:
         assert torch.allclose(model._get_confidence(self.BATCH), expected)
 
 
-class TestForward:
-    def test_requires_llm(self):
-        model = ConfidenceAugmentedLLM(model_dim=DIM)
-        with pytest.raises(RuntimeError, match="requires an LLM"):
-            model(torch.zeros(1, 1), torch.ones(1, 1))
+class TestInvalidBatch:
+    def test_batch_without_activations_or_prompt_lengths(self):
+        model = ConfidenceAugmentedLLM(llm=_mock_llm(hidden_size=DIM))
+        with pytest.raises(ValueError, match="activations.*prompt_lengths"):
+            model.training_step(
+                {
+                    "input_ids": torch.zeros(1, 2, dtype=torch.long),
+                    "attention_mask": torch.ones(1, 2),
+                    "correct": torch.tensor([1]),
+                },
+                0,
+            )
 
-    def test_generate_without_hidden_states_reruns_on_full_sequence(self):
+
+class TestLiveEval:
+    @staticmethod
+    def _llm(is_seq2seq=False):
         llm = _mock_llm(hidden_size=DIM)
-        llm.is_seq2seq = False
-        prompt = torch.tensor([[1, 2], [3, 4]])
-        mask = torch.tensor([[0, 1], [1, 1]])
-        sequences = torch.tensor([[1, 2, 7, 8], [3, 4, 9, 0]])
+        llm.is_seq2seq = is_seq2seq
+        llm.strip_prompt = functools.partial(LLM.strip_prompt, llm)
+        llm.full_sequence = functools.partial(LLM.full_sequence, llm)
+        return llm
+
+    @staticmethod
+    def _checkpoint(tmp_path, **kwargs):
+        trained = ConfidenceAugmentedLLM(model_dim=DIM, **kwargs)
+        path = tmp_path / "probe.ckpt"
+        torch.save(
+            {
+                "state_dict": {
+                    f"probe.{k}": v for k, v in trained.probe.state_dict().items()
+                }
+            },
+            path,
+        )
+        return str(path)
+
+    @pytest.mark.parametrize(
+        "activations_to_use,slices",
+        [
+            ("answer", [slice(2, 4), slice(2, 4)]),
+            ("prompt", [slice(1, 2), slice(0, 2)]),
+            ("both", [slice(1, 4), slice(0, 4)]),
+        ],
+    )
+    @pytest.mark.parametrize("pool_strategy", ["mean", "last", "none"])
+    def test_scores_prompt_plus_answer_like_training(
+        self, tmp_path, activations_to_use, slices, pool_strategy
+    ):
+        llm = self._llm()
+        prompt = torch.tensor([[0, 2], [3, 4]])
+        mask = torch.tensor([[0, 1], [1, 1]])  # first prompt is left-padded
+        sequences = torch.tensor([[0, 2, 7, 8], [3, 4, 9, 6]])
         hidden = _hidden_states(seq=4)
         llm.side_effect = [Mock(sequences=sequences), hidden]
-        model = ConfidenceAugmentedLLM(llm=llm, layer_idx=0)
+        model = LiveEvalConfidenceLLM(
+            llm=llm,
+            probe_checkpoint=self._checkpoint(tmp_path, layer_idx=1),
+            layer_idx=1,
+            activations_to_use=activations_to_use,
+            pool_strategy=pool_strategy,
+        )
 
-        generated, confidence = model(prompt, mask)
+        generated, confidence = model._generate_and_score(prompt, mask)
 
         assert generated is sequences
+        # Hidden states come from a second pass over [prompt + answer]
         rerun = llm.call_args_list[1]
         assert torch.equal(rerun.args[0], sequences)
         assert torch.equal(rerun.args[1], torch.tensor([[0, 1, 1, 1], [1, 1, 1, 1]]))
-        assert rerun.kwargs == {"generate": False, "return_hidden_states": True}
-        assert torch.allclose(confidence, model.probe(hidden[0]))
+        assert rerun.kwargs == {"generate": False}
+        pooled = [
+            hidden[1][i, s][-1] if pool_strategy == "last" else hidden[1][i, s].mean(0)
+            for i, s in enumerate(slices)
+        ]
+        expected = model.probe.classify(torch.stack(pooled))
+        assert torch.allclose(confidence, expected, atol=1e-6)
 
-    def test_generate_seq2seq_reruns_on_prompt(self):
-        llm = _mock_llm(hidden_size=DIM)
-        llm.is_seq2seq = True
+    def test_seq2seq_scores_encoder_input(self, tmp_path):
+        llm = self._llm(is_seq2seq=True)
         prompt, mask = torch.tensor([[1, 2]]), torch.tensor([[1, 1]])
         llm.side_effect = [torch.tensor([[0, 5]]), _hidden_states(batch=1, seq=2)]
-        model = ConfidenceAugmentedLLM(llm=llm, layer_idx=0)
+        model = LiveEvalConfidenceLLM(
+            llm=llm, probe_checkpoint=self._checkpoint(tmp_path), layer_idx=0
+        )
 
-        model(prompt, mask)
+        _, confidence = model._generate_and_score(prompt, mask)
 
         assert llm.call_args_list[1].args[0] is prompt
         assert llm.call_args_list[1].args[1] is mask
+        # No answer tokens in the encoder input: the answer slice is a zero vector
+        assert torch.allclose(confidence, model.probe.classify(torch.zeros(1, DIM)))
+
+    def test_probe_is_loaded_and_frozen(self, tmp_path):
+        model = LiveEvalConfidenceLLM(
+            llm=self._llm(), probe_checkpoint=self._checkpoint(tmp_path), layer_idx=0
+        )
+        assert not any(p.requires_grad for p in model.probe.parameters())
+
+    def test_validation_writes_outputs_and_metrics(self, tmp_path):
+        llm = self._llm()
+        llm.tokenizer.decode.side_effect = lambda ids, **_: " ".join(
+            str(int(t)) for t in ids
+        )
+        llm.extractor.extract_answer.side_effect = ["Paris", "Rome"]
+        prompt = torch.tensor([[1, 2], [3, 4]])
+        llm.side_effect = [
+            torch.tensor([[1, 2, 7], [3, 4, 9]]),
+            _hidden_states(batch=2, seq=3),
+        ]
+        model = LiveEvalConfidenceLLM(
+            llm=llm, probe_checkpoint=self._checkpoint(tmp_path), layer_idx=0
+        )
+        model._trainer = Mock(log_dir=str(tmp_path))
+        model.log = Mock()
+
+        model.on_validation_epoch_start()
+        model.validation_step(
+            {
+                "input_ids": prompt,
+                "attention_mask": torch.ones_like(prompt),
+                "question": ["q1", "q2"],
+                "gold_answers": [["Paris"], ["Madrid"]],
+            },
+            0,
+        )
+        # Only the generated tokens (prompt stripped) are decoded
+        decoded = [c.args[0].tolist() for c in llm.tokenizer.decode.call_args_list]
+        assert decoded == [[7], [9]]
+
+        model.on_validation_epoch_end()
+
+        logged = {c.args[0]: c.args[1] for c in model.log.call_args_list}
+        assert logged["val_accuracy"] == 0.5
+        assert {"val_ece", "val_brier_score", "val_auc", "val_ecuas_0"} <= logged.keys()
+        with open(tmp_path / "llm_outputs.csv") as f:
+            rows = list(csv.reader(f))
+        assert rows[0] == [
+            "question",
+            "gold_answers",
+            "pred_answer",
+            "confidence",
+            "correct",
+            "raw_output",
+        ]
+        assert [r[:3] + r[4:] for r in rows[1:]] == [
+            ["q1", "Paris", "Paris", "Yes", "7"],
+            ["q2", "Madrid", "Rome", "No", "9"],
+        ]
+        with open(tmp_path / "metrics.csv") as f:
+            assert next(csv.reader(f))[0] == "val_accuracy"
+        assert model.outputs == []
 
 
 class TestTrainingHooks:

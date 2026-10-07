@@ -1,5 +1,9 @@
 from .llm import LLM
-from .confidence_llm import ConfidenceAugmentedLLM, SplitConfidenceAugmentedLLM
+from .confidence_llm import (
+    ConfidenceAugmentedLLM,
+    LiveEvalConfidenceLLM,
+    SplitConfidenceAugmentedLLM,
+)
 from .evaluator import EvaluatorModule
 from .gcp_llm import GCPLLM
 from .gcp_evaluator import GCPEvaluatorModule
@@ -28,6 +32,7 @@ __all__ = [
     "GCPLLM",
     "GCPEvaluatorModule",
     "ConfidenceAugmentedLLM",
+    "LiveEvalConfidenceLLM",
     "SplitConfidenceAugmentedLLM",
     "Probe",
     "SplitProbe",

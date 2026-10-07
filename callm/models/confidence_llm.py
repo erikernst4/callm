@@ -35,17 +35,18 @@ def _config_attr(config, *names):
 
 class ConfidenceAugmentedLLM(LightningModule):
     """
-    LightningModule that wraps a Probe and (optionally) a LLM module.
+    LightningModule that trains a Probe to predict answer correctness from
+    LLM activations.
 
-    Three modes of operation:
-    - **Live mode** (``llm`` provided): Runs the LLM forward pass to extract
-      activations on the fly and feeds them to the probe.
-    - **Cached mode** (``llm=None``): Expects pre-computed activations in the
-      batch (key ``"activations"``), skipping the LLM entirely. Requires
+    Two modes, chosen by the batch:
+    - **Cached mode** (``llm=None``): batches carry pre-computed activations
+      (key ``"activations"``), skipping the LLM entirely. Requires
       ``model_dim`` to be specified explicitly.
-    - **Live evaluation mode** (``llm`` provided + ``probe_checkpoint``): Loads
-      a trained probe from a checkpoint and runs end-to-end evaluation:
-      generate response → extract activations → probe → confidence.
+    - **On-the-fly mode** (``llm`` provided): batches carry pre-tokenized
+      [prompt + answer] sequences and ``"prompt_lengths"``; activations are
+      extracted with a single LLM forward pass.
+
+    End-to-end evaluation of a trained probe is ``LiveEvalConfidenceLLM``.
     """
 
     POOL_STRATEGIES = ("mean", "last", "none")
@@ -106,8 +107,6 @@ class ConfidenceAugmentedLLM(LightningModule):
 
         self.val_confidences = []
         self.val_correctness = []
-        # Storage for live evaluation outputs
-        self._eval_outputs = []
 
     def _resolve_model_dim(self, model_dim: int | None) -> int:
         """Explicit ``model_dim``, else the hidden size from the LLM config."""
@@ -325,9 +324,7 @@ class ConfidenceAugmentedLLM(LightningModule):
     def _run_llm_hidden_states(self, input_ids, attention_mask):
         """Non-generative LLM forward pass returning a tuple of hidden states."""
         with torch.no_grad():
-            hidden_states = self.llm(
-                input_ids, attention_mask, generate=False, return_hidden_states=True
-            )
+            hidden_states = self.llm(input_ids, attention_mask, generate=False)
         return self._as_tuple(hidden_states)
 
     @staticmethod
@@ -336,115 +333,32 @@ class ConfidenceAugmentedLLM(LightningModule):
             return (hidden_states,)
         return hidden_states
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        generate: bool = True,
-    ):
-        """
-        Run forward pass of LLM to generate response, extract activations,
-        and run Probe to get confidence.
-
-        Requires ``self.llm`` to be set (live mode).
-
-        When ``generate=True``, the method:
-        1. Generates the response via ``self.llm.generate()``
-        2. Re-runs a forward pass on ``[prompt + generated answer]``
-           to extract hidden states for the full sequence
-        3. Slices activations to the configured region
-           (``self.activations_to_use``)
-        4. Pools and feeds through the probe
-
-        Returns:
-            If generate is True: (generated_ids, confidence)
-            If generate is False: confidence
-        """
-        if self.llm is None:
-            raise RuntimeError(
-                "forward() requires an LLM but this instance was created "
-                "without one (cached-activations mode). Use training_step/"
-                "validation_step with pre-computed activations instead."
-            )
-
-        if not generate:
-            # Non-generative forward: get hidden states for the input only
-            hidden_states = self.llm(
-                input_ids, attention_mask, generate=False, return_hidden_states=True
-            )
-            activations = self._select_layer_activations(self._as_tuple(hidden_states))
-            return self.probe(activations)
-
-        # --- Generate response, then extract activations ---
-        with torch.no_grad():
-            llm_output = self.llm(
-                input_ids, attention_mask, generate=True, return_hidden_states=True
-            )
-
-        if isinstance(llm_output, tuple) and len(llm_output) == 2:
-            generated_output, hidden_states = llm_output
-        else:
-            generated_output = llm_output
-            hidden_states = None
-
-        # Handle GenerateOutput (dict-like with .sequences) vs plain tensor
-        if hasattr(generated_output, "sequences"):
-            generated_ids = generated_output.sequences
-        else:
-            generated_ids = generated_output
-
-        if hidden_states is None:
-            # Re-run forward on [prompt + answer] to extract hidden states
-            batch_size = input_ids.shape[0]
-
-            if not self.llm.is_seq2seq:
-                full_ids = generated_ids  # already [prompt | answer]
-                answer_len = full_ids.shape[1] - input_ids.shape[1]
-                answer_mask = torch.ones(
-                    batch_size,
-                    answer_len,
-                    device=attention_mask.device,
-                    dtype=attention_mask.dtype,
-                )
-                full_attention_mask = torch.cat([attention_mask, answer_mask], dim=1)
-            else:
-                full_ids = input_ids
-                full_attention_mask = attention_mask
-
-            hidden_states = self._run_llm_hidden_states(full_ids, full_attention_mask)
-
-        activations = self._select_layer_activations(self._as_tuple(hidden_states))
-        confidence = self.probe(activations)
-
-        return generated_ids, confidence
-
     def _get_confidence(self, batch):
         """
-        Get confidence from batch, supporting cached, on-the-fly, and live modes.
+        Get confidence from batch, supporting cached and on-the-fly modes.
 
         - Cached mode: batch contains ``"activations"`` key with pre-computed
           activations (already pooled or raw).
         - On-the-fly mode: batch contains ``"prompt_lengths"`` — runs a single
           non-generative LLM forward pass on pre-tokenized [prompt + answer]
           inputs, slices activations, and feeds to probe.
-        - Live mode: batch contains ``"input_ids"`` and ``"attention_mask"``;
-          the LLM is run to extract activations (prompt-only).
         """
         if "activations" in batch:
             return self.probe(
                 batch["activations"],
                 seq_mask=batch.get("seq_mask"),
             )
-        elif "prompt_lengths" in batch:
-            # On-the-fly: single non-generative forward pass on [prompt + answer]
+        if "prompt_lengths" in batch:
             hidden_states = self._run_llm_hidden_states(
                 batch["input_ids"], batch["attention_mask"]
             )
             return self._probe_from_hidden_states(
                 hidden_states, batch["prompt_lengths"], batch["attention_mask"]
             )
-        else:
-            return self(batch["input_ids"], batch["attention_mask"], generate=False)
+        raise ValueError(
+            "Batch must contain 'activations' (cached mode) or 'prompt_lengths' "
+            "(on-the-fly mode)."
+        )
 
     def training_step(self, batch, batch_idx):
         confidence = self._get_confidence(batch)
@@ -463,42 +377,8 @@ class ConfidenceAugmentedLLM(LightningModule):
     def on_validation_epoch_start(self):
         self.val_confidences = []
         self.val_correctness = []
-        self._eval_outputs = []
 
     def validation_step(self, batch, batch_idx):
-        # --- Live evaluation path (question answering evaluation with text output) ---
-        if "question" in batch:
-            input_ids = batch["input_ids"]
-            attention_mask = batch["attention_mask"]
-            questions = batch["question"]
-            gold_answers = get_gold_answers(batch)
-
-            with torch.no_grad():
-                generated_ids, confidence = self.forward(
-                    input_ids, attention_mask, generate=True
-                )
-
-            for i, gen_tokens in enumerate(
-                self.llm.strip_prompt(generated_ids, input_ids)
-            ):
-                raw_output = self.llm.tokenizer.decode(
-                    gen_tokens, skip_special_tokens=True
-                )
-                pred_answer = self.llm.extractor.extract_answer(raw_output)
-
-                self._eval_outputs.append(
-                    {
-                        "question": questions[i],
-                        "gold_answers": gold_answers[i],
-                        "pred_answer": pred_answer,
-                        "confidence": confidence[i].item(),
-                        "raw_output": raw_output,
-                    }
-                )
-
-            return {"batch_size": len(questions)}
-
-        # --- Standard training/validation step (cached activations or live LLM) ---
         confidence = self._get_confidence(batch)
         correct = batch["correct"]
         loss = self.loss_fn(confidence, correct.float())
@@ -515,12 +395,6 @@ class ConfidenceAugmentedLLM(LightningModule):
         return {"val_loss": loss, "confidence": confidence, "correct": correct}
 
     def on_validation_epoch_end(self):
-        # --- Live evaluation path ---
-        if self._eval_outputs:
-            self._compute_eval_metrics()
-            return
-
-        # --- Cached-mode training path ---
         if not self.val_confidences or not self.val_correctness:
             return
 
@@ -535,19 +409,117 @@ class ConfidenceAugmentedLLM(LightningModule):
         self.val_confidences.clear()
         self.val_correctness.clear()
 
-    def _compute_eval_metrics(self):
-        """
-        Compute exact-match correctness and calibration metrics for live
-        evaluation outputs.  Saves ``llm_outputs.csv`` and ``metrics.csv``
-        to the trainer's log directory.
-        """
-        for out in self._eval_outputs:
+    def configure_optimizers(self):
+        # Only self.probe parameters are optimized
+        optimizer = torch.optim.AdamW(self.probe.parameters(), lr=self.lr)
+        if self.lr_scheduler is not None:
+            scheduler = self.lr_scheduler(
+                optimizer, max_steps=self.trainer.estimated_stepping_batches
+            )
+
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "step",
+                },
+            }
+        return optimizer
+
+
+class LiveEvalConfidenceLLM(ConfidenceAugmentedLLM):
+    """
+    End-to-end evaluation of a trained probe (``validate`` only).
+
+    For each batch of prompts the LLM generates an answer, a forward pass on
+    [prompt + answer] (built like the activations the probe was trained on,
+    see ``LLM.full_sequence``) yields the hidden states, and the probe scores
+    them with the same ``layer_idx``, ``activations_to_use`` and
+    ``pool_strategy`` as in training. Correctness is exact match against the
+    gold answers; ``llm_outputs.csv`` and ``metrics.csv`` are written to the
+    trainer's log directory.
+    """
+
+    def __init__(
+        self,
+        llm: LLM,
+        probe_checkpoint: str,
+        model_dim: int | None = None,
+        probe: nn.Module | None = None,
+        layer_idx: int | list[int] | str = -1,
+        num_layers: int | None = None,
+        layer_pooling: nn.Module | None = None,
+        seq_pooling: nn.Module | None = None,
+        pool_strategy: str = "mean",
+        activations_to_use: str = "answer",
+    ):
+        super().__init__(
+            llm=llm,
+            model_dim=model_dim,
+            probe=probe,
+            layer_idx=layer_idx,
+            num_layers=num_layers,
+            layer_pooling=layer_pooling,
+            seq_pooling=seq_pooling,
+            probe_checkpoint=probe_checkpoint,
+            pool_strategy=pool_strategy,
+            activations_to_use=activations_to_use,
+        )
+        self.outputs = []
+
+    def _generate_and_score(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Generate answers and the probe's confidence in each of them."""
+        with torch.no_grad():
+            generated = self.llm(input_ids, attention_mask, generate=True)
+        # With return_logits, generate() returns a GenerateOutput
+        generated_ids = getattr(generated, "sequences", generated)
+
+        full_ids, full_mask = self.llm.full_sequence(
+            input_ids, attention_mask, generated_ids
+        )
+        hidden_states = self._run_llm_hidden_states(full_ids, full_mask)
+        with torch.no_grad():
+            confidence = self._probe_from_hidden_states(
+                hidden_states, attention_mask.sum(dim=1), full_mask
+            )
+        return generated_ids, confidence
+
+    def on_validation_epoch_start(self):
+        self.outputs = []
+
+    def validation_step(self, batch, batch_idx):
+        input_ids = batch["input_ids"]
+        generated_ids, confidence = self._generate_and_score(
+            input_ids, batch["attention_mask"]
+        )
+
+        gold_answers = get_gold_answers(batch)
+        for i, gen_tokens in enumerate(self.llm.strip_prompt(generated_ids, input_ids)):
+            raw_output = self.llm.tokenizer.decode(gen_tokens, skip_special_tokens=True)
+            self.outputs.append(
+                {
+                    "question": batch["question"][i],
+                    "gold_answers": gold_answers[i],
+                    "pred_answer": self.llm.extractor.extract_answer(raw_output),
+                    "confidence": confidence[i].item(),
+                    "raw_output": raw_output,
+                }
+            )
+        return {"batch_size": len(batch["question"])}
+
+    def on_validation_epoch_end(self):
+        if not self.outputs:
+            return
+
+        for out in self.outputs:
             gold = out["gold_answers"]
             if not isinstance(gold, list):
                 gold = [gold] if gold else []
             out["correct"] = check_exact_match(out["pred_answer"] or "", gold)
 
-        metrics_results = log_answer_metrics(self, self._eval_outputs)
+        metrics_results = log_answer_metrics(self, self.outputs)
 
         write_csv(
             os.path.join(self.trainer.log_dir or os.getcwd(), "llm_outputs.csv"),
@@ -568,37 +540,19 @@ class ConfidenceAugmentedLLM(LightningModule):
                     "Yes" if out["correct"] else "No",
                     out["raw_output"],
                 ]
-                for out in self._eval_outputs
+                for out in self.outputs
             ],
             "LLM outputs",
         )
 
-        # Print summary
         print(f"\n{'='*60}")
-        print(f"Evaluation Results ({len(self._eval_outputs)} samples)")
+        print(f"Evaluation Results ({len(self.outputs)} samples)")
         print(f"{'='*60}")
         for name, value in metrics_results.items():
             print(f"  {name}: {value:.4f}")
         print(f"{'='*60}")
 
-        self._eval_outputs.clear()
-
-    def configure_optimizers(self):
-        # Only self.probe parameters are optimized
-        optimizer = torch.optim.AdamW(self.probe.parameters(), lr=self.lr)
-        if self.lr_scheduler is not None:
-            scheduler = self.lr_scheduler(
-                optimizer, max_steps=self.trainer.estimated_stepping_batches
-            )
-
-            return {
-                "optimizer": optimizer,
-                "lr_scheduler": {
-                    "scheduler": scheduler,
-                    "interval": "step",
-                },
-            }
-        return optimizer
+        self.outputs = []
 
 
 class SplitConfidenceAugmentedLLM(ConfidenceAugmentedLLM):

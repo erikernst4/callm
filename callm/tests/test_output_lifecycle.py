@@ -440,16 +440,12 @@ class TestLLMForwardAndInit:
         )
         llm.model.generate.assert_not_called()
 
-    def test_generate_with_hidden_states(self, make_llm):
+    def test_generate(self, make_llm):
         llm = make_llm(max_new_tokens=7)
         llm.model.generate.return_value = "generated"
-        llm.model.return_value = Mock(hidden_states=("h0",))
         ids, mask = torch.tensor([[1]]), torch.tensor([[1]])
 
-        assert llm.forward(ids, mask, return_hidden_states=True) == (
-            "generated",
-            ("h0",),
-        )
+        assert llm.forward(ids, mask) == "generated"
         llm.model.generate.assert_called_once_with(
             input_ids=ids,
             attention_mask=mask,
@@ -459,6 +455,21 @@ class TestLLMForwardAndInit:
             return_dict_in_generate=False,
             pad_token_id=0,
         )
+        llm.model.assert_not_called()
+
+    def test_full_sequence(self, make_llm):
+        prompt = torch.tensor([[0, 5], [6, 7]])
+        mask = torch.tensor([[0, 1], [1, 1]])
+        generated = torch.tensor([[0, 5, 8, 9, 2], [6, 7, 3, 2, 0]])
+
+        full_ids, full_mask = make_llm().full_sequence(prompt, mask, generated)
+        assert full_ids is generated
+        assert torch.equal(full_mask, torch.tensor([[0, 1, 1, 1, 1], [1, 1, 1, 1, 1]]))
+
+        full_ids, full_mask = make_llm(is_seq2seq=True).full_sequence(
+            prompt, mask, torch.tensor([[0, 8], [0, 3]])
+        )
+        assert full_ids is prompt and full_mask is mask
 
     def test_pad_token_id_falls_back_to_tokenizer(self, make_llm):
         config = Mock(spec=["pad_token_id", "eos_token_id"])
