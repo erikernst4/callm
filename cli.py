@@ -3,7 +3,7 @@ from lightning.pytorch.trainer import Trainer
 from callm.models.evaluator import EvaluatorModule
 from callm.data.triviaqa import EvaluatorDataModule
 from callm.utils import get_last_llm_outputs_path
-from callm.callbacks import TrainingTimeCallback
+from callm.callbacks import LayerWeightsHistoryCallback, TrainingTimeCallback
 import os
 from lightning.pytorch.loggers import CSVLogger
 
@@ -33,17 +33,17 @@ class CalibrationTrainer(Trainer):
             if not isinstance(loggers, CSVLogger):
                 kwargs["logger"] = [loggers, csv_logger]
 
-        # Ensure TrainingTimeCallback is added by default to capture and persist timing
+        # Ensure default callbacks are added to capture and persist timing and
+        # layer weight history
         callbacks = kwargs.get("callbacks")
-        timing_callback = TrainingTimeCallback()
         if callbacks is None:
-            kwargs["callbacks"] = [timing_callback]
-        elif isinstance(callbacks, list):
-            if not any(isinstance(cb, TrainingTimeCallback) for cb in callbacks):
-                callbacks.append(timing_callback)
-        else:
-            if not isinstance(callbacks, TrainingTimeCallback):
-                kwargs["callbacks"] = [callbacks, timing_callback]
+            callbacks = []
+        elif not isinstance(callbacks, list):
+            callbacks = [callbacks]
+        for callback_cls in (TrainingTimeCallback, LayerWeightsHistoryCallback):
+            if not any(isinstance(cb, callback_cls) for cb in callbacks):
+                callbacks.append(callback_cls())
+        kwargs["callbacks"] = callbacks
 
         super().__init__(*args, **kwargs)
         self.evaluate_correctness = evaluate_correctness

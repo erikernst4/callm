@@ -149,6 +149,13 @@ class GlobalZNormWeightedAverage(nn.Module):
         self.global_std.copy_(global_std.clamp(min=1e-8))
         self._stats_set = True
 
+    def load_stats(self, layer_stats: dict):
+        """Set normalization statistics from a datamodule's ``layer_stats``."""
+        self.set_normalization_stats(
+            layer_stats["global_mean"].to(self.global_mean.device),
+            layer_stats["global_std"].to(self.global_std.device),
+        )
+
     def forward(self, activations: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -225,6 +232,13 @@ class LayerwiseZNormWeightedAverage(nn.Module):
         self.layer_means.copy_(layer_means)
         self.layer_stds.copy_(layer_stds.clamp(min=1e-8))
         self._stats_set = True
+
+    def load_stats(self, layer_stats: dict):
+        """Set normalization statistics from a datamodule's ``layer_stats``."""
+        self.set_normalization_stats(
+            layer_stats["layer_means"].to(self.layer_means.device),
+            layer_stats["layer_stds"].to(self.layer_stds.device),
+        )
 
     def forward(self, activations: torch.Tensor) -> torch.Tensor:
         """

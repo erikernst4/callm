@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from typing import Callable
 
@@ -9,9 +8,7 @@ import torch.nn as nn
 from lightning.pytorch import LightningModule
 
 from callm.models.layer_pooling import (
-    GlobalZNormWeightedAverage,
     LayerWeightedAverage,
-    LayerwiseZNormWeightedAverage,
     SingleLayerSelector,
 )
 from callm.models.llm import LLM
@@ -28,6 +25,14 @@ from callm.models.probe import Probe, SplitProbe
 from callm.utils import check_exact_match
 
 
+def _config_attr(config, *names):
+    """First attribute of ``config`` found among ``names``, or ``None``."""
+    for name in names:
+        if hasattr(config, name):
+            return getattr(config, name)
+    return None
+
+
 class ConfidenceAugmentedLLM(LightningModule):
     """
     LightningModule that wraps a Probe and (optionally) a LLM module.
@@ -42,6 +47,8 @@ class ConfidenceAugmentedLLM(LightningModule):
       a trained probe from a checkpoint and runs end-to-end evaluation:
       generate response → extract activations → probe → confidence.
     """
+
+    POOL_STRATEGIES = ("mean", "last", "none")
 
     def __init__(
         self,
@@ -69,45 +76,17 @@ class ConfidenceAugmentedLLM(LightningModule):
         self.pool_strategy = pool_strategy
         self.activations_to_use = activations_to_use
 
-        # Determine model_dim: explicit arg > inferred from LLM config
-        if model_dim is not None:
-            self.model_dim = model_dim
-        elif self.llm is not None:
-            if hasattr(self.llm.model.config, "hidden_size"):
-                self.model_dim = self.llm.model.config.hidden_size
-            elif hasattr(self.llm.model.config, "d_model"):
-                self.model_dim = self.llm.model.config.d_model
-            else:
-                raise ValueError(
-                    "Could not determine model dimension from LLM config. "
-                    "Pass model_dim explicitly."
-                )
-        else:
-            raise ValueError("Either llm or model_dim must be provided.")
+        if pool_strategy not in self.POOL_STRATEGIES:
+            raise ValueError(
+                f"pool_strategy must be one of {self.POOL_STRATEGIES}. Got: {pool_strategy}"
+            )
+        self.model_dim = self._resolve_model_dim(model_dim)
 
         self.num_layers = num_layers
         if layer_pooling is None:
-            if isinstance(layer_idx, list):
-                self.num_layers = len(layer_idx)
-                layer_pooling = LayerWeightedAverage(num_layers=self.num_layers)
-            elif isinstance(layer_idx, str) and layer_idx.lower() == "all":
-                if self.num_layers is None and self.llm is not None:
-                    if hasattr(self.llm.model.config, "num_hidden_layers"):
-                        self.num_layers = self.llm.model.config.num_hidden_layers
-                    elif hasattr(self.llm.model.config, "n_layer"):
-                        self.num_layers = self.llm.model.config.n_layer
-                if self.num_layers is None:
-                    raise ValueError(
-                        "When layer_idx is 'all' and running in cached mode (no llm provided), "
-                        "you must specify 'num_layers' explicitly."
-                    )
-                layer_pooling = LayerWeightedAverage(num_layers=self.num_layers)
-        else:
-            if (
-                hasattr(layer_pooling, "num_layers")
-                and layer_pooling.num_layers is not None
-            ):
-                self.num_layers = layer_pooling.num_layers
+            layer_pooling = self._default_layer_pooling()
+        elif getattr(layer_pooling, "num_layers", None) is not None:
+            self.num_layers = layer_pooling.num_layers
 
         if probe is None:
             self.probe = Probe(
@@ -130,9 +109,40 @@ class ConfidenceAugmentedLLM(LightningModule):
         # Storage for live evaluation outputs
         self._eval_outputs = []
 
-        # Layer weight snapshot tracking for visualization
-        self._weight_snapshots = []
-        self._weight_snapshot_interval = 50  # log every N training steps
+    def _resolve_model_dim(self, model_dim: int | None) -> int:
+        """Explicit ``model_dim``, else the hidden size from the LLM config."""
+        if model_dim is not None:
+            return model_dim
+        if self.llm is None:
+            raise ValueError("Either llm or model_dim must be provided.")
+        model_dim = _config_attr(self.llm.model.config, "hidden_size", "d_model")
+        if model_dim is None:
+            raise ValueError(
+                "Could not determine model dimension from LLM config. "
+                "Pass model_dim explicitly."
+            )
+        return model_dim
+
+    def _default_layer_pooling(self) -> nn.Module | None:
+        """
+        Learned weighted average over layers when ``layer_idx`` is a list or
+        ``"all"`` (setting ``self.num_layers``); no layer pooling otherwise.
+        """
+        if isinstance(self.layer_idx, list):
+            self.num_layers = len(self.layer_idx)
+        elif isinstance(self.layer_idx, str) and self.layer_idx.lower() == "all":
+            if self.num_layers is None and self.llm is not None:
+                self.num_layers = _config_attr(
+                    self.llm.model.config, "num_hidden_layers", "n_layer"
+                )
+            if self.num_layers is None:
+                raise ValueError(
+                    "When layer_idx is 'all' and running in cached mode (no llm provided), "
+                    "you must specify 'num_layers' explicitly."
+                )
+        else:
+            return None
+        return LayerWeightedAverage(num_layers=self.num_layers)
 
     def _load_probe_checkpoint(self, probe_checkpoint: str):
         """
@@ -177,9 +187,7 @@ class ConfidenceAugmentedLLM(LightningModule):
         Called automatically by Lightning before training begins.
         """
         layer_pooling = getattr(self.probe, "layer_pooling", None)
-        if layer_pooling is None or not hasattr(
-            layer_pooling, "set_normalization_stats"
-        ):
+        if not hasattr(layer_pooling, "load_stats"):
             return
 
         datamodule = getattr(self.trainer, "datamodule", None)
@@ -189,24 +197,14 @@ class ConfidenceAugmentedLLM(LightningModule):
         layer_stats = getattr(datamodule, "layer_stats", None)
         if layer_stats is None:
             print(
-                "Warning: layer_pooling has set_normalization_stats() but "
+                "Warning: layer_pooling needs normalization statistics but "
                 "datamodule has no layer_stats. Normalization will use default "
                 "(zero-mean, unit-std) values."
             )
             return
 
-        if isinstance(layer_pooling, GlobalZNormWeightedAverage):
-            layer_pooling.set_normalization_stats(
-                layer_stats["global_mean"].to(self.device),
-                layer_stats["global_std"].to(self.device),
-            )
-            print("Injected global Z-normalization statistics into layer_pooling")
-        elif isinstance(layer_pooling, LayerwiseZNormWeightedAverage):
-            layer_pooling.set_normalization_stats(
-                layer_stats["layer_means"].to(self.device),
-                layer_stats["layer_stds"].to(self.device),
-            )
-            print("Injected layer-wise Z-normalization statistics into layer_pooling")
+        layer_pooling.load_stats(layer_stats)
+        print(f"Injected normalization statistics into {type(layer_pooling).__name__}")
 
     def on_save_checkpoint(self, checkpoint: dict):
         """
@@ -227,25 +225,17 @@ class ConfidenceAugmentedLLM(LightningModule):
         Returns:
             activations tensor ready for per-sample slicing/pooling.
         """
-        num_all_layers = len(hidden_states)
         layer_pooling = getattr(self.probe, "layer_pooling", None)
-
-        if isinstance(layer_pooling, SingleLayerSelector):
-            return torch.stack(hidden_states, dim=1)
-        elif layer_pooling is not None:
-            if isinstance(self.layer_idx, list):
-                selected = [
-                    hidden_states[layer_i % num_all_layers]
-                    for layer_i in self.layer_idx
-                ]
-                return torch.stack(selected, dim=1)
-            else:
-                return torch.stack(hidden_states, dim=1)
-        else:
-            if isinstance(self.layer_idx, int):
-                return hidden_states[self.layer_idx % num_all_layers]
-            else:
-                return torch.stack(hidden_states, dim=1)
+        if layer_pooling is None and isinstance(self.layer_idx, int):
+            return hidden_states[self.layer_idx % len(hidden_states)]
+        if isinstance(self.layer_idx, list) and not (
+            layer_pooling is None or isinstance(layer_pooling, SingleLayerSelector)
+        ):
+            return torch.stack(
+                [hidden_states[i % len(hidden_states)] for i in self.layer_idx], dim=1
+            )
+        # SingleLayerSelector and "all" pick from the stack of every layer
+        return torch.stack(hidden_states, dim=1)
 
     def _slice_samples(
         self,
@@ -288,45 +278,49 @@ class ConfidenceAugmentedLLM(LightningModule):
             sliced_list.append(sample_act)
         return sliced_list
 
-    def _extract_and_pool_activations(
+    def _probe_from_hidden_states(
         self,
         hidden_states,
         prompt_lengths: torch.Tensor,
         attention_mask: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Extract, slice, and pool activations for probe evaluation.
+        Confidence from the hidden states of [prompt + answer] sequences.
 
-        Handles per-sample slicing (answer/prompt/both) based on
-        ``self.activations_to_use`` and pooling (mean/last) based on
-        ``self.pool_strategy``.
+        Selects and pools layers, slices each sample to the region given by
+        ``self.activations_to_use`` and pools it according to
+        ``self.pool_strategy``: ``"mean"``/``"last"`` token, or ``"none"`` to
+        keep the sequence for the probe's own sequence pooling.
 
         Args:
             hidden_states: tuple of layer tensors from the LLM forward pass
             prompt_lengths: (batch,) tensor of prompt token counts
             attention_mask: (batch, seq_len) attention mask for the full sequence
-
-        Returns:
-            pooled activations tensor of shape (batch, model_dim)
         """
         activations = self.probe.pool_layers(
             self._select_layer_activations(hidden_states)
         )
-
-        # Now activations is (batch, seq, dim) or (batch, dim)
         if activations.ndim == 2:
-            # Already pooled (no sequence dimension), return directly
-            return activations
+            # Already pooled (no sequence dimension)
+            return self.probe.classify(activations)
 
         sliced_list = self._slice_samples(activations, prompt_lengths, attention_mask)
         if self.pool_strategy == "mean":
-            pooled_list = [sample_act.mean(dim=0) for sample_act in sliced_list]
+            pooled = torch.stack([sample.mean(dim=0) for sample in sliced_list])
         elif self.pool_strategy == "last":
-            pooled_list = [sample_act[-1] for sample_act in sliced_list]
+            pooled = torch.stack([sample[-1] for sample in sliced_list])
         else:
-            raise ValueError(f"Unknown pool_strategy: {self.pool_strategy}")
-
-        return torch.stack(pooled_list)  # (batch, dim)
+            padded = torch.nn.utils.rnn.pad_sequence(sliced_list, batch_first=True)
+            seq_lengths = torch.tensor(
+                [sample.shape[0] for sample in sliced_list], device=padded.device
+            )
+            seq_mask = (
+                torch.arange(padded.shape[1], device=padded.device)
+                < seq_lengths[:, None]
+            )
+            # seq_pooling (or masked mean fallback)
+            pooled = self.probe.pool_sequence(padded, seq_mask)
+        return self.probe.classify(pooled)
 
     def _run_llm_hidden_states(self, input_ids, attention_mask):
         """Non-generative LLM forward pass returning a tuple of hidden states."""
@@ -442,62 +436,15 @@ class ConfidenceAugmentedLLM(LightningModule):
                 seq_mask=batch.get("seq_mask"),
             )
         elif "prompt_lengths" in batch:
-            return self._get_confidence_on_the_fly(batch)
+            # On-the-fly: single non-generative forward pass on [prompt + answer]
+            hidden_states = self._run_llm_hidden_states(
+                batch["input_ids"], batch["attention_mask"]
+            )
+            return self._probe_from_hidden_states(
+                hidden_states, batch["prompt_lengths"], batch["attention_mask"]
+            )
         else:
             return self(batch["input_ids"], batch["attention_mask"], generate=False)
-
-    def _get_confidence_on_the_fly(self, batch):
-        """
-        Get confidence using on-the-fly LLM forward pass on pre-tokenized
-        [prompt + answer] sequences.
-
-        Runs a single non-generative forward pass, extracts hidden states,
-        slices to the configured region (prompt/answer/both), pools, and
-        feeds through the probe.
-
-        Args:
-            batch: dict with keys ``input_ids``, ``attention_mask``,
-                   ``prompt_lengths``, ``correct``
-        """
-        attention_mask = batch["attention_mask"]
-        prompt_lengths = batch["prompt_lengths"]
-
-        # Single non-generative forward pass — no generation needed
-        hidden_states = self._run_llm_hidden_states(batch["input_ids"], attention_mask)
-
-        # For pool_strategy in ("mean", "last"): pool here, then classify
-        if self.pool_strategy in ("mean", "last"):
-            pooled = self._extract_and_pool_activations(
-                hidden_states, prompt_lengths, attention_mask
-            )
-            return self.probe.classify(pooled)
-
-        # pool_strategy == "none": preserve sequence for attentive/seq pooling
-        activations = self.probe.pool_layers(
-            self._select_layer_activations(hidden_states)
-        )
-
-        # activations is now (batch, seq, dim) or (batch, dim)
-        if activations.ndim == 2:
-            # Already pooled (no sequence dimension)
-            return self.probe.classify(activations)
-
-        # Pad variable-length sliced sequences and create seq_mask
-        sliced_list = self._slice_samples(activations, prompt_lengths, attention_mask)
-        padded = torch.nn.utils.rnn.pad_sequence(
-            sliced_list,
-            batch_first=True,
-            padding_value=0.0,
-        )
-        seq_lengths = torch.tensor(
-            [s.shape[0] for s in sliced_list], device=padded.device
-        )
-        seq_mask = (
-            torch.arange(padded.shape[1], device=padded.device) < seq_lengths[:, None]
-        )
-
-        # seq_pooling (or masked mean fallback) + linear + sigmoid
-        return self.probe.classify(self.probe.pool_sequence(padded, seq_mask))
 
     def training_step(self, batch, batch_idx):
         confidence = self._get_confidence(batch)
@@ -511,40 +458,7 @@ class ConfidenceAugmentedLLM(LightningModule):
                 prog_bar=True,
             )
 
-        # Snapshot layer weights for visualization
-        if self.global_step % self._weight_snapshot_interval == 0:
-            layer_pooling = getattr(self.probe, "layer_pooling", None)
-            if layer_pooling is not None and hasattr(layer_pooling, "get_weights"):
-                weights = layer_pooling.get_weights().detach().cpu().tolist()
-                self._weight_snapshots.append(
-                    {"step": self.global_step, "weights": weights}
-                )
-
         return loss
-
-    def on_fit_end(self):
-        """Save layer weight evolution to a JSON file for later visualization."""
-        if not self._weight_snapshots:
-            return
-
-        log_dir = self.trainer.log_dir or os.getcwd()
-        weights_file = os.path.join(log_dir, "layer_weights_history.json")
-        try:
-            # Include layer_idx mapping so we know which layers the weights correspond to
-            layer_indices = (
-                self.layer_idx
-                if isinstance(self.layer_idx, list)
-                else list(range(self.num_layers or 0))
-            )
-            data = {
-                "layer_indices": layer_indices,
-                "snapshots": self._weight_snapshots,
-            }
-            with open(weights_file, "w") as f:
-                json.dump(data, f, indent=2)
-            print(f"Layer weight history saved to {weights_file}")
-        except Exception as e:
-            print(f"Failed to save layer weight history: {e}")
 
     def on_validation_epoch_start(self):
         self.val_confidences = []

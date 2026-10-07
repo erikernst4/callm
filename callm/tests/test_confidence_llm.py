@@ -15,6 +15,7 @@ from ecuas import (
     ExpectedCalibrationError,
 )
 
+from callm.callbacks import LayerWeightsHistoryCallback
 from callm.models.layer_pooling import (
     GlobalZNormWeightedAverage,
     LayerWeightedAverage,
@@ -160,11 +161,7 @@ class TestOnTheFlyPooling:
 
     def test_unknown_pool_strategy(self):
         with pytest.raises(ValueError, match="pool_strategy"):
-            self._model(pool_strategy="max")._extract_and_pool_activations(
-                _hidden_states(),
-                self.BATCH["prompt_lengths"],
-                self.BATCH["attention_mask"],
-            )
+            self._model(pool_strategy="max")
 
     @pytest.mark.parametrize("pool_strategy", ["mean", "none"])
     def test_prepooled_hidden_states_skip_slicing(self, pool_strategy):
@@ -227,16 +224,23 @@ class TestTrainingHooks:
         )
         model.log = Mock()
 
+    def _run_weight_history(self, model, tmp_path, activations, steps=(0,)):
+        callback = LayerWeightsHistoryCallback()
+        for step in steps:
+            self._attach(model, tmp_path, global_step=step)
+            callback.on_train_batch_start(model.trainer, model, None, step)
+            model.training_step(
+                {"activations": activations, "correct": torch.tensor([1, 0])}, step
+            )
+        callback.on_fit_end(model.trainer, model)
+        path = tmp_path / "layer_weights_history.json"
+        return json.loads(path.read_text()) if path.exists() else None
+
     def test_weight_snapshots_written_on_fit_end(self, tmp_path):
         model = ConfidenceAugmentedLLM(model_dim=DIM, layer_idx=[3, 5])
-        batch = {"activations": torch.randn(2, 2, DIM), "correct": torch.tensor([1, 0])}
-        for step in [0, 1, 50, 100]:
-            self._attach(model, tmp_path, global_step=step)
-            model.training_step(batch, step)
-
-        model.on_fit_end()
-
-        data = json.loads((tmp_path / "layer_weights_history.json").read_text())
+        data = self._run_weight_history(
+            model, tmp_path, torch.randn(2, 2, DIM), steps=[0, 1, 50, 100]
+        )
         weights = model.probe.layer_pooling.get_weights().tolist()
         assert data == {
             "layer_indices": [3, 5],
@@ -245,22 +249,12 @@ class TestTrainingHooks:
 
     def test_weight_snapshots_layer_indices_for_all(self, tmp_path):
         model = ConfidenceAugmentedLLM(model_dim=DIM, layer_idx="all", num_layers=3)
-        self._attach(model, tmp_path)
-        model.training_step(
-            {"activations": torch.randn(2, 3, DIM), "correct": torch.tensor([1, 0])}, 0
-        )
-        model.on_fit_end()
-        data = json.loads((tmp_path / "layer_weights_history.json").read_text())
+        data = self._run_weight_history(model, tmp_path, torch.randn(2, 3, DIM))
         assert data["layer_indices"] == [0, 1, 2]
 
     def test_no_snapshots_without_layer_weights(self, tmp_path):
         model = ConfidenceAugmentedLLM(model_dim=DIM)
-        self._attach(model, tmp_path)
-        model.training_step(
-            {"activations": torch.randn(2, DIM), "correct": torch.tensor([1, 0])}, 0
-        )
-        model.on_fit_end()
-        assert not (tmp_path / "layer_weights_history.json").exists()
+        assert self._run_weight_history(model, tmp_path, torch.randn(2, DIM)) is None
 
     def test_training_step_logs_lr(self, tmp_path):
         model = ConfidenceAugmentedLLM(model_dim=DIM, lr=0.25)

@@ -202,3 +202,56 @@ class TrainingTimeCallback(Callback):
         self.total_pure_train_time = state_dict.get("total_pure_train_time", 0.0)
         self.total_fit_elapsed_prior = state_dict.get("total_fit_elapsed_prior", 0.0)
         self.epoch_times = state_dict.get("epoch_times", [])
+
+
+class LayerWeightsHistoryCallback(Callback):
+    """
+    Snapshots the probe's learned layer weights every ``every_n_steps``
+    training steps and saves their evolution to ``layer_weights_history.json``
+    in the log directory at the end of fit. Does nothing for probes without
+    weighted layer pooling.
+    """
+
+    def __init__(self, every_n_steps: int = 50):
+        super().__init__()
+        self.every_n_steps = every_n_steps
+        self.snapshots = []
+
+    @staticmethod
+    def _layer_pooling(pl_module):
+        layer_pooling = getattr(
+            getattr(pl_module, "probe", None), "layer_pooling", None
+        )
+        return layer_pooling if hasattr(layer_pooling, "get_weights") else None
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        layer_pooling = self._layer_pooling(pl_module)
+        if layer_pooling is None or trainer.global_step % self.every_n_steps != 0:
+            return
+        weights = layer_pooling.get_weights().detach().cpu().tolist()
+        self.snapshots.append({"step": trainer.global_step, "weights": weights})
+
+    def on_fit_end(self, trainer, pl_module):
+        if not self.snapshots:
+            return
+
+        weights_file = os.path.join(
+            trainer.log_dir or os.getcwd(), "layer_weights_history.json"
+        )
+        # Include layer_idx mapping so we know which layers the weights correspond to
+        layer_idx = getattr(pl_module, "layer_idx", None)
+        layer_indices = (
+            layer_idx
+            if isinstance(layer_idx, list)
+            else list(range(getattr(pl_module, "num_layers", None) or 0))
+        )
+        try:
+            with open(weights_file, "w") as f:
+                json.dump(
+                    {"layer_indices": layer_indices, "snapshots": self.snapshots},
+                    f,
+                    indent=2,
+                )
+            print(f"Layer weight history saved to {weights_file}")
+        except Exception as e:
+            print(f"Failed to save layer weight history: {e}")

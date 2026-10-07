@@ -227,3 +227,32 @@ def test_plot_probe_training_with_elapsed_time(tmp_path):
 
     assert (out_dir / "probe_loss_plots.png").exists()
     assert (out_dir / "probe_loss_plots.pdf").exists()
+
+
+def test_calibration_trainer_writes_layer_weights_history(tmp_path):
+    from torch.utils.data import DataLoader
+
+    from callm.callbacks import LayerWeightsHistoryCallback
+    from callm.models import ConfidenceAugmentedLLM
+
+    data = [
+        {"activations": torch.randn(2, 4), "correct": torch.tensor(i % 2)}
+        for i in range(8)
+    ]
+    trainer = CalibrationTrainer(
+        default_root_dir=str(tmp_path),
+        accelerator="cpu",
+        max_steps=3,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    assert any(isinstance(cb, LayerWeightsHistoryCallback) for cb in trainer.callbacks)
+    model = ConfidenceAugmentedLLM(model_dim=4, layer_idx=[7, 9])
+
+    trainer.fit(model, DataLoader(data, batch_size=2))
+
+    with open(os.path.join(trainer.log_dir, "layer_weights_history.json")) as f:
+        history = json.load(f)
+    assert history["layer_indices"] == [7, 9]
+    # Snapshot at step 0 holds the initial (uniform) weights
+    assert history["snapshots"] == [{"step": 0, "weights": [0.5, 0.5]}]
