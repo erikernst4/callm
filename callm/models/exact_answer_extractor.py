@@ -23,6 +23,8 @@ class ExactAnswerExtractorModule(BaseLightningModule):
     For incorrect predictions, queries Gemini to extract the short answer entity.
     """
 
+    flush_prefix = "temp_exact_answer_results"
+
     def __init__(
         self,
         model_name: str = "gemini-3.5-flash-lite",
@@ -217,38 +219,24 @@ class ExactAnswerExtractorModule(BaseLightningModule):
 
             self.outputs.append(result)
 
-        if (
-            self.flush_outputs_every_n_steps > 0
-            and len(self.outputs) >= self.flush_outputs_every_n_steps
-        ):
-            self._flush_outputs(prefix="temp_exact_answer_results")
+        self._maybe_flush()
 
         return {"batch_size": len(questions)}
 
-    def on_validation_epoch_end(self):
+    def process_outputs(self, outputs: list[dict]):
         """Save extraction results to CSV."""
-        if self.outputs and (
-            self.flushed_output_files or self.flush_outputs_every_n_steps > 0
-        ):
-            self._flush_outputs(prefix="temp_exact_answer_results")
+        outputs.sort(key=lambda x: x["index"])
 
-        self._reload_flushed_outputs()
-
-        if len(self.outputs) == 0:
-            return
-
-        self.outputs.sort(key=lambda x: x["index"])
-
-        total = len(self.outputs)
-        valid_count = sum(1 for r in self.outputs if r.get("valid_exact_answer"))
+        total = len(outputs)
+        valid_count = sum(1 for r in outputs if r.get("valid_exact_answer"))
         no_answer_count = sum(
-            1 for r in self.outputs if r.get("exact_answer", "").upper() == "NO ANSWER"
+            1 for r in outputs if r.get("exact_answer", "").upper() == "NO ANSWER"
         )
         print(
             f"\nExtraction stats: {valid_count}/{total} valid, {no_answer_count} NO ANSWER"
         )
 
-        log_dir = self.trainer.log_dir or os.getcwd()
+        log_dir = self.log_dir
         results_file = os.path.join(log_dir, "evaluation_results_exact.csv")
 
         def short_output(txt: str, limit: int = 200) -> str:
@@ -273,7 +261,7 @@ class ExactAnswerExtractorModule(BaseLightningModule):
                         "Raw Output",
                     ]
                 )
-                for result in self.outputs:
+                for result in outputs:
                     conf_str = (
                         f"{float(result['confidence']):.6f}"
                         if result["confidence"] not in ["nan", "", None]
@@ -303,5 +291,3 @@ class ExactAnswerExtractorModule(BaseLightningModule):
             print(f"\nExact answer results saved to {results_file}")
         except Exception as e:
             print(f"Failed to save exact answer results: {e}")
-
-        self.outputs = []

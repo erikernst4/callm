@@ -91,6 +91,8 @@ def _log_calibration_metrics(
 
 
 class LLM(BaseLightningModule):
+    flush_prefix = "temp_val_outputs"
+
     def __init__(
         self,
         extractor: BaseExtractor,
@@ -259,34 +261,17 @@ class LLM(BaseLightningModule):
 
             self.outputs.append(out)
 
-        # Periodically flush outputs to disk to save memory
-        if (
-            self.flush_outputs_every_n_steps > 0
-            and len(self.outputs) >= self.flush_outputs_every_n_steps
-        ):
-            self._flush_outputs(prefix="temp_val_outputs")
-
+        self._maybe_flush()
         return {"batch_size": len(questions)}
 
-    def on_validation_epoch_end(self):
+    def process_outputs(self, outputs: list[dict]):
         """
         Decode outputs, extract answers/confidence, and save to CSV.
         If the datamodule does not require semantic equivalence checking,
         compute correctness and calibration metrics directly.
         """
-        # Flush any remaining outputs
-        if self.outputs and (
-            self.flushed_output_files or self.flush_outputs_every_n_steps > 0
-        ):
-            self._flush_outputs(prefix="temp_val_outputs")
-
-        self._reload_flushed_outputs()
-
-        if len(self.outputs) == 0:
-            return
-
         # Decode all output IDs and extract answers/confidence
-        for out in self.outputs:
+        for out in outputs:
             raw_output = self.tokenizer.decode(
                 out["output_ids"], skip_special_tokens=True
             )
@@ -300,7 +285,7 @@ class LLM(BaseLightningModule):
             out["confidence"] = confidence
 
         # Save outputs to CSV for evaluator
-        log_dir = self.trainer.log_dir or os.getcwd()
+        log_dir = self.log_dir
         outputs_file = os.path.join(log_dir, "llm_outputs.csv")
 
         def short_output(
@@ -313,14 +298,14 @@ class LLM(BaseLightningModule):
                 txt = txt[:limit] + ("..." if len(txt) > limit else "")
             return txt.replace("\n", "\\n")
 
-        has_choices = any("choices" in out for out in self.outputs)
+        has_choices = any("choices" in out for out in outputs)
         headers = ["question", "gold_answers"]
         if has_choices:
             headers.append("choices")
         headers.extend(["pred_answer", "confidence", "raw_output"])
 
         rows = []
-        for out in self.outputs:
+        for out in outputs:
             # Format gold_answers as a string representation
             gold_str = "|".join(out["gold_answers"]) if out["gold_answers"] else ""
             conf_str = (
@@ -351,9 +336,6 @@ class LLM(BaseLightningModule):
         datamodule = self.trainer.datamodule
         if not getattr(datamodule, "requires_semantic_equivalence", False):
             self._calculate_metrics_direct()
-
-        # Clear outputs for next epoch
-        self.outputs = []
 
     def _calculate_metrics_direct(self):
         """

@@ -17,6 +17,8 @@ from google.genai import types
 
 
 class GCPLLM(BaseLightningModule):
+    flush_prefix = "temp_val_outputs"
+
     def __init__(
         self,
         extractor: BaseExtractor,
@@ -177,33 +179,18 @@ class GCPLLM(BaseLightningModule):
 
             self.outputs.append(out)
 
-        # Periodically flush outputs to disk to save memory
-        if (
-            self.flush_outputs_every_n_steps > 0
-            and len(self.outputs) >= self.flush_outputs_every_n_steps
-        ):
-            self._flush_outputs(prefix="temp_val_outputs")
+        self._maybe_flush()
 
         return {"batch_size": len(questions)}
 
-    def on_validation_epoch_end(self):
+    def process_outputs(self, outputs: list[dict]):
         """
         Decode outputs, extract answers/confidence, and save to CSV.
         If the datamodule does not require semantic equivalence checking,
         compute correctness and calibration metrics directly.
         """
-        if self.outputs and (
-            self.flushed_output_files or self.flush_outputs_every_n_steps > 0
-        ):
-            self._flush_outputs(prefix="temp_val_outputs")
-
-        self._reload_flushed_outputs()
-
-        if len(self.outputs) == 0:
-            return
-
         # Extract answer and confidence using the same BaseExtractor logic
-        for out in self.outputs:
+        for out in outputs:
             raw_output = out.get("raw_output", "")
 
             # BaseExtractor can take logits when return_logits is True
@@ -214,7 +201,7 @@ class GCPLLM(BaseLightningModule):
             out["pred_answer"] = pred_answer
             out["confidence"] = confidence
 
-        log_dir = self.trainer.log_dir or os.getcwd()
+        log_dir = self.log_dir
         outputs_file = os.path.join(log_dir, "llm_outputs.csv")
 
         def short_output(txt: str, limit: int = 200) -> str:
@@ -226,7 +213,7 @@ class GCPLLM(BaseLightningModule):
         try:
             with open(outputs_file, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                has_choices = any("choices" in out for out in self.outputs)
+                has_choices = any("choices" in out for out in outputs)
                 headers = [
                     "question",
                     "gold_answers",
@@ -242,7 +229,7 @@ class GCPLLM(BaseLightningModule):
                 )
                 writer.writerow(headers)
 
-                for out in self.outputs:
+                for out in outputs:
                     gold_str = (
                         "|".join(out["gold_answers"]) if out["gold_answers"] else ""
                     )
@@ -276,9 +263,6 @@ class GCPLLM(BaseLightningModule):
         datamodule = self.trainer.datamodule
         if not getattr(datamodule, "requires_semantic_equivalence", False):
             self._calculate_metrics_direct()
-
-        # Clear outputs for next epoch
-        self.outputs = []
 
     def _calculate_metrics_direct(self):
         """

@@ -2,8 +2,6 @@ import torch
 import numpy as np
 import os
 import csv
-import shutil
-import glob
 from ecuas import (
     ExpectedCalibrationError,
     ConfidenceBrierScore,
@@ -24,6 +22,8 @@ class GCPEvaluatorModule(BaseLightningModule):
     and exact matches, preventing redundant external API calls.
     """
 
+    flush_prefix = "temp_eval_results"
+
     def __init__(
         self,
         model_name: str = "gemini-3-flash-preview",
@@ -41,7 +41,6 @@ class GCPEvaluatorModule(BaseLightningModule):
         )
 
         self.model_name = model_name
-        self.initial_flushed_files = []
 
         kwargs = {"vertexai": True, "location": location}
 
@@ -123,57 +122,22 @@ class GCPEvaluatorModule(BaseLightningModule):
                 }
             )
 
-        # Periodically flush results to disk to save memory
-        if (
-            self.flush_outputs_every_n_steps > 0
-            and len(self.outputs) >= self.flush_outputs_every_n_steps
-        ):
-            self._flush_outputs(prefix="temp_eval_results")
+        self._maybe_flush()
 
         return {"batch_size": len(exact_matches)}
 
     def on_validation_start(self):
         """Prepare evaluation by loading previous results if resuming."""
         if self.resume_from:
-            if not os.path.exists(self.resume_from):
-                raise ValueError(f"Resume path {self.resume_from} does not exist.")
-            else:
-                pattern = os.path.join(self.resume_from, "temp_eval_results_rank0_*.pt")
-                found_files = sorted(
-                    glob.glob(pattern),
-                    key=lambda x: int(x.split("_")[-1].split(".")[0]),
-                )
+            self._adopt_resume_files(self._find_resume_files(self.resume_from))
 
-                if found_files:
-                    print(f"Found {len(found_files)} temp files to resume from.")
-                    self.initial_flushed_files = found_files
-
-        for i, src_path in enumerate(self.initial_flushed_files):
-            filename = os.path.join(
-                self.trainer.log_dir, f"temp_eval_results_rank{self.global_rank}_{i}.pt"
-            )
-            if os.path.abspath(src_path) != os.path.abspath(filename):
-                shutil.copy(src_path, filename)
-
-            self.flushed_output_files.append(filename)
-
-    def on_validation_epoch_end(self):
+    def process_outputs(self, outputs: list[dict]):
         """
         Compute calibration metrics and save results.
         """
-        if self.outputs and (
-            self.flushed_output_files or self.flush_outputs_every_n_steps > 0
-        ):
-            self._flush_outputs(prefix="temp_eval_results")
+        outputs.sort(key=lambda x: x["index"])
 
-        self._reload_flushed_outputs()
-
-        if len(self.outputs) == 0:
-            return
-
-        self.outputs.sort(key=lambda x: x["index"])
-
-        for result in self.outputs:
+        for result in outputs:
             if "correct" in result:
                 continue
 
@@ -193,7 +157,7 @@ class GCPEvaluatorModule(BaseLightningModule):
 
         self.calculate_metrics()
 
-        log_dir = self.trainer.log_dir or os.getcwd()
+        log_dir = self.log_dir
         results_file = os.path.join(log_dir, "evaluation_results.csv")
 
         def format_field(txt: str) -> str:
@@ -215,7 +179,7 @@ class GCPEvaluatorModule(BaseLightningModule):
                         "Raw Output",
                     ]
                 )
-                for result in self.outputs:
+                for result in outputs:
                     conf_str = (
                         f"{float(result['confidence']):.6f}"
                         if result["confidence"] not in ["nan", "", None]
@@ -236,9 +200,6 @@ class GCPEvaluatorModule(BaseLightningModule):
             print(f"\nGCP Evaluation results saved to {results_file}")
         except Exception as e:
             print(f"Failed to save GCP evaluation results: {e}")
-
-        # Clear for next epoch
-        self.outputs = []
 
     def load_evaluation_results_from_csv(self, csv_path: str):
         if not os.path.exists(csv_path):

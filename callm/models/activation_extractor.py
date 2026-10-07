@@ -21,6 +21,8 @@ class ActivationExtractor(BaseLightningModule):
     and save them as sharded .pt files alongside the llm_outputs.csv.
     """
 
+    flush_prefix = "activations_chunk"
+
     def __init__(
         self,
         llm: LLM,
@@ -78,21 +80,11 @@ class ActivationExtractor(BaseLightningModule):
                 self.initial_flushed_files = valid_files
                 self.sample_counter = resumed_samples
 
-        log_dir = self.trainer.log_dir or self.output_dir
-        os.makedirs(log_dir, exist_ok=True)
-        for i, src_path in enumerate(self.initial_flushed_files):
-            filename = os.path.join(
-                log_dir, f"activations_chunk_rank{self.global_rank}_{i}.pt"
-            )
-            if os.path.abspath(src_path) != os.path.abspath(filename):
-                try:
-                    if os.path.exists(filename):
-                        os.remove(filename)
-                    os.link(src_path, filename)
-                except OSError:
-                    shutil.copy(src_path, filename)
-
-            self.flushed_output_files.append(filename)
+        self._adopt_resume_files(
+            self.initial_flushed_files,
+            log_dir=self.trainer.log_dir or self.output_dir,
+            link=True,
+        )
 
     def _extract_gold_answers(self, batch):
         """Extract gold answers from batch. Override for dataset-specific logic."""
@@ -212,11 +204,7 @@ class ActivationExtractor(BaseLightningModule):
             )
 
         # Periodically flush outputs to disk
-        if (
-            self.flush_outputs_every_n_steps > 0
-            and len(self.outputs) >= self.flush_outputs_every_n_steps
-        ):
-            self._flush_outputs(prefix="activations_chunk")
+        self._maybe_flush()
 
         return {"batch_size": batch_size}
 
@@ -227,13 +215,8 @@ class ActivationExtractor(BaseLightningModule):
         shard_size = 1000
 
         # Case 1: Chunks were periodically flushed to disk
-        if self.flushed_output_files or (
-            self.flush_outputs_every_n_steps > 0
-            and len(self.outputs) > 0
-            and self.flushed_output_files
-        ):
-            if self.outputs:
-                self._flush_outputs(prefix="activations_chunk")
+        if self.flushed_output_files:
+            self._flush_outputs()
 
             chunk_files = list(self.flushed_output_files)
             if not chunk_files:

@@ -703,7 +703,7 @@ class TestFlushing:
         _attach_trainer(module, tmp_path)
         outputs = SAMPLE_OUTPUTS[factory_name]()
         module.outputs = outputs[:1]
-        module._flush_outputs(prefix=prefix)
+        module._flush_outputs()
         module.outputs = outputs[1:]
 
         module.on_validation_epoch_end()
