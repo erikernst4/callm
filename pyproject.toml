@@ -33,3 +33,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["callm"]
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]
