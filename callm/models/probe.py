@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from .layer_pooling import LayerWeightedAverage
+from .sequence_pooling import masked_mean
 
 
 class Probe(nn.Module):
@@ -69,13 +70,7 @@ class Probe(nn.Module):
         """Pool (#batch, #seq, #model_dim) activations to (#batch, #model_dim)."""
         if self.seq_pooling is not None:
             return self.seq_pooling(activations, mask=seq_mask)
-        if seq_mask is None:
-            # Default mean pooling (backward compatible)
-            return activations.mean(dim=1)
-        # Masked mean pooling
-        mask = seq_mask.unsqueeze(-1).to(dtype=activations.dtype)
-        lengths = mask.sum(dim=1).clamp(min=1)
-        return (activations * mask).sum(dim=1) / lengths
+        return masked_mean(activations, seq_mask)
 
     def classify(self, pooled: torch.Tensor) -> torch.Tensor:
         """Map pooled (#batch, #model_dim) activations to confidences (#batch)."""
@@ -180,10 +175,7 @@ class SplitProbe(nn.Module):
         if activations.ndim == 3:
             if self.seq_pooling is not None:
                 return self.seq_pooling[part](activations, mask=seq_mask)
-            if seq_mask is None:
-                return activations.mean(dim=1)
-            mask = seq_mask.unsqueeze(-1).to(dtype=activations.dtype)
-            return (activations * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+            return masked_mean(activations, seq_mask)
         if activations.ndim != 2:
             raise ValueError(
                 f"Expected 2D or 3D activations after layer pooling, got {activations.ndim}D"

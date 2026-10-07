@@ -17,6 +17,18 @@ import torch
 import torch.nn as nn
 
 
+def masked_mean(x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+    """
+    Mean over the sequence dimension of (batch, seq_len, model_dim) ``x``,
+    counting only positions where ``mask`` (batch, seq_len) is True.
+    """
+    if mask is None:
+        return x.mean(dim=1)
+    x_masked = x * mask.unsqueeze(-1).to(dtype=x.dtype)
+    lengths = mask.sum(dim=1, keepdim=True).clamp(min=1).to(dtype=x.dtype)
+    return x_masked.sum(dim=1) / lengths  # (batch, model_dim)
+
+
 class MeanPooling(nn.Module):
     """
     Mean pooling over the sequence dimension.
@@ -39,11 +51,7 @@ class MeanPooling(nn.Module):
         Returns:
             (batch, model_dim)
         """
-        if mask is not None:
-            x_masked = x * mask.unsqueeze(-1).to(dtype=x.dtype)
-            lengths = mask.sum(dim=1, keepdim=True).clamp(min=1).to(dtype=x.dtype)
-            return x_masked.sum(dim=1) / lengths  # (batch, model_dim)
-        return x.mean(dim=1)
+        return masked_mean(x, mask)
 
 
 class AttentivePooling(nn.Module):
