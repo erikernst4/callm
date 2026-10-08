@@ -5,7 +5,7 @@ from .confidence_llm import (
     LiveEvalConfidenceAugmentedLLM,
     SplitConfidenceAugmentedLLM,
 )
-from .evaluator import EvaluatorModule
+from .evaluator import BaseEvaluatorModule, EvaluatorModule
 from .gcp_llm import GCPLLM
 from .gcp_evaluator import GCPEvaluatorModule
 from .probe import Probe, SplitProbe
@@ -29,6 +29,7 @@ from .layer_pooling import (
 
 __all__ = [
     "LLM",
+    "BaseEvaluatorModule",
     "EvaluatorModule",
     "GCPLLM",
     "GCPEvaluatorModule",

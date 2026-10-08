@@ -44,6 +44,19 @@ def get_tokenizer_for_model(model_name: str, hf_token: str = None):
     return tokenizer
 
 
+def generation_pad_token_id(model, tokenizer, is_seq2seq: bool):
+    """
+    ``pad_token_id`` to pass to ``generate()``: the model config's, else the
+    tokenizer's, for causal models; ``None`` for seq2seq models.
+    """
+    if is_seq2seq:
+        return None
+    pad_token_id = getattr(model.config, "pad_token_id", None)
+    if pad_token_id is None:
+        pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    return pad_token_id
+
+
 def initialize_model(model_name: str, hf_token: str = None):
     model = None
     is_seq2seq = None

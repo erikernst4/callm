@@ -380,8 +380,10 @@ class TestEvaluatorModuleCharacterization:
             "confidence",
             "raw_output",
             "exact_match",
+            "cached_correct",
             "output_ids",
         }
+        assert evaluator.outputs[0]["cached_correct"] is None
 
     def test_validation_step_seq2seq_keeps_full_generation(self):
         evaluator = self._make(is_seq2seq=True)

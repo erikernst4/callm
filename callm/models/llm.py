@@ -3,7 +3,11 @@ from __future__ import annotations
 import torch
 import os
 from callm.extractors import BaseExtractor
-from callm.utils import initialize_model, get_tokenizer_for_model
+from callm.utils import (
+    generation_pad_token_id,
+    get_tokenizer_for_model,
+    initialize_model,
+)
 from callm.models.base import BaseLightningModule
 from callm.models.outputs import (
     get_gold_answers,
@@ -45,11 +49,9 @@ class LLM(BaseLightningModule):
             self.model.config.pad_token_id = self.model.config.eos_token_id
 
         # Causal models get an explicit pad_token_id for generate()
-        self.pad_token_id = None
-        if not self.is_seq2seq:
-            self.pad_token_id = getattr(self.model.config, "pad_token_id", None)
-            if self.pad_token_id is None:
-                self.pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
+        self.pad_token_id = generation_pad_token_id(
+            self.model, self.tokenizer, self.is_seq2seq
+        )
 
         if not train:
             self.model.eval()
