@@ -1,3 +1,4 @@
+from jsonargparse import set_parsing_settings
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.trainer import Trainer
 from callm.models.evaluator import EvaluatorModule
@@ -22,7 +23,7 @@ class CalibrationTrainer(Trainer):
     ):
         # Ensure CSVLogger is added by default to capture metrics
         loggers = kwargs.get("logger")
-        save_dir = kwargs.get("default_root_dir", os.getcwd())
+        save_dir = kwargs.get("default_root_dir") or os.getcwd()
         csv_logger = CSVLogger(save_dir=save_dir)
         if loggers is None or loggers is True:
             kwargs["logger"] = csv_logger
@@ -49,6 +50,24 @@ class CalibrationTrainer(Trainer):
         self.evaluate_correctness = evaluate_correctness
         self.evaluator_model_name = evaluator_model_name
         self.evaluator_batch_size = evaluator_batch_size
+
+    def _default_evaluator(
+        self,
+        flush_outputs_every_n_steps: int | None,
+        save_outputs: bool | None,
+        resume_from: str | None,
+    ) -> EvaluatorModule:
+        """``EvaluatorModule`` for ``evaluator_model_name``; options left as
+        ``None`` keep the module's defaults."""
+        options = {
+            "flush_outputs_every_n_steps": flush_outputs_every_n_steps,
+            "save_outputs": save_outputs,
+            "resume_from": resume_from,
+        }
+        return EvaluatorModule(
+            model_name=self.evaluator_model_name,
+            **{k: v for k, v in options.items() if v is not None},
+        )
 
     def evaluation(
         self,
@@ -100,11 +119,8 @@ class CalibrationTrainer(Trainer):
             )[-1]
 
             if evaluator_model is None:
-                evaluator_model = EvaluatorModule(
-                    model_name=self.evaluator_model_name,
-                    flush_outputs_every_n_steps=flush_outputs_every_n_steps,
-                    save_outputs=save_outputs,
-                    resume_from=resume_from,
+                evaluator_model = self._default_evaluator(
+                    flush_outputs_every_n_steps, save_outputs, resume_from
                 )
 
             print(f"Using existing CSV for metrics computation: {csv_path}")
@@ -157,11 +173,8 @@ class CalibrationTrainer(Trainer):
                 evaluator_dm.previous_eval_csv = previous_eval_csv
 
         if evaluator_model is None:
-            evaluator_model = EvaluatorModule(
-                model_name=self.evaluator_model_name,
-                flush_outputs_every_n_steps=flush_outputs_every_n_steps,
-                save_outputs=save_outputs,
-                resume_from=resume_from,
+            evaluator_model = self._default_evaluator(
+                flush_outputs_every_n_steps, save_outputs, resume_from
             )
 
         # Configure logging to a new folder with _evaluation suffix
@@ -271,6 +284,11 @@ class CalibrationCLI(LightningCLI):
 
     def __init__(self, *args, **kwargs):
         kwargs["trainer_class"] = CalibrationTrainer
+        # With parser_mode "omegaconf+", interpolations like
+        # ${trainer.evaluator_model_name} are resolved after command-line
+        # overrides; making them relative lets them resolve within the
+        # subcommand's config (e.g. under "evaluation.").
+        set_parsing_settings(omegaconf_absolute_to_relative_paths=True)
         super().__init__(*args, **kwargs)
 
     def after_validate(self):
