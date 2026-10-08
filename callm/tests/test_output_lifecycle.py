@@ -511,6 +511,38 @@ class TestLLMForwardAndInit:
             assert not param.requires_grad
             model.eval.assert_called_once()
 
+    def test_full_sequence_ends_answers_at_first_eos(self, make_llm):
+        llm = make_llm(tokenizer=Mock(eos_token_id=2, pad_token_id=None))
+        assert llm.eos_token_ids == [2]
+        prompt = torch.tensor([[0, 5], [6, 7], [6, 8]])
+        mask = torch.tensor([[0, 1], [1, 1], [1, 1]])
+        # Row 0 finished early: the batch keeps filling it (here with EOS ids).
+        # Row 1 ends exactly at the last step; row 2 never produced an EOS.
+        generated = torch.tensor(
+            [[0, 5, 8, 2, 2, 2], [6, 7, 3, 4, 9, 2], [6, 8, 3, 4, 9, 9]]
+        )
+
+        full_ids, full_mask = llm.full_sequence(prompt, mask, generated)
+
+        assert full_ids is generated
+        assert full_mask.tolist() == [
+            [0, 1, 1, 1, 0, 0],
+            [1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1],
+        ]
+
+    def test_eos_token_ids_resolution(self):
+        from callm.models.llm import _eos_token_ids
+
+        model = Mock(generation_config=Mock(eos_token_id=[2, 3]))
+        assert _eos_token_ids(model, Mock(eos_token_id=9)) == [2, 3]
+        model = Mock(generation_config=Mock(eos_token_id=4))
+        assert _eos_token_ids(model, Mock(eos_token_id=9)) == [4]
+        model = Mock(generation_config=Mock(eos_token_id=None))
+        assert _eos_token_ids(model, Mock(eos_token_id=9)) == [9]
+        # Nothing usable: answers are not truncated
+        assert _eos_token_ids(Mock(), Mock()) == []
+
     def test_strip_prompt(self, make_llm):
         ids = torch.tensor([[1, 2, 3], [4, 5, 6]])
         prompt = torch.zeros(2, 2)

@@ -19,6 +19,7 @@ def _make_mock_llm(is_seq2seq=False, model_name="Qwen/Qwen3.5-9B"):
     mock_llm.model_name = model_name
     mock_llm.is_seq2seq = is_seq2seq
     mock_llm.full_sequence = functools.partial(LLM.full_sequence, mock_llm)
+    mock_llm.eos_token_ids = []
     mock_llm.tokenizer = Mock()
     mock_llm.tokenizer.decode.return_value = "Guess: Paris"
     mock_llm.extractor.return_value = ("Paris", 0.9)

@@ -17,6 +17,25 @@ from callm.models.outputs import (
 )
 
 
+def _eos_token_ids(model, tokenizer) -> list[int]:
+    """
+    Token ids that end a generated sequence: the model's generation config
+    (what ``generate()`` stops on), else the tokenizer's EOS; empty if neither
+    is available.
+    """
+    sources = (getattr(model, "generation_config", None), tokenizer)
+    for eos in (getattr(source, "eos_token_id", None) for source in sources):
+        if isinstance(eos, int):
+            return [eos]
+        if (
+            isinstance(eos, (list, tuple))
+            and eos
+            and all(isinstance(e, int) for e in eos)
+        ):
+            return list(eos)
+    return []
+
+
 class LLM(BaseLightningModule):
     flush_prefix = "temp_val_outputs"
 
@@ -52,6 +71,7 @@ class LLM(BaseLightningModule):
         self.pad_token_id = generation_pad_token_id(
             self.model, self.tokenizer, self.is_seq2seq
         )
+        self.eos_token_ids = _eos_token_ids(self.model, self.tokenizer)
 
         if not train:
             self.model.eval()
@@ -136,17 +156,22 @@ class LLM(BaseLightningModule):
         that extracts activations of a generated answer.
 
         For causal models ``generated_ids`` already is [prompt | answer]; the
-        mask keeps the prompt's (possibly left-padded) mask and appends ones
-        for the generated tokens. Seq2seq models use the encoder input only.
+        mask keeps the prompt's (possibly left-padded) mask and marks each
+        answer's tokens up to and including its first EOS. In a batch,
+        ``generate()`` keeps filling sequences that finished early, so tokens
+        after the first EOS are masked out; this matches batch size 1, where
+        nothing follows the EOS. Seq2seq models use the encoder input only.
         """
         if self.is_seq2seq:
             return input_ids, attention_mask
-        answer_mask = torch.ones(
-            attention_mask.shape[0],
-            generated_ids.shape[1] - input_ids.shape[1],
-            device=attention_mask.device,
-            dtype=attention_mask.dtype,
-        )
+        answer_ids = generated_ids[:, input_ids.shape[1] :]
+        answer_mask = torch.ones_like(answer_ids, dtype=attention_mask.dtype)
+        if self.eos_token_ids:
+            is_eos = torch.isin(
+                answer_ids, torch.tensor(self.eos_token_ids, device=answer_ids.device)
+            ).long()
+            # Positions after the first EOS (the EOS itself stays)
+            answer_mask[(is_eos.cumsum(dim=1) - is_eos) > 0] = 0
         return generated_ids, torch.cat([attention_mask, answer_mask], dim=1)
 
     def training_step(self, batch, batch_idx):

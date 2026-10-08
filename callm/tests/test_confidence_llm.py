@@ -218,6 +218,7 @@ class TestLiveEval:
         llm.is_seq2seq = is_seq2seq
         llm.strip_prompt = functools.partial(LLM.strip_prompt, llm)
         llm.full_sequence = functools.partial(LLM.full_sequence, llm)
+        llm.eos_token_ids = []
         return llm
 
     @staticmethod
