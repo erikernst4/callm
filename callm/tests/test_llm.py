@@ -13,32 +13,6 @@ class TestLLMInitialization:
 
     @patch("callm.models.llm.get_tokenizer_for_model")
     @patch("callm.models.llm.initialize_model")
-    def test_flan_t5_initialization(self, mock_init_model, mock_get_tokenizer):
-        """Test initialization with flan-t5 model."""
-        # Setup mock model with required attributes
-        mock_model_instance = Mock()
-        mock_model_instance.parameters.return_value = iter([])
-        mock_model_instance.config = Mock()
-        mock_model_instance.config.configure_mock(text_config=Mock(pad_token_id=0))
-        mock_model_instance.config.pad_token_id = 0
-        mock_model_instance.config.eos_token_id = 1
-        mock_init_model.return_value = (mock_model_instance, True)  # is_seq2seq=True
-
-        mock_tokenizer_instance = Mock()
-        mock_get_tokenizer.return_value = mock_tokenizer_instance
-
-        llm = LLM(
-            model_name="google/flan-t5-small",
-            train=False,
-            extractor=VerbalizedConfidenceExtractor(),
-        )
-
-        assert llm.model_name == "google/flan-t5-small"
-        assert llm.is_seq2seq is True
-        assert mock_init_model.called
-
-    @patch("callm.models.llm.get_tokenizer_for_model")
-    @patch("callm.models.llm.initialize_model")
     def test_llama_initialization(self, mock_init_model, mock_get_tokenizer):
         """Test initialization with Llama model."""
         # Setup mock model
@@ -47,7 +21,7 @@ class TestLLMInitialization:
         mock_model_instance.config = Mock(spec=["pad_token_id", "eos_token_id"])
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
-        mock_init_model.return_value = (mock_model_instance, False)  # is_seq2seq=False
+        mock_init_model.return_value = mock_model_instance
 
         mock_tokenizer_instance = Mock()
         mock_get_tokenizer.return_value = mock_tokenizer_instance
@@ -60,7 +34,6 @@ class TestLLMInitialization:
         )
 
         assert llm.model_name == "meta-llama/Llama-2-7b-chat-hf"
-        assert llm.is_seq2seq is False
 
     @patch("callm.models.llm.get_tokenizer_for_model")
     @patch("callm.models.llm.initialize_model")
@@ -92,13 +65,13 @@ class TestLLMForward:
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
         mock_model_instance.generate.return_value = torch.tensor([[1, 2, 3]])
-        mock_init_model.return_value = (mock_model_instance, True)  # is_seq2seq=True
+        mock_init_model.return_value = mock_model_instance
 
         mock_tokenizer_instance = Mock()
         mock_get_tokenizer.return_value = mock_tokenizer_instance
 
         llm = LLM(
-            model_name="google/flan-t5-small",
+            model_name="Qwen/Qwen3.5-9B",
             train=False,
             extractor=VerbalizedConfidenceExtractor(),
         )
@@ -127,7 +100,7 @@ class TestLLMValidation:
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
         mock_model_instance.generate.return_value = torch.tensor([[1, 2, 3]])
-        mock_init_model.return_value = (mock_model_instance, True)  # is_seq2seq=True
+        mock_init_model.return_value = mock_model_instance
 
         mock_tokenizer_instance = Mock()
         mock_tokenizer_instance.batch_decode.return_value = [
@@ -137,7 +110,7 @@ class TestLLMValidation:
 
         # Create LLM
         llm = LLM(
-            model_name="google/flan-t5-small",
+            model_name="Qwen/Qwen3.5-9B",
             train=False,
             extractor=VerbalizedConfidenceExtractor(),
         )
@@ -172,7 +145,7 @@ class TestLLMValidation:
         mock_model_instance.config.eos_token_id = 1
         # Mock generate return value for batch of 4
         mock_model_instance.generate.return_value = torch.tensor([[10, 11]] * 4)
-        mock_init_model.return_value = (mock_model_instance, True)
+        mock_init_model.return_value = mock_model_instance
 
         mock_tokenizer_instance = Mock()
         mock_tokenizer_instance.decode.return_value = "decoded answer"
@@ -180,7 +153,7 @@ class TestLLMValidation:
 
         # Initialize LLM with flush every 2 steps
         llm = LLM(
-            model_name="google/flan-t5-small",
+            model_name="Qwen/Qwen3.5-9B",
             train=False,
             extractor=VerbalizedConfidenceExtractor(),
             flush_outputs_every_n_steps=2,
@@ -239,12 +212,12 @@ class TestConfigureOptimizers:
         mock_model_instance.config = Mock(spec=["pad_token_id", "eos_token_id"])
         mock_model_instance.config.pad_token_id = 0
         mock_model_instance.config.eos_token_id = 1
-        mock_init_model.return_value = (mock_model_instance, True)
+        mock_init_model.return_value = mock_model_instance
 
         mock_get_tokenizer.return_value = Mock()
 
         llm = LLM(
-            model_name="google/flan-t5-small",
+            model_name="Qwen/Qwen3.5-9B",
             train=False,
             extractor=VerbalizedConfidenceExtractor(),
         )
@@ -260,7 +233,7 @@ class TestConfigureOptimizers:
         mock_model.config.pad_token_id = 0
         mock_model.config.eos_token_id = 1
         mock_model.parameters.return_value = iter([])  # Ensure it's iterable
-        mock_init_model.return_value = (mock_model, False)  # model, is_seq2seq=False
+        mock_init_model.return_value = mock_model
 
         # Mock tokenizer
         mock_tokenizer = Mock()

@@ -63,7 +63,7 @@ The CLI is built on top of `LightningCLI` and exposes three subcommands:
 ```bash
 # TriviaQA with a local HuggingFace model (default config)
 uv run python main.py validate \
-  --model.init_args.model_name=google/flan-t5-small \
+  --model.init_args.model_name=Qwen/Qwen3.5-9B \
   --data.init_args.batch_size=8
 
 # MMLU with a local model

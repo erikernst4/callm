@@ -104,7 +104,7 @@ class TestEvaluatorModule:
         mock_model.config = Mock()
         mock_model.config.pad_token_id = 0
         mock_model.generate.return_value = torch.tensor([[1, 2]])  # Dummy output
-        mock_init_model.return_value = (mock_model, True)  # is_seq2seq=True
+        mock_init_model.return_value = mock_model
 
         mock_tokenizer = Mock()
         # Decode "Yes" for correctness
@@ -155,7 +155,7 @@ class TestEvaluatorModule:
         mock_model.parameters.return_value = iter([])
         mock_model.config = Mock()
         mock_model.config.pad_token_id = 0
-        mock_init_model.return_value = (mock_model, True)
+        mock_init_model.return_value = mock_model
         mock_get_tokenizer.return_value = Mock()
 
         evaluator = EvaluatorModule(model_name="dummy")
@@ -237,7 +237,7 @@ class TestEvaluatorModule:
         mock_model.config = Mock()
         mock_model.config.pad_token_id = 0
         mock_model.generate.return_value = torch.tensor([[10, 11]] * 3)
-        mock_init_model.return_value = (mock_model, True)
+        mock_init_model.return_value = mock_model
 
         mock_tokenizer = Mock()
         mock_tokenizer.decode.return_value = "Yes"
@@ -303,7 +303,7 @@ class TestEvaluatorModuleCharacterization:
     """Pins EvaluatorModule behaviour that the shared evaluator base must keep."""
 
     @staticmethod
-    def _make(is_seq2seq=False, config=None, tokenizer=None, **kwargs):
+    def _make(config=None, tokenizer=None, **kwargs):
         with (
             patch("callm.models.evaluator.initialize_model") as init_model,
             patch("callm.models.evaluator.get_tokenizer_for_model") as get_tokenizer,
@@ -313,7 +313,7 @@ class TestEvaluatorModuleCharacterization:
             model.config = config or Mock(
                 spec=["pad_token_id", "eos_token_id"], pad_token_id=0, eos_token_id=1
             )
-            init_model.return_value = (model, is_seq2seq)
+            init_model.return_value = model
             get_tokenizer.return_value = tokenizer or Mock(pad_token_id=None)
             return EvaluatorModule(model_name="judge", **kwargs)
 
@@ -357,11 +357,6 @@ class TestEvaluatorModuleCharacterization:
         evaluator.forward(torch.tensor([[1]]), torch.tensor([[1]]))
         assert evaluator.model.generate.call_args.kwargs["pad_token_id"] == 5
 
-    def test_forward_seq2seq_has_no_pad(self):
-        evaluator = self._make(is_seq2seq=True)
-        evaluator.forward(torch.tensor([[1]]), torch.tensor([[1]]))
-        assert "pad_token_id" not in evaluator.model.generate.call_args.kwargs
-
     def test_validation_step_maps_generations_to_non_exact_rows(self):
         evaluator = self._make()
         evaluator.model.generate.return_value = torch.tensor([[5, 6, 7], [7, 8, 9]])
@@ -384,13 +379,6 @@ class TestEvaluatorModuleCharacterization:
             "output_ids",
         }
         assert evaluator.outputs[0]["cached_correct"] is None
-
-    def test_validation_step_seq2seq_keeps_full_generation(self):
-        evaluator = self._make(is_seq2seq=True)
-        evaluator.model.generate.return_value = torch.tensor([[0, 7], [0, 9]])
-        evaluator.validation_step(self._batch(), 0)
-        assert evaluator.outputs[0]["output_ids"].tolist() == [0, 7]
-        assert evaluator.outputs[2]["output_ids"].tolist() == [0, 9]
 
     def test_validation_step_without_inputs_skips_generation(self):
         evaluator = self._make()

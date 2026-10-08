@@ -27,7 +27,7 @@ class AnswersDataModule(LightningDataModule):
     def __init__(
         self,
         llm_outputs_path: str = None,
-        model_name: str = "google/flan-t5-base",
+        model_name: str = "Qwen/Qwen3.5-9B",
         batch_size: int = 1,
         num_workers: int = 8,
         max_length: int = None,

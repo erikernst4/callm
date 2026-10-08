@@ -80,13 +80,13 @@ def make_llm():
         patch("callm.models.llm.get_tokenizer_for_model") as get_tokenizer,
     ):
 
-        def _make(is_seq2seq=False, config=None, tokenizer=None, **kwargs):
+        def _make(config=None, tokenizer=None, **kwargs):
             model = Mock()
             model.parameters.return_value = iter([])
             model.config = config or Mock(
                 spec=["pad_token_id", "eos_token_id"], pad_token_id=0, eos_token_id=1
             )
-            init_model.return_value = (model, is_seq2seq)
+            init_model.return_value = model
             get_tokenizer.return_value = tokenizer or Mock()
             kwargs.setdefault("extractor", Mock())
             return LLM(model_name="m", **kwargs)
@@ -109,7 +109,7 @@ def make_evaluator():
         model = Mock()
         model.parameters.return_value = iter([])
         model.config = Mock(pad_token_id=0, eos_token_id=1)
-        init_model.return_value = (model, False)
+        init_model.return_value = model
         tokenizer = Mock()
         tokenizer.decode.side_effect = lambda ids, **_: {1: " Yes.", 2: "no"}[
             int(ids[0])
@@ -466,22 +466,12 @@ class TestLLMForwardAndInit:
         assert full_ids is generated
         assert torch.equal(full_mask, torch.tensor([[0, 1, 1, 1, 1], [1, 1, 1, 1, 1]]))
 
-        full_ids, full_mask = make_llm(is_seq2seq=True).full_sequence(
-            prompt, mask, torch.tensor([[0, 8], [0, 3]])
-        )
-        assert full_ids is prompt and full_mask is mask
-
     def test_pad_token_id_falls_back_to_tokenizer(self, make_llm):
         config = Mock(spec=["pad_token_id", "eos_token_id"])
         config.pad_token_id, config.eos_token_id = None, None
         llm = make_llm(config=config, tokenizer=Mock(pad_token_id=5))
         llm.forward(torch.tensor([[1]]), torch.tensor([[1]]))
         assert llm.model.generate.call_args.kwargs["pad_token_id"] == 5
-
-    def test_seq2seq_does_not_pass_pad_token_id(self, make_llm):
-        llm = make_llm(is_seq2seq=True)
-        llm.forward(torch.tensor([[1]]), torch.tensor([[1]]))
-        assert "pad_token_id" not in llm.model.generate.call_args.kwargs
 
     def test_pad_token_id_init(self, make_llm):
         config = Mock(spec=["pad_token_id", "eos_token_id"])
@@ -501,7 +491,7 @@ class TestLLMForwardAndInit:
             model = Mock()
             model.parameters.return_value = iter([param])
             model.config = Mock(spec=["pad_token_id", "eos_token_id"], pad_token_id=0)
-            init_model.return_value = (model, False)
+            init_model.return_value = model
             LLM(extractor=Mock(), train=True)
             assert param.requires_grad
             model.eval.assert_not_called()
@@ -550,9 +540,6 @@ class TestLLMForwardAndInit:
             [3],
             [6],
         ]
-        assert [
-            t.tolist() for t in make_llm(is_seq2seq=True).strip_prompt(ids, prompt)
-        ] == [[1, 2, 3], [4, 5, 6]]
 
 
 # ---------------------------------------------------------------------------

@@ -123,7 +123,7 @@ class ActivationExtractor(BaseLightningModule):
             generated_ids = generated_output
 
         batch_size = input_ids.shape[0]
-        input_length = input_ids.shape[1] if not self.llm.is_seq2seq else 0
+        input_length = input_ids.shape[1]
 
         # 2. Run forward pass on full sequence (prompt + answer) to extract activations
         full_ids, full_attention_mask = self.llm.full_sequence(
@@ -137,9 +137,7 @@ class ActivationExtractor(BaseLightningModule):
 
         for i in range(batch_size):
             # Decode generated output
-            gen_tokens = generated_ids[i]
-            if not self.llm.is_seq2seq:
-                gen_tokens = gen_tokens[input_length:]
+            gen_tokens = generated_ids[i][input_length:]
 
             raw_output = self.tokenizer.decode(gen_tokens, skip_special_tokens=True)
             pred_answer, _ = self.llm.extractor(raw_output, None, gen_tokens)

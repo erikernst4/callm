@@ -15,7 +15,7 @@ class TriviaQADataModule(LightningDataModule):
     def __init__(
         self,
         batch_size: int = 32,
-        model_name: str = "google/flan-t5-small",
+        model_name: str = "Qwen/Qwen3.5-9B",
         prompt: Prompt = CHAT_LABEL_PROB_PROMPT_ZERO_SHOT,
         max_samples: int = None,
         seed: int = 42,

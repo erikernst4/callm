@@ -18,7 +18,7 @@ class TestAnswersDataModule:
         """Test default initialization values."""
         dm = AnswersDataModule()
         assert dm.llm_outputs_path is None
-        assert dm.model_name == "google/flan-t5-base"
+        assert dm.model_name == "Qwen/Qwen3.5-9B"
         assert dm.batch_size == 1
         assert dm.num_workers == 8
         assert dm.max_length is None

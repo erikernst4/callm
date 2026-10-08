@@ -65,7 +65,7 @@ def test_interpolations_follow_cli_overrides_in_evaluation(capsys, tmp_path):
     config = _print_config(
         [
             "evaluation",
-            "--trainer.evaluator_model_name=google/flan-t5-base",
+            "--trainer.evaluator_model_name=Qwen/Qwen2.5-3B",
             "--trainer.evaluator_batch_size=8",
             f"--llm_outputs_path={outputs}",
             "--num_workers=2",
@@ -74,7 +74,7 @@ def test_interpolations_follow_cli_overrides_in_evaluation(capsys, tmp_path):
         capsys,
     )
     model, data = config["model"]["init_args"], config["data"]["init_args"]
-    assert model["model_name"] == data["model_name"] == "google/flan-t5-base"
+    assert model["model_name"] == data["model_name"] == "Qwen/Qwen2.5-3B"
     assert data["batch_size"] == 8
     assert data["llm_outputs_path"] == outputs
     assert data["num_workers"] == 2
@@ -115,8 +115,7 @@ def test_evaluation_builds_evaluator_with_module_defaults(tmp_path):
         model = Mock()
         model.parameters.return_value = iter([])
         model.config = Mock(spec=["pad_token_id", "eos_token_id"], pad_token_id=0)
-        init_model.return_value = (model, False)
-        # Options left as None, as when evaluation() is called without them
+        init_model.return_value = model
         trainer.evaluation(llm_outputs_path=str(outputs))
 
     evaluator = validate.call_args.args[0]

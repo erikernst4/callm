@@ -5,7 +5,6 @@ import torch
 from datasets import Dataset
 from transformers import (
     AutoTokenizer,
-    AutoModelForSeq2SeqLM,
     AutoModelForCausalLM,
     Glm4vForConditionalGeneration,
     Mistral3ForConditionalGeneration,
@@ -18,7 +17,7 @@ from callm.config import CACHE_PATH, HF_TOKEN
 def get_tokenizer_for_model(model_name: str, hf_token: str = None):
     if hf_token is None:
         hf_token = HF_TOKEN
-    if model_name.startswith("google/flan-t5") or model_name.startswith("zai-org"):
+    if model_name.startswith("zai-org"):
         tokenizer = AutoTokenizer.from_pretrained(model_name)
     elif model_name.startswith("meta-llama/"):
         tokenizer = AutoTokenizer.from_pretrained(
@@ -44,13 +43,11 @@ def get_tokenizer_for_model(model_name: str, hf_token: str = None):
     return tokenizer
 
 
-def generation_pad_token_id(model, tokenizer, is_seq2seq: bool):
+def generation_pad_token_id(model, tokenizer):
     """
     ``pad_token_id`` to pass to ``generate()``: the model config's, else the
-    tokenizer's, for causal models; ``None`` for seq2seq models.
+    tokenizer's.
     """
-    if is_seq2seq:
-        return None
     pad_token_id = getattr(model.config, "pad_token_id", None)
     if pad_token_id is None:
         pad_token_id = getattr(tokenizer, "pad_token_id", None)
@@ -58,14 +55,11 @@ def generation_pad_token_id(model, tokenizer, is_seq2seq: bool):
 
 
 def initialize_model(model_name: str, hf_token: str = None):
+    """Load a supported causal (decoder-only) model."""
     model = None
-    is_seq2seq = None
     if hf_token is None:
         hf_token = HF_TOKEN
-    if model_name.startswith("google/flan-t5"):
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name, cache_dir=CACHE_PATH)
-        is_seq2seq = True
-    elif model_name == "zai-org/GLM-4.6V-Flash":
+    if model_name == "zai-org/GLM-4.6V-Flash":
         model = model = Glm4vForConditionalGeneration.from_pretrained(
             pretrained_model_name_or_path=model_name,
         )
@@ -80,7 +74,6 @@ def initialize_model(model_name: str, hf_token: str = None):
             trust_remote_code=True if model_name.startswith("Qwen/") else False,
             # use_auth_token=hf_token,
         )
-        is_seq2seq = False
     elif model_name.startswith("mistralai"):
         model = Mistral3ForConditionalGeneration.from_pretrained(
             model_name, quantization_config=FineGrainedFP8Config(dequantize=True)
@@ -90,7 +83,7 @@ def initialize_model(model_name: str, hf_token: str = None):
             f"Model {model_name} not supported in initialize_model"
         )
 
-    return model, is_seq2seq
+    return model
 
 
 def get_last_llm_outputs_path(log_dir: str):

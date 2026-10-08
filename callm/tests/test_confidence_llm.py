@@ -213,9 +213,8 @@ class TestInvalidBatch:
 
 class TestLiveEval:
     @staticmethod
-    def _llm(is_seq2seq=False):
+    def _llm():
         llm = _mock_llm(hidden_size=DIM)
-        llm.is_seq2seq = is_seq2seq
         llm.strip_prompt = functools.partial(LLM.strip_prompt, llm)
         llm.full_sequence = functools.partial(LLM.full_sequence, llm)
         llm.eos_token_ids = []
@@ -275,21 +274,6 @@ class TestLiveEval:
         ]
         expected = model.probe.classify(torch.stack(pooled))
         assert torch.allclose(confidence, expected, atol=1e-6)
-
-    def test_seq2seq_scores_encoder_input(self, tmp_path):
-        llm = self._llm(is_seq2seq=True)
-        prompt, mask = torch.tensor([[1, 2]]), torch.tensor([[1, 1]])
-        llm.side_effect = [torch.tensor([[0, 5]]), _hidden_states(batch=1, seq=2)]
-        model = LiveEvalConfidenceAugmentedLLM(
-            llm=llm, probe_checkpoint=self._checkpoint(tmp_path), layer_idx=0
-        )
-
-        _, confidence = model._generate_and_score(prompt, mask)
-
-        assert llm.call_args_list[1].args[0] is prompt
-        assert llm.call_args_list[1].args[1] is mask
-        # No answer tokens in the encoder input: the answer slice is a zero vector
-        assert torch.allclose(confidence, model.probe.classify(torch.zeros(1, DIM)))
 
     def test_probe_is_loaded_and_frozen(self, tmp_path):
         model = LiveEvalConfidenceAugmentedLLM(

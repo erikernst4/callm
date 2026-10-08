@@ -158,7 +158,7 @@ class EvaluatorModule(BaseEvaluatorModule):
 
     def __init__(
         self,
-        model_name: str = "google/flan-t5-base",
+        model_name: str = "Qwen/Qwen3.5-9B",
         hf_token: str = None,
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
@@ -176,14 +176,12 @@ class EvaluatorModule(BaseEvaluatorModule):
         )
 
         # Load evaluator model
-        self.model, self.is_seq2seq = initialize_model(model_name, hf_token)
+        self.model = initialize_model(model_name, hf_token)
         self.tokenizer = get_tokenizer_for_model(model_name)
 
         if self.model.config.pad_token_id is None:
             self.model.config.pad_token_id = self.model.config.eos_token_id
-        self.pad_token_id = generation_pad_token_id(
-            self.model, self.tokenizer, self.is_seq2seq
-        )
+        self.pad_token_id = generation_pad_token_id(self.model, self.tokenizer)
 
         self.model.eval()
         for param in self.model.parameters():
@@ -214,7 +212,7 @@ class EvaluatorModule(BaseEvaluatorModule):
 
         if batch["input_ids"] is not None:
             input_ids = batch["input_ids"]
-            input_length = input_ids.shape[1] if not self.is_seq2seq else 0
+            input_length = input_ids.shape[1]
 
             with torch.no_grad():
                 output_ids = self.forward(input_ids, batch["attention_mask"])

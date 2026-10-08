@@ -6,34 +6,42 @@ Verifies that:
 2. Non-generative forward pass hidden states are consistent across batch sizes
 3. Attention masking correctly isolates per-sample computations in batched inference
 
-These tests use google/flan-t5-small for speed. The same principles apply to
-larger models like Qwen3.5-9B.
+These tests use a tiny, randomly initialised causal Qwen2 model in float32 on
+CPU (with the Qwen tokenizer and its left padding), so they exercise the same
+padding and masking path as the real decoder-only models. Real models in
+bfloat16 are only approximately batch-invariant: rounding differs between
+batch sizes and can occasionally flip a greedy decoding step.
 """
 
 import pytest
 import torch
-from callm.utils import initialize_model, get_tokenizer_for_model
+from transformers import Qwen2Config, Qwen2ForCausalLM
 
+from callm.utils import get_tokenizer_for_model
 
-# Use small model for fast testing
-TEST_MODEL_NAME = "google/flan-t5-small"
+TOKENIZER_NAME = "Qwen/Qwen2.5-3B"
 
 
 @pytest.fixture(scope="module")
 def model_and_tokenizer():
-    """Load model and tokenizer once for all tests in this module."""
-    model, is_seq2seq = initialize_model(TEST_MODEL_NAME)
-    tokenizer = get_tokenizer_for_model(TEST_MODEL_NAME)
-    model.eval()
+    """Build the tiny model and load the tokenizer once for all tests in this module."""
+    tokenizer = get_tokenizer_for_model(TOKENIZER_NAME)
+    torch.manual_seed(0)
+    config = Qwen2Config(
+        vocab_size=len(tokenizer),
+        hidden_size=64,
+        intermediate_size=128,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        max_position_embeddings=512,
+        pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+    )
+    model = Qwen2ForCausalLM(config).eval()
     for param in model.parameters():
         param.requires_grad = False
-
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    if model.config.pad_token_id is None:
-        model.config.pad_token_id = tokenizer.pad_token_id
-
-    return model, tokenizer, is_seq2seq
+    return model, tokenizer
 
 
 # ── Test prompts with varying lengths ──────────────────────────────────
@@ -47,33 +55,22 @@ TEST_PROMPTS = [
 ]
 
 
+def _hidden_states(model, inputs):
+    with torch.no_grad():
+        outputs = model(
+            input_ids=inputs["input_ids"].to(model.device),
+            attention_mask=inputs["attention_mask"].to(model.device),
+            output_hidden_states=True,
+            return_dict=True,
+        )
+    return outputs.hidden_states[-1]
+
+
 class TestGreedyGenerationDeterminism:
     """Verify that greedy generation is identical across batch sizes."""
 
-    def _generate_single(self, model, tokenizer, prompt, is_seq2seq, max_new_tokens=50):
-        """Generate output for a single prompt (batch_size=1)."""
-        inputs = tokenizer(prompt, return_tensors="pt", padding=True)
-        input_ids = inputs["input_ids"].to(model.device)
-        attention_mask = inputs["attention_mask"].to(model.device)
-
-        with torch.no_grad():
-            output = model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                pad_token_id=model.config.pad_token_id,
-            )
-
-        if is_seq2seq:
-            generated = output[0]
-        else:
-            generated = output[0][input_ids.shape[1] :]
-
-        return tokenizer.decode(generated, skip_special_tokens=True)
-
-    def _generate_batch(self, model, tokenizer, prompts, is_seq2seq, max_new_tokens=50):
-        """Generate outputs for multiple prompts in a single batch."""
+    def _generate_batch(self, model, tokenizer, prompts, max_new_tokens=50):
+        """Generate outputs for prompts in a single batch."""
         inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True)
         input_ids = inputs["input_ids"].to(model.device)
         attention_mask = inputs["attention_mask"].to(model.device)
@@ -87,24 +84,23 @@ class TestGreedyGenerationDeterminism:
                 pad_token_id=model.config.pad_token_id,
             )
 
-        results = []
-        input_length = input_ids.shape[1] if not is_seq2seq else 0
-        for i in range(len(prompts)):
-            if is_seq2seq:
-                generated = output[i]
-            else:
-                generated = output[i][input_length:]
-            results.append(tokenizer.decode(generated, skip_special_tokens=True))
+        input_length = input_ids.shape[1]
+        return [
+            tokenizer.decode(output[i][input_length:], skip_special_tokens=True)
+            for i in range(len(prompts))
+        ]
 
-        return results
+    def _generate_single(self, model, tokenizer, prompt, max_new_tokens=50):
+        """Generate output for a single prompt (batch_size=1)."""
+        return self._generate_batch(model, tokenizer, [prompt], max_new_tokens)[0]
 
     def test_batch1_vs_batch1(self, model_and_tokenizer):
         """Same prompt, two separate batch_size=1 calls → identical output."""
-        model, tokenizer, is_seq2seq = model_and_tokenizer
+        model, tokenizer = model_and_tokenizer
         prompt = TEST_PROMPTS[0]
 
-        out1 = self._generate_single(model, tokenizer, prompt, is_seq2seq)
-        out2 = self._generate_single(model, tokenizer, prompt, is_seq2seq)
+        out1 = self._generate_single(model, tokenizer, prompt)
+        out2 = self._generate_single(model, tokenizer, prompt)
 
         assert out1 == out2, (
             f"Same prompt produced different outputs:\n"
@@ -114,16 +110,11 @@ class TestGreedyGenerationDeterminism:
 
     def test_batch1_vs_batch2(self, model_and_tokenizer):
         """Compare batch_size=1 outputs with batch_size=2 outputs."""
-        model, tokenizer, is_seq2seq = model_and_tokenizer
+        model, tokenizer = model_and_tokenizer
         prompts = TEST_PROMPTS[:2]
 
-        # Generate individually
-        singles = [
-            self._generate_single(model, tokenizer, p, is_seq2seq) for p in prompts
-        ]
-
-        # Generate as a batch
-        batched = self._generate_batch(model, tokenizer, prompts, is_seq2seq)
+        singles = [self._generate_single(model, tokenizer, p) for p in prompts]
+        batched = self._generate_batch(model, tokenizer, prompts)
 
         for i, (single, batch_out) in enumerate(zip(singles, batched)):
             assert single == batch_out, (
@@ -134,13 +125,11 @@ class TestGreedyGenerationDeterminism:
 
     def test_batch1_vs_batch4(self, model_and_tokenizer):
         """Compare batch_size=1 outputs with batch_size=4 outputs."""
-        model, tokenizer, is_seq2seq = model_and_tokenizer
+        model, tokenizer = model_and_tokenizer
         prompts = TEST_PROMPTS[:4]
 
-        singles = [
-            self._generate_single(model, tokenizer, p, is_seq2seq) for p in prompts
-        ]
-        batched = self._generate_batch(model, tokenizer, prompts, is_seq2seq)
+        singles = [self._generate_single(model, tokenizer, p) for p in prompts]
+        batched = self._generate_batch(model, tokenizer, prompts)
 
         for i, (single, batch_out) in enumerate(zip(singles, batched)):
             assert single == batch_out, (
@@ -151,23 +140,15 @@ class TestGreedyGenerationDeterminism:
 
     def test_different_batch_compositions(self, model_and_tokenizer):
         """Same prompt in different batch contexts → identical output."""
-        model, tokenizer, is_seq2seq = model_and_tokenizer
+        model, tokenizer = model_and_tokenizer
         target_prompt = TEST_PROMPTS[0]
 
-        # Batch 1: target + short prompt
+        # Batch 1: target + short prompt; batch 2: target + very different prompt
         batch1 = self._generate_batch(
-            model,
-            tokenizer,
-            [target_prompt, TEST_PROMPTS[1]],
-            is_seq2seq,
+            model, tokenizer, [target_prompt, TEST_PROMPTS[1]]
         )
-
-        # Batch 2: target + very different prompt
         batch2 = self._generate_batch(
-            model,
-            tokenizer,
-            [target_prompt, TEST_PROMPTS[4]],
-            is_seq2seq,
+            model, tokenizer, [target_prompt, TEST_PROMPTS[4]]
         )
 
         assert batch1[0] == batch2[0], (
@@ -177,22 +158,18 @@ class TestGreedyGenerationDeterminism:
         )
 
     def test_batch_size_sweep(self, model_and_tokenizer):
-        """Sweep batch sizes 1..6 and verify all outputs are identical."""
-        model, tokenizer, is_seq2seq = model_and_tokenizer
+        """Sweep batch sizes and verify all outputs match batch_size=1."""
+        model, tokenizer = model_and_tokenizer
         prompts = TEST_PROMPTS
 
-        # Ground truth: batch_size=1
         reference_outputs = [
-            self._generate_single(model, tokenizer, p, is_seq2seq) for p in prompts
+            self._generate_single(model, tokenizer, p) for p in prompts
         ]
 
-        # Test various batch sizes
         for batch_size in [2, 3, 6, 16, 32, 64]:
             for start in range(0, len(prompts), batch_size):
                 batch_prompts = prompts[start : start + batch_size]
-                batch_outputs = self._generate_batch(
-                    model, tokenizer, batch_prompts, is_seq2seq
-                )
+                batch_outputs = self._generate_batch(model, tokenizer, batch_prompts)
 
                 for j, (ref, out) in enumerate(
                     zip(reference_outputs[start : start + batch_size], batch_outputs)
@@ -209,69 +186,23 @@ class TestForwardPassDeterminism:
 
     def test_hidden_states_batch1_vs_batch2(self, model_and_tokenizer):
         """Hidden states should be identical for the same prompt regardless of batch."""
-        model, tokenizer, is_seq2seq = model_and_tokenizer
-
+        model, tokenizer = model_and_tokenizer
         prompts = TEST_PROMPTS[:2]
 
-        # Single forward passes
+        # Single forward passes, keeping only valid (non-padding) positions
         hidden_states_single = []
         for prompt in prompts:
             inputs = tokenizer(prompt, return_tensors="pt", padding=True)
-            input_ids = inputs["input_ids"].to(model.device)
-            attention_mask = inputs["attention_mask"].to(model.device)
-
-            # Seq2seq models require decoder_input_ids for forward pass
-            extra_kwargs = {}
-            if is_seq2seq:
-                decoder_start_id = model.config.decoder_start_token_id or 0
-                extra_kwargs["decoder_input_ids"] = torch.tensor(
-                    [[decoder_start_id]]
-                ).to(model.device)
-
-            with torch.no_grad():
-                outputs = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    output_hidden_states=True,
-                    return_dict=True,
-                    **extra_kwargs,
-                )
-            # Get last layer hidden states, only valid (non-padding) positions
-            if is_seq2seq:
-                hs = outputs.encoder_hidden_states[-1]
-            else:
-                hs = outputs.hidden_states[-1]
-            valid_mask = attention_mask[0] == 1
+            hs = _hidden_states(model, inputs)
+            valid_mask = inputs["attention_mask"][0] == 1
             hidden_states_single.append(hs[0][valid_mask].cpu())
 
         # Batched forward pass
         inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True)
-        input_ids = inputs["input_ids"].to(model.device)
-        attention_mask = inputs["attention_mask"].to(model.device)
-
-        # Seq2seq models require decoder_input_ids for forward pass
-        extra_kwargs = {}
-        if is_seq2seq:
-            decoder_start_id = model.config.decoder_start_token_id or 0
-            extra_kwargs["decoder_input_ids"] = torch.tensor(
-                [[decoder_start_id]] * len(prompts)
-            ).to(model.device)
-
-        with torch.no_grad():
-            outputs = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                return_dict=True,
-                **extra_kwargs,
-            )
-        if is_seq2seq:
-            hs_batched = outputs.encoder_hidden_states[-1]
-        else:
-            hs_batched = outputs.hidden_states[-1]
+        hs_batched = _hidden_states(model, inputs)
 
         for i in range(2):
-            valid_mask = attention_mask[i] == 1
+            valid_mask = inputs["attention_mask"][i] == 1
             hs_b = hs_batched[i][valid_mask].cpu()
             hs_s = hidden_states_single[i]
 
@@ -288,63 +219,26 @@ class TestForwardPassDeterminism:
         Verify that changing one sample's content in a batch does NOT affect
         the other sample's hidden states (attention mask isolation).
         """
-        model, tokenizer, is_seq2seq = model_and_tokenizer
-
-        # Fixed prompt + two different companions
+        model, tokenizer = model_and_tokenizer
         fixed_prompt = TEST_PROMPTS[0]
 
-        # Batch 1: fixed + companion A
+        # Fixed prompt with two different companions
         inputs1 = tokenizer(
             [fixed_prompt, TEST_PROMPTS[1]],
             return_tensors="pt",
             padding=True,
             truncation=True,
         )
-        # Seq2seq models require decoder_input_ids for forward pass
-        extra_kwargs1 = {}
-        extra_kwargs2 = {}
-        if is_seq2seq:
-            decoder_start_id = model.config.decoder_start_token_id or 0
-            extra_kwargs1["decoder_input_ids"] = torch.tensor(
-                [[decoder_start_id]] * 2
-            ).to(model.device)
-            extra_kwargs2["decoder_input_ids"] = torch.tensor(
-                [[decoder_start_id]] * 2
-            ).to(model.device)
-
-        with torch.no_grad():
-            out1 = model(
-                input_ids=inputs1["input_ids"].to(model.device),
-                attention_mask=inputs1["attention_mask"].to(model.device),
-                output_hidden_states=True,
-                return_dict=True,
-                **extra_kwargs1,
-            )
-
-        # Batch 2: fixed + companion B (very different)
         inputs2 = tokenizer(
             [fixed_prompt, TEST_PROMPTS[4]],
             return_tensors="pt",
             padding=True,
             truncation=True,
         )
-        with torch.no_grad():
-            out2 = model(
-                input_ids=inputs2["input_ids"].to(model.device),
-                attention_mask=inputs2["attention_mask"].to(model.device),
-                output_hidden_states=True,
-                return_dict=True,
-                **extra_kwargs2,
-            )
+        hs1 = _hidden_states(model, inputs1)
+        hs2 = _hidden_states(model, inputs2)
 
         # Extract hidden states for the fixed prompt (index 0)
-        if is_seq2seq:
-            hs1 = out1.encoder_hidden_states[-1]
-            hs2 = out2.encoder_hidden_states[-1]
-        else:
-            hs1 = out1.hidden_states[-1]
-            hs2 = out2.hidden_states[-1]
-
         valid1 = inputs1["attention_mask"][0] == 1
         valid2 = inputs2["attention_mask"][0] == 1
         h1_fixed = hs1[0][valid1.to(model.device)].cpu()

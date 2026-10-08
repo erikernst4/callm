@@ -42,7 +42,7 @@ class LLM(BaseLightningModule):
     def __init__(
         self,
         extractor: BaseExtractor,
-        model_name: str = "google/flan-t5-small",
+        model_name: str = "Qwen/Qwen3.5-9B",
         hf_token: str = None,
         train: bool = False,
         return_logits: bool = False,
@@ -59,7 +59,7 @@ class LLM(BaseLightningModule):
         self.model_name = model_name
 
         # Load main model
-        self.model, self.is_seq2seq = initialize_model(model_name, hf_token)
+        self.model = initialize_model(model_name, hf_token)
         self.tokenizer = get_tokenizer_for_model(model_name)
 
         if hasattr(self.model.config, "text_config"):
@@ -67,10 +67,8 @@ class LLM(BaseLightningModule):
         elif self.model.config.pad_token_id is None:
             self.model.config.pad_token_id = self.model.config.eos_token_id
 
-        # Causal models get an explicit pad_token_id for generate()
-        self.pad_token_id = generation_pad_token_id(
-            self.model, self.tokenizer, self.is_seq2seq
-        )
+        # Explicit pad_token_id for generate()
+        self.pad_token_id = generation_pad_token_id(self.model, self.tokenizer)
         self.eos_token_ids = _eos_token_ids(self.model, self.tokenizer)
 
         if not train:
@@ -141,9 +139,8 @@ class LLM(BaseLightningModule):
     def strip_prompt(
         self, output_ids: torch.Tensor, input_ids: torch.Tensor
     ) -> list[torch.Tensor]:
-        """Per-sample generated tokens, dropping the echoed prompt for causal models."""
-        input_length = 0 if self.is_seq2seq else input_ids.shape[1]
-        return [ids[input_length:] for ids in output_ids]
+        """Per-sample generated tokens, dropping the echoed prompt."""
+        return [ids[input_ids.shape[1] :] for ids in output_ids]
 
     def full_sequence(
         self,
@@ -155,15 +152,13 @@ class LLM(BaseLightningModule):
         Token ids and attention mask of [prompt + answer], for the forward pass
         that extracts activations of a generated answer.
 
-        For causal models ``generated_ids`` already is [prompt | answer]; the
-        mask keeps the prompt's (possibly left-padded) mask and marks each
-        answer's tokens up to and including its first EOS. In a batch,
-        ``generate()`` keeps filling sequences that finished early, so tokens
-        after the first EOS are masked out; this matches batch size 1, where
-        nothing follows the EOS. Seq2seq models use the encoder input only.
+        ``generated_ids`` already is [prompt | answer]; the mask keeps the
+        prompt's (possibly left-padded) mask and marks each answer's tokens up
+        to and including its first EOS. In a batch, ``generate()`` keeps
+        filling sequences that finished early, so tokens after the first EOS
+        are masked out; this matches batch size 1, where nothing follows the
+        EOS.
         """
-        if self.is_seq2seq:
-            return input_ids, attention_mask
         answer_ids = generated_ids[:, input_ids.shape[1] :]
         answer_mask = torch.ones_like(answer_ids, dtype=attention_mask.dtype)
         if self.eos_token_ids:

@@ -17,7 +17,7 @@ class CalibrationTrainer(Trainer):
         self,
         *args,
         evaluate_correctness: bool = False,
-        evaluator_model_name: str = "google/flan-t5-base",
+        evaluator_model_name: str = "Qwen/Qwen3.5-9B",
         evaluator_batch_size: int = 8,
         **kwargs,
     ):

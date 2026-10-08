@@ -13,11 +13,10 @@ from unittest.mock import Mock
 from callm.models.llm import LLM
 
 
-def _make_mock_llm(is_seq2seq=False, model_name="Qwen/Qwen3.5-9B"):
+def _make_mock_llm(model_name="Qwen/Qwen3.5-9B"):
     """Create a mock LLM with the required attributes for ActivationExtractor."""
     mock_llm = Mock()
     mock_llm.model_name = model_name
-    mock_llm.is_seq2seq = is_seq2seq
     mock_llm.full_sequence = functools.partial(LLM.full_sequence, mock_llm)
     mock_llm.eos_token_ids = []
     mock_llm.tokenizer = Mock()
