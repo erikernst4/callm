@@ -1,0 +1,54 @@
+# lightning.pytorch==2.6.5
+# Config for Experiment 9: Data Scaling — How Training Set Size Affects Probe Overfitting
+# Uses TransformerPooling on layer 17 with val_check_interval=100 steps.
+# val_size=10000 ensures a fixed validation set across all training sizes.
+# max_steps for the LR scheduler is auto-computed from trainer.estimated_stepping_batches.
+seed_everything: 0
+trainer:
+  evaluate_correctness: false
+  accelerator: gpu
+  strategy: auto
+  devices: [0]
+  max_epochs: 1000
+  val_check_interval: 100
+  check_val_every_n_epoch: null
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val_loss
+        patience: 20
+        mode: min
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val_loss
+        save_top_k: 1
+        mode: min
+model:
+  class_path: callm.models.CachedActivationsConfidenceAugmentedLLM
+  init_args:
+    model_dim: 4096
+    layer_idx: 17
+    lr: 0.001
+    lr_scheduler:
+      class_path: callm.models.WarmupCosineAnnealingLR
+      init_args:
+        warmup_steps: 100
+        eta_min: 1.0e-06
+        last_epoch: -1
+    seq_pooling:
+      class_path: callm.models.TransformerPooling
+      init_args:
+        model_dim: 4096
+data:
+  class_path: callm.data.ActivationsDataModule
+  init_args:
+    activations_dir: activations_cache/qwen_triviaqa/lightning_logs/version_27
+    evaluation_csv: activations_cache/qwen_triviaqa_50000/lightning_logs/version_0_evaluation/version_0/evaluation_results.csv
+    layer_idx: 17
+    batch_size: 64
+    num_workers: 4
+    pool_strategy: none
+    activations_to_use: both
+    seed: 42
+    dtype: bfloat16
+    val_size: 10000

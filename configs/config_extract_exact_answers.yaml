@@ -1,0 +1,45 @@
+# configs/config_extract_exact_answers.yaml
+# Extracts exact answer entities from LLM outputs using gemini-3.5-flash-lite.
+#
+# Usage:
+#   # Pilot run (10 examples to inspect Gemini outputs):
+#   uv run main.py extract_exact_answers \
+#     --config configs/config_extract_exact_answers.yaml \
+#     --data.init_args.max_samples 10
+#
+#   # Full run (all 5000 examples):
+  # uv run main.py extract_exact_answers \
+  #   --config configs/config_extract_exact_answers.yaml
+
+seed_everything: true
+trainer:
+  evaluate_correctness: false
+  accelerator: "cpu"
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  deterministic: null
+  inference_mode: true
+  use_distributed_sampler: true
+  default_root_dir: ./activations_cache/qwen_triviaqa
+
+model:
+  class_path: callm.models.ExactAnswerExtractorModule
+  init_args:
+    model_name: gemini-3.5-flash-lite
+    flush_outputs_every_n_steps: 100
+    save_outputs: false
+    max_new_tokens: 50
+    max_retries: 3
+
+data:
+  class_path: callm.data.ExactAnswerExtractorDataModule
+  init_args:
+    batch_size: 1
+    llm_outputs_path: /home/eernst/doctorado/callm-dev/results/exp1_linear_probe_input_seq-mean/answer/layer_19/evaluation_strict/lightning_logs/version_11/llm_outputs.csv
+    num_workers: 0
+    max_samples: null
+
+
+optimizer: null
+lr_scheduler: null
