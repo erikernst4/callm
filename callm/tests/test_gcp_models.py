@@ -183,3 +183,141 @@ class TestGCPLLMChatPromptInput:
         # No system_instruction should be in config
         config_call = mock_types.GenerateContentConfig.call_args
         assert "system_instruction" not in config_call[1]
+
+
+class TestGCPEvaluatorCharacterization:
+    """Pins GCPEvaluatorModule behaviour that the shared evaluator base must keep."""
+
+    @staticmethod
+    def _make(**kwargs):
+        with patch("callm.models.gcp_evaluator.genai"):
+            return GCPEvaluatorModule(model_name="judge", **kwargs)
+
+    @staticmethod
+    def _batch(**overrides):
+        batch = {
+            "exact_match": [True, False, False, False, False],
+            "question": ["q1", "q2", "q3", "q4", "q5"],
+            "gold_answers": [["a"], ["b"], ["c"], ["d"], ["e"]],
+            "pred_answer": ["a", "x", "y", "z", "w"],
+            "confidence": [0.1, 0.2, 0.3, 0.4, 0.5],
+            "raw_output": ["r1", "r2", "r3", "r4", "r5"],
+            "index": [0, 1, 2, 3, 4],
+            "input": ["p1", "p2", "p3", "p4", ""],
+            "cached_correct": [None, None, 1, 0, None],
+            "cached_evaluator_response": [None, None, "prev yes", None, None],
+        }
+        batch.update(overrides)
+        return batch
+
+    @patch("callm.models.gcp_evaluator.types")
+    def test_judge_calls_only_for_uncached_non_exact_rows(self, mock_types):
+        evaluator = self._make(max_new_tokens=9)
+        evaluator.client.models.generate_content.return_value = Mock(text="Yes.")
+
+        assert evaluator.validation_step(self._batch(), 0) == {"batch_size": 5}
+
+        # Only q2: q1 exact, q3/q4 cached, q5 has no prompt
+        assert evaluator.client.models.generate_content.call_count == 1
+        call = evaluator.client.models.generate_content.call_args
+        assert call.kwargs["model"] == "judge"
+        mock_types.GenerateContentConfig.assert_called_once_with(
+            max_output_tokens=9, temperature=0.0
+        )
+        assert [o["evaluator_response_raw"] for o in evaluator.outputs] == [
+            None,
+            "Yes.",
+            "prev yes",
+            "",
+            None,
+        ]
+        assert [o["cached_correct"] for o in evaluator.outputs] == [
+            None,
+            None,
+            1,
+            0,
+            None,
+        ]
+        assert set(evaluator.outputs[0]) == {
+            "index",
+            "question",
+            "gold_answers",
+            "pred_answer",
+            "confidence",
+            "raw_output",
+            "exact_match",
+            "cached_correct",
+            "evaluator_response_raw",
+        }
+
+    @patch("callm.models.gcp_evaluator.types")
+    def test_api_error_gives_empty_response(self, mock_types):
+        evaluator = self._make()
+        evaluator.client.models.generate_content.side_effect = RuntimeError("quota")
+        evaluator.validation_step(self._batch(), 0)
+        assert evaluator.outputs[1]["evaluator_response_raw"] == ""
+
+    @patch("callm.models.gcp_evaluator.types")
+    def test_without_cache_keys(self, mock_types):
+        evaluator = self._make()
+        evaluator.client.models.generate_content.return_value = Mock(text="No")
+        batch = self._batch()
+        del batch["cached_correct"], batch["cached_evaluator_response"]
+        evaluator.validation_step(batch, 0)
+        assert evaluator.client.models.generate_content.call_count == 3
+        assert all(o["cached_correct"] is None for o in evaluator.outputs)
+
+    def test_process_outputs_keeps_existing_correct(self, tmp_path):
+        evaluator = self._make()
+        evaluator._trainer = Mock(log_dir=str(tmp_path))
+        evaluator.log = Mock()
+        record = {
+            "question": "q",
+            "gold_answers": ["a"],
+            "pred_answer": "a",
+            "confidence": 0.5,
+            "raw_output": "r",
+            "cached_correct": None,
+        }
+        evaluator.outputs = [
+            {**record, "index": 0, "exact_match": True, "correct": False},
+            {
+                **record,
+                "index": 1,
+                "exact_match": False,
+                "evaluator_response_raw": "no",
+                "correct": True,
+            },
+        ]
+        evaluator.process_outputs(evaluator.outputs)
+        assert [o["correct"] for o in evaluator.outputs] == [False, True]
+
+    def test_load_csv_and_calculate_metrics(self, tmp_path):
+        from callm.models.outputs import write_evaluation_results_csv
+
+        path = str(tmp_path / "evaluation_results.csv")
+        record = {
+            "question": "q",
+            "gold_answers": ["a"],
+            "pred_answer": "a",
+            "raw_output": "r",
+        }
+        write_evaluation_results_csv(
+            [
+                {**record, "confidence": 0.9, "correct": True},
+                {**record, "confidence": 0.2, "correct": False},
+            ],
+            path,
+            text_limit=None,
+            description="x",
+        )
+        evaluator = self._make()
+        evaluator._trainer = Mock(log_dir=str(tmp_path / "logs"))
+        evaluator.log = Mock()
+
+        evaluator.load_evaluation_results_from_csv(path)
+        evaluator.calculate_metrics()
+
+        logged = {c.args[0]: float(c.args[1]) for c in evaluator.log.call_args_list}
+        assert logged["val_accuracy"] == 0.5
+        assert not (tmp_path / "logs" / "metrics.csv").exists()
