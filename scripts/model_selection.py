@@ -26,43 +26,64 @@ def compute_metrics(scores, labels, metrics):
     results = pd.DataFrame(results)
     return results
 
-def _compute_chow(scores, labels, gamma):
+# def _compute_chow(scores, labels, gamma):
+#     probs = torch.softmax(torch.from_numpy(scores.values.copy()).float(), dim=1)
+#     labels_tensor = torch.from_numpy(labels.values.reshape(-1).copy()).long()
+#     pred_val, pred_idx = probs.max(dim=1)
+#     cost01 = (labels_tensor != pred_idx).float()
+#     u_C = 1 - pred_val
+#     cost01[u_C > gamma] = gamma[u_C > gamma]
+#     return cost01
+
+# def compute_chow_cost_0(scores, labels, u_M, zero=1e-8, rs=None):
+#     alpha_n = 1 / u_M 
+#     u = rs.rand(len(scores))
+#     # log_a, log_b = np.log(zero), np.log(u_M)
+#     # log_gamma = log_a + (log_b - log_a) * u # = log_a * (1 - u) + log_b * u
+#     # gamma = torch.from_numpy(np.exp(log_gamma)).float()
+#     gamma = torch.from_numpy(np.power(zero, 1 - u) * np.power(u_M, u)).float()
+#     cost01 = _compute_chow(scores, labels, gamma) * (torch.log(torch.tensor(u_M)) - torch.log(torch.tensor(zero))) * alpha_n
+#     return cost01.mean().item()
+
+# def compute_chow_cost_1(scores, labels, u_M, zero=1e-8, rs=None):
+#     alpha_n = 2 / (u_M ** 2)
+#     gamma = rs.rand(len(scores)) * u_M
+#     gamma = torch.from_numpy(gamma).float()
+#     cost01 = _compute_chow(scores, labels, gamma) * u_M * alpha_n
+#     return cost01.mean().item()
+
+# def compute_chow_cost_14(scores, labels, u_M, zero=1e-8, rs=None):
+#     alpha_n = (1/4 + 1) / (u_M ** (1/4 + 1))
+#     gamma = rs.rand(len(scores)) ** 4 * u_M
+#     gamma = torch.from_numpy(gamma).float()
+#     cost01 = _compute_chow(scores, labels, gamma) * np.power(u_M, 1/4) / 4 * alpha_n
+#     return cost01.mean().item()
+
+# def compute_chow_cost_12(scores, labels, u_M, zero=1e-8, rs=None):
+#     alpha_n = (1/2 + 1) / (u_M ** (1/2 + 1))
+#     gamma = rs.rand(len(scores)) ** 2 * u_M
+#     gamma = torch.from_numpy(gamma).float()
+#     cost01 = _compute_chow(scores, labels, gamma) * np.power(u_M, 1/2) / 2 * alpha_n
+#     return cost01.mean().item()
+
+def compute_chow_cost(scores, labels, u_M, zero=1e-8, rs=None, n=0):
+    alpha_n = (n + 1) / np.power(u_M, n + 1)
+    alpha_n = torch.tensor(alpha_n).float()
+
+    # Importance sampling weight: 
+    # q(gamma) ~ U[0, u_M] 
+    # p(gamma) ~ w_n(gamma) = alpha_n * gamma ** (n-1)
+    # w \propto p(gamma) / q(gamma)
+    gamma = torch.from_numpy(rs.rand(len(scores)) * u_M).float()
+    w_n = alpha_n * gamma ** (n - 1) * u_M
+
     probs = torch.softmax(torch.from_numpy(scores.values.copy()).float(), dim=1)
     labels_tensor = torch.from_numpy(labels.values.reshape(-1).copy()).long()
     pred_val, pred_idx = probs.max(dim=1)
     cost01 = (labels_tensor != pred_idx).float()
     u_C = 1 - pred_val
     cost01[u_C > gamma] = gamma[u_C > gamma]
-    return cost01
-
-def compute_chow_cost_0(scores, labels, u_M, zero=1e-8, rs=None):
-    alpha_n = 1 / u_M 
-    u = rs.rand(len(scores))
-    log_a, log_b = np.log(zero), np.log(u_M)
-    log_gamma = log_a + (log_b - log_a) * u # = log_a * (1 - u) + log_b * u
-    gamma = torch.from_numpy(np.exp(log_gamma)).float()
-    cost01 = _compute_chow(scores, labels, gamma) * (torch.log(torch.tensor(u_M)) - torch.log(torch.tensor(zero))) * alpha_n
-    return cost01.mean().item()
-
-def compute_chow_cost_1(scores, labels, u_M, zero=1e-8, rs=None):
-    alpha_n = 2 / (u_M ** 2)
-    gamma = rs.rand(len(scores)) * u_M
-    gamma = torch.from_numpy(gamma).float()
-    cost01 = _compute_chow(scores, labels, gamma) * u_M * alpha_n
-    return cost01.mean().item()
-
-def compute_chow_cost_14(scores, labels, u_M, zero=1e-8, rs=None):
-    alpha_n = (1/4 + 1) / (u_M ** (1/4 + 1))
-    gamma = rs.rand(len(scores)) ** 4 * u_M
-    gamma = torch.from_numpy(gamma).float()
-    cost01 = _compute_chow(scores, labels, gamma) * np.power(u_M, 1/4) / 4 * alpha_n
-    return cost01.mean().item()
-
-def compute_chow_cost_12(scores, labels, u_M, zero=1e-8, rs=None):
-    alpha_n = (1/2 + 1) / (u_M ** (1/2 + 1))
-    gamma = rs.rand(len(scores)) ** 2 * u_M
-    gamma = torch.from_numpy(gamma).float()
-    cost01 = _compute_chow(scores, labels, gamma) * np.power(u_M, 1/2) / 2 * alpha_n
+    cost01 = cost01 * w_n
     return cost01.mean().item()
 
 def highlight_best_per_column(table, metrics):
@@ -77,7 +98,7 @@ def highlight_best_per_column(table, metrics):
         values = table[col].astype(float)
         best_value = values.max() if higher_is_better.get(display, False) else values.min()
         table[col] = values.apply(
-            lambda v: f"\\textbf{{{v:.4f}}}" if v == best_value else f"{v:.4f}"
+            lambda v: f"\\textbf{{{v:.3f}}}" if v == best_value else f"{v:.3f}"
         )
     return table
 
@@ -129,10 +150,14 @@ def main():
         K = 10 if dataset == "cifar10" else 100
         u_M = 1 - 1 / K
         # gamma_values = torch.from_numpy(zero * (u_M / zero) ** rs.rand(len(test_scores))).float()
-        cost0 = compute_chow_cost_0(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs)
-        cost1 = compute_chow_cost_1(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs)
-        cost14 = compute_chow_cost_14(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs)
-        cost12 = compute_chow_cost_12(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs)
+        # cost0 = compute_chow_cost_0(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs)
+        # cost1 = compute_chow_cost_1(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs)
+        # cost14 = compute_chow_cost_14(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs)
+        # cost12 = compute_chow_cost_12(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs)
+        cost0 = compute_chow_cost(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs, n=0)
+        cost1 = compute_chow_cost(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs, n=1)
+        cost14 = compute_chow_cost(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs, n=1/4)
+        cost12 = compute_chow_cost(test_scores, test_labels, u_M=u_M, zero=zero, rs=rs, n=1/2)
         results_all.extend([
             pd.DataFrame([{
                 "model": model2name[model],
@@ -171,12 +196,12 @@ def main():
         ("Test", "AURC"), ("Test", "ECUAS (n=0)"), ("Test", "ECUAS (n=1)"),
         ("Test", "Chow (n=0)"), ("Test", "Chow (n=1/4)"), ("Test", "Chow (n=1/2)"), ("Test", "Chow (n=1)")
     ]]
-    table = table.round(4)
+    table = table.round(3)
     table = highlight_best_per_column(table, metrics)
     results_path = Path(f"outputs/model_selection/{dataset}/results.csv")
     results_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(results_path)
-    # table.to_markdown(results_path.with_suffix(".md"))
+    table.to_markdown(results_path.with_suffix(".md"))
     table.to_latex(
         results_path.with_suffix(".tex"),
         index=True,
