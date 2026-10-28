@@ -38,7 +38,7 @@ def test_normalize_answer_parenthetical():
     assert normalize_answer("imola (autodromo enzo e dino ferrari)") == "imola"
 
     # Multiple parentheticals
-    assert normalize_answer("a (b) c (d)") == "a c"
+    assert normalize_answer("x (b) c (d)") == "x c"
 
     # No parenthetical
     assert normalize_answer("hello world") == "hello world"
@@ -53,14 +53,27 @@ def test_normalize_answer_parenthetical():
     assert normalize_answer("giglio (disambiguation)") == "giglio"
     assert normalize_answer("farthing (coin)") == "farthing"
 
-    # Nested parens - only strips the first level
-    # (shouldn't matter for our use case, but good to know behavior)
-    result = normalize_answer("a (b (c)) d")
-    # re.sub with [^)] stops at first ), so "a (b (c" remains, then ") d"
-    # Actually: r'\s*\([^)]*\)' matches "(b (c)" — [^)] is greedy up to first )
-    # Result: "a ) d" → hmm, let me think. [^)]* matches "b (c", so \([^)]*\) matches "(b (c)"
-    # So result is "a ) d" — but that's OK, nested parens shouldn't appear in practice
-    assert "a" in result  # Just verify it doesn't crash
+    # Nested parens - only strips up to the first ")", leftover ")" is punctuation
+    assert normalize_answer("x (b (c)) d") == "x d"
+
+
+def test_normalize_answer_punctuation_and_articles():
+    # Markdown emphasis anywhere, not only "**"
+    assert normalize_answer("*Bonnie and Clyde") == "bonnie and clyde"
+    assert normalize_answer('**"Giblets"') == "giblets"
+
+    # Inner and trailing punctuation
+    assert normalize_answer("Estimate:") == "estimate"
+    assert (
+        normalize_answer("Holly came from Miami, F.L.A.") == "holly came from miami f l"
+    )
+    assert normalize_answer("Turn! Turn! Turn") == "turn turn turn"
+    assert normalize_answer("Women’s Prize") == "womens prize"
+
+    # Articles
+    assert normalize_answer("The Parliamentary Debates") == "parliamentary debates"
+    assert normalize_answer("A well") == "well"
+    assert normalize_answer("Theodore") == "theodore"
 
 
 def test_check_exact_match():
@@ -202,7 +215,28 @@ def test_check_exact_match_real_cases():
         is True
     )
 
+    # Formatting-only differences from the Gemini labeling round
+    assert check_exact_match("Estimate:", ["estimate", "estimation"]) is True
+    assert check_exact_match("*Bonnie and Clyde", ["bonnie and clyde"]) is True
+    assert (
+        check_exact_match(
+            "Holly came from Miami, F.L.A.", ["holly came from miami f l a"]
+        )
+        is True
+    )
+    assert (
+        check_exact_match("Yemen** and **Djibouti**.", ["yemen and djibouti"]) is True
+    )
+    assert (
+        check_exact_match(
+            "The UK Women's Prize for Fiction", ["uk women's prize for fiction"]
+        )
+        is True
+    )
+
     # Non-matches that should remain non-matches
+    assert check_exact_match("Yemen and Eritrea", ["yemen and djibouti"]) is False
+    assert check_exact_match("Evaporation (or reducing)", ["reducing"]) is False
     assert (
         check_exact_match(
             "Bascule bridge",

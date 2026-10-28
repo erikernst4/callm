@@ -2,6 +2,7 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausa
 from callm.config import CACHE_PATH, HF_TOKEN
 import os
 import re
+import string
 from datasets import Dataset
 from transformers import Glm4vForConditionalGeneration
 from transformers import (
@@ -116,18 +117,23 @@ def subsample_dataset(dataset: Dataset, max_samples: int, seed: int = None):
     return dataset
 
 
+_DELETED_CHARS = "'’‘-*"
+_SPACED_CHARS = "".join(
+    c for c in string.punctuation + "“”–—…" if c not in _DELETED_CHARS
+)
+_PUNCT_TABLE = str.maketrans(
+    {**{c: "" for c in _DELETED_CHARS}, **{c: " " for c in _SPACED_CHARS}}
+)
+
+
 def normalize_answer(text: str) -> str:
     if not isinstance(text, str):
         return str(text) if text is not None else ""
-    t = text.lower().strip()
+    t = text.lower()
     t = re.sub(r"\s*\([^)]*\)", "", t)  # Remove parenthetical content
-    t = t.replace("'", "").replace("-", "")
-    t = t.replace("**", "")
-    t = t.strip("\"'")
-    t = t.strip()
-    t = t.rstrip(".")
-    t = t.strip()
-    return t
+    t = t.translate(_PUNCT_TABLE)  # Drop apostrophes/hyphens/markdown, space others
+    t = re.sub(r"\b(a|an|the)\b", " ", t)
+    return " ".join(t.split())
 
 
 def check_exact_match(pred_answer: str, gold_answers: list) -> bool:
