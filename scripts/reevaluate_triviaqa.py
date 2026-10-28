@@ -6,7 +6,9 @@ Produces cleaned copies of all evaluation CSVs under
 
 Steps for each experiment CSV:
   1. Remove rows for questions marked erase_question=Yes in labeling CSV
-  2. If --strict is set (default), keep ONLY questions that were human-reviewed or exact-matched across all models
+  2. If --strict is set (default), keep ONLY the questions of the pinned subset (--subset-csv,
+     default: the published 455-question subset); without it, keep questions that were
+     human-reviewed or exact-matched across all models
   3. Re-run improved exact match (with parenthetical removal)
   4. Apply human label overrides from equivalence_labeling.csv
   5. Write cleaned CSV to parallel directory structure
@@ -211,8 +213,39 @@ def reevaluate_csv(
     return stats
 
 
+def load_subset_questions(csv_path: Path) -> set[str]:
+    """Load the normalized questions of a pinned subset (e.g. the published one)."""
+    with open(csv_path, "r", encoding="utf-8") as f:
+        return {normalize_question(row["Question"]) for row in csv.DictReader(f)}
+
+
+def add_truncated_questions(
+    subset_questions: set[str], experiment_csvs: list[tuple[Path, Path]]
+) -> set[str]:
+    """Add the truncated ('...') spellings that evaluation CSVs use for long subset questions."""
+    expanded = set(subset_questions)
+    for csv_path, _ in experiment_csvs:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                q = normalize_question(row.get("Question", ""))
+                if q in expanded or not q.endswith("..."):
+                    continue
+                prefix = q[:-3].strip()
+                matches = [s for s in subset_questions if s.startswith(prefix)]
+                if len(matches) == 1:
+                    expanded.add(q)
+    return expanded
+
+
 def main():
     root_dir = Path(__file__).resolve().parents[1]
+    default_subset_csv = (
+        root_dir
+        / "lightning_logs"
+        / "paper_results"
+        / "triviaqa_strict"
+        / "triviaqa_annotated_subset.csv"
+    )
 
     parser = argparse.ArgumentParser(
         description="Re-evaluate TriviaQA with human labels and improved exact matching"
@@ -240,6 +273,14 @@ def main():
         type=str,
         default=None,
         help="Output directory for cleaned results (default: triviaqa_strict if --strict else triviaqa_cleaned)",
+    )
+    parser.add_argument(
+        "--subset-csv",
+        type=str,
+        default=str(default_subset_csv) if default_subset_csv.exists() else None,
+        help="CSV with a 'Question' column pinning the strict subset (default: the "
+        "published triviaqa_annotated_subset.csv). Without it, the strict subset is "
+        "recomputed as (universal exact matches | reviewed) - erased",
     )
     args = parser.parse_args()
 
@@ -271,7 +312,16 @@ def main():
     print(f"  Human corrections: {len(human_corrections)}")
 
     allowed_questions = None
-    if args.strict:
+    if args.strict and args.subset_csv:
+        subset_questions = load_subset_questions(Path(args.subset_csv))
+        allowed_questions = (
+            add_truncated_questions(subset_questions, experiment_csvs) - erase_questions
+        )
+        print(f"  Pinned subset questions: {len(subset_questions)} ({args.subset_csv})")
+        print(
+            f"  Total strict allowed questions (Subset - Erased): {len(allowed_questions)}"
+        )
+    elif args.strict:
         universal_matches = find_universal_exact_matches(experiment_csvs)
         print(
             f"  Questions with exact match across ALL models: {len(universal_matches)}"

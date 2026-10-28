@@ -19,6 +19,8 @@ from scripts.reevaluate_triviaqa import (
     parse_gold_answers,
     reevaluate_csv,
     find_experiment_csvs,
+    load_subset_questions,
+    add_truncated_questions,
 )
 
 
@@ -722,3 +724,30 @@ class TestReevaluateWithRealLabelingFormat:
             rows = list(csv.DictReader(f))
         assert len(rows) == 1
         assert rows[0]["Question"] == "Good Q?"
+
+
+def test_load_subset_questions_normalizes_quotes(tmp_path):
+    """Pinned subset questions are normalized like the evaluation CSV questions."""
+    subset_path = tmp_path / "subset.csv"
+    with open(subset_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Question", "Question ID"])
+        writer.writerow(['"Quoted question?"', "q_1"])
+        writer.writerow(["Plain question?", "q_2"])
+
+    assert load_subset_questions(subset_path) == {"Quoted question?", "Plain question?"}
+
+
+def test_add_truncated_questions_matches_unique_prefix(tmp_path):
+    """Long subset questions stored truncated with '...' in eval CSVs are kept."""
+    eval_path = tmp_path / "eval.csv"
+    with open(eval_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Question", "Predicted Answer"])
+        writer.writerow(["Which long question is this...", "A"])
+        writer.writerow(["Unrelated question...", "B"])
+
+    subset = {"Which long question is this one?", "Short?"}
+    expanded = add_truncated_questions(subset, [(eval_path, Path("eval.csv"))])
+
+    assert expanded == subset | {"Which long question is this..."}
