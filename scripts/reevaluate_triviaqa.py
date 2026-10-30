@@ -9,7 +9,7 @@ Steps for each experiment CSV:
   2. If --strict is set (default), keep ONLY the questions of the pinned subset (--subset-csv,
      default: the published 455-question subset); without it, keep questions that were
      human-reviewed or exact-matched across all models
-  3. Re-run improved exact match (with parenthetical removal)
+  3. Re-run improved exact match against the raw and the curated (--subset-csv) gold aliases
   4. Apply human label overrides from equivalence_labeling.csv
   5. Write cleaned CSV to parallel directory structure
 
@@ -129,8 +129,13 @@ def reevaluate_csv(
     erase_questions: set[str],
     human_corrections: dict[tuple[str, str], str],
     allowed_questions: set[str] | None = None,
+    curated_gold: dict[str, list[str]] | None = None,
 ) -> dict:
-    """Re-evaluate a single evaluation CSV and write cleaned output."""
+    """Re-evaluate a single evaluation CSV and write cleaned output.
+
+    `curated_gold` maps questions to the curated dataset's gold aliases, which extend
+    the raw TriviaQA aliases stored in the evaluation CSVs.
+    """
     stats = {
         "original_rows": 0,
         "erased_rows": 0,
@@ -178,8 +183,10 @@ def reevaluate_csv(
             gold_str = row.get("Gold Answers", "")
             original_correct = row.get("Correct", "").strip()
 
-            # Step 3: Re-run improved exact match
+            # Step 3: Re-run improved exact match (raw + curated gold aliases)
             gold_answers = parse_gold_answers(gold_str)
+            if curated_gold is not None:
+                gold_answers += curated_gold.get(question, [])
             is_exact = check_exact_match(pred_answer, gold_answers)
 
             new_correct = original_correct
@@ -217,6 +224,26 @@ def load_subset_questions(csv_path: Path) -> set[str]:
     """Load the normalized questions of a pinned subset (e.g. the published one)."""
     with open(csv_path, "r", encoding="utf-8") as f:
         return {normalize_question(row["Question"]) for row in csv.DictReader(f)}
+
+
+def load_subset_gold(csv_path: Path, questions: set[str]) -> dict[str, list[str]]:
+    """Map each question (full or truncated '...' spelling) to its curated gold aliases."""
+    with open(csv_path, "r", encoding="utf-8") as f:
+        subset_gold = {
+            normalize_question(row["Question"]): parse_gold_answers(
+                row["Gold Answers (aliases)"]
+            )
+            for row in csv.DictReader(f)
+        }
+    gold = {}
+    for q in questions:
+        if q in subset_gold:
+            gold[q] = subset_gold[q]
+        elif q.endswith("..."):
+            matches = [s for s in subset_gold if s.startswith(q[:-3].strip())]
+            if len(matches) == 1:
+                gold[q] = subset_gold[matches[0]]
+    return gold
 
 
 def add_truncated_questions(
@@ -312,11 +339,13 @@ def main():
     print(f"  Human corrections: {len(human_corrections)}")
 
     allowed_questions = None
+    curated_gold = None
     if args.strict and args.subset_csv:
         subset_questions = load_subset_questions(Path(args.subset_csv))
         allowed_questions = (
             add_truncated_questions(subset_questions, experiment_csvs) - erase_questions
         )
+        curated_gold = load_subset_gold(Path(args.subset_csv), allowed_questions)
         print(f"  Pinned subset questions: {len(subset_questions)} ({args.subset_csv})")
         print(
             f"  Total strict allowed questions (Subset - Erased): {len(allowed_questions)}"
@@ -370,6 +399,7 @@ def main():
             erase_questions,
             human_corrections,
             allowed_questions=allowed_questions,
+            curated_gold=curated_gold,
         )
 
         for k in total_stats:

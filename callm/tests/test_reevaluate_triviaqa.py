@@ -21,6 +21,7 @@ from scripts.reevaluate_triviaqa import (
     find_experiment_csvs,
     load_subset_questions,
     add_truncated_questions,
+    load_subset_gold,
 )
 
 
@@ -751,3 +752,47 @@ def test_add_truncated_questions_matches_unique_prefix(tmp_path):
     expanded = add_truncated_questions(subset, [(eval_path, Path("eval.csv"))])
 
     assert expanded == subset | {"Which long question is this..."}
+
+
+def test_curated_gold_aliases_count_as_exact_match(tmp_path):
+    """Aliases added to the curated dataset match, but human 'No' labels still win."""
+    eval_path = tmp_path / "eval.csv"
+    with open(eval_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Question", "Gold Answers", "Predicted Answer", "Correct"])
+        writer.writerow(["Which line?", "['northern']", "Northern Line", "No"])
+        writer.writerow(["Which colour?", "['red']", "Crimson", "No"])
+
+    out_path = tmp_path / "out.csv"
+    reevaluate_csv(
+        eval_path,
+        out_path,
+        set(),
+        {("Which colour?", "Crimson"): "No"},
+        curated_gold={"Which line?": ["northern line"], "Which colour?": ["crimson"]},
+    )
+
+    with open(out_path) as f:
+        rows = list(csv.DictReader(f))
+    assert [r["Correct"] for r in rows] == ["Yes", "No"]
+
+
+def test_load_subset_gold_maps_truncated_questions(tmp_path):
+    """Truncated ('...') question spellings get the aliases of their full question."""
+    subset_path = tmp_path / "subset.csv"
+    with open(subset_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Question", "Question ID", "Gold Answers (aliases)"])
+        writer.writerow(
+            ["Which long question is this one?", "q_1", "['northern line']"]
+        )
+        writer.writerow(["Short?", "q_2", "['yes']"])
+
+    gold = load_subset_gold(
+        subset_path, {"Which long question is this...", "Short?", "Unknown?"}
+    )
+
+    assert gold == {
+        "Which long question is this...": ["northern line"],
+        "Short?": ["yes"],
+    }
