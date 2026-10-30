@@ -109,6 +109,28 @@ Probability: 0.88"""
         assert answer == "The United States of America"
         assert confidence == 0.88
 
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            # Formats produced by Ministral-3-8B on TriviaQA
+            ("**The Sorcerer**\n\nProbability: **0.95**", 0.95),
+            ("Pulsar\n\n**Probability:** 0.9", 0.9),
+            ("Pulsar\n\n**Probability:** **0.85**", 0.85),
+            ("Probability: **0.9**\n\n---\n*(Correction: 0.4)*", 0.9),
+            ("Guess: Paris\nProbability: <0.7>", 0.7),
+            ("Guess: Paris\nProbability: __0.6__", 0.6),
+        ],
+    )
+    def test_markdown_formatted_probability(self, text, expected):
+        """Probabilities wrapped in markdown emphasis or brackets are parsed."""
+        _, confidence = self.extractor(text)
+        assert confidence == pytest.approx(expected)
+
+    def test_markdown_probability_out_of_range(self):
+        """Formatting does not bypass the [0, 1] range check."""
+        _, confidence = self.extractor("Guess: Paris\nProbability: **1.5**")
+        assert np.isnan(confidence)
+
 
 class TestSequencePosteriorLogic:
     """Tests for the base sequence posterior logic using IsTruePosteriorExtractor."""

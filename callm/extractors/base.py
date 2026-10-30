@@ -14,6 +14,26 @@ from lightning.pytorch import LightningModule
 from callm.utils import get_tokenizer_for_model
 
 
+# "Probability:" followed by markdown emphasis or brackets, e.g. "Probability: **0.95**"
+_PROBABILITY_PATTERN = re.compile(
+    r"Probability:[\s*_<]*(-?[0-9]*\.?[0-9]+)", re.IGNORECASE
+)
+
+
+def extract_verbalized_probability(text: str) -> float:
+    """Extract a verbalized probability in [0, 1], or np.nan if missing or invalid."""
+    prob_match = _PROBABILITY_PATTERN.search(text)
+    if prob_match:
+        try:
+            prob_value = float(prob_match.group(1))
+        except ValueError:
+            return np.nan
+        # Only accept valid range [0, 1]; out of range is invalid
+        if 0.0 <= prob_value <= 1.0:
+            return prob_value
+    return np.nan
+
+
 class BaseExtractor(LightningModule, ABC):
     """Abstract base class for answer extractors."""
 

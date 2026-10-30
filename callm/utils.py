@@ -3,6 +3,7 @@ from callm.config import CACHE_PATH, HF_TOKEN
 import os
 import re
 import string
+import numpy as np
 from datasets import Dataset
 from transformers import Glm4vForConditionalGeneration
 from transformers import (
@@ -134,6 +135,16 @@ def normalize_answer(text: str) -> str:
     t = t.translate(_PUNCT_TABLE)  # Drop apostrophes/hyphens/markdown, space others
     t = re.sub(r"\b(a|an|the)\b", " ", t)
     return " ".join(t.split())
+
+
+MISSING_CONFIDENCE_FALLBACK = 0.5
+
+
+def impute_missing_confidences(
+    confidences: np.ndarray, fallback: float = MISSING_CONFIDENCE_FALLBACK
+) -> np.ndarray:
+    """Replace missing (NaN) confidences, so every metric sees the same values."""
+    return np.where(np.isnan(confidences), fallback, confidences)
 
 
 def check_exact_match(pred_answer: str, gold_answers: list) -> bool:

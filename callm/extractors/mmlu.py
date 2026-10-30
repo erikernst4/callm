@@ -6,13 +6,13 @@ and confidence score for MMLU multiple-choice questions.
 """
 
 import re
-import numpy as np
 from typing import Tuple
 
 from callm.extractors.base import (
     BaseExtractor,
     SequencePosteriorExtractor,
     GCPSequencePosteriorExtractor,
+    extract_verbalized_probability,
 )
 
 
@@ -52,22 +52,7 @@ class MMLUVerbalizedExtractor(MMLUBaseExtractor):
     """
 
     def forward(self, text: str, *args, **kwargs) -> Tuple[str, float]:
-        answer = self.extract_answer(text)
-        confidence = np.nan
-
-        # Extract probability/confidence
-        prob_match = re.search(
-            r"Probability:\s*(-?[0-9]*\.?[0-9]+)", text, re.IGNORECASE
-        )
-        if prob_match:
-            try:
-                prob_value = float(prob_match.group(1))
-                if 0.0 <= prob_value <= 1.0:
-                    confidence = prob_value
-            except ValueError:
-                pass
-
-        return answer, confidence
+        return self.extract_answer(text), extract_verbalized_probability(text)
 
 
 class MMLUSequencePosteriorExtractor(SequencePosteriorExtractor):

@@ -1,4 +1,6 @@
-from callm.utils import check_exact_match, normalize_answer
+import numpy as np
+
+from callm.utils import check_exact_match, impute_missing_confidences, normalize_answer
 
 
 def test_normalize_answer():
@@ -267,3 +269,11 @@ def test_check_exact_match_real_cases():
         )
         is False
     )
+
+
+def test_impute_missing_confidences():
+    confidences = np.array([0.9, np.nan, 0.1, np.nan])
+    imputed = impute_missing_confidences(confidences)
+    np.testing.assert_array_equal(imputed, [0.9, 0.5, 0.1, 0.5])
+    # Input is left untouched
+    assert np.isnan(confidences[1])

@@ -30,6 +30,7 @@ import matplotlib.pyplot as plt
 # Add project root to path so we can import callm
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from callm.utils import impute_missing_confidences
 from ecuas import get_metric_from_id, ExpectedCalibrationError
 
 # ── Directory → (Method, LLM) mapping ──────────────────────────────────
@@ -136,6 +137,7 @@ def load_csv_data(csv_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
             file=sys.stderr,
         )
 
+    confidences = impute_missing_confidences(np.array(confidences))
     return torch.tensor(confidences, dtype=torch.float32), torch.tensor(
         correctness, dtype=torch.float32
     )
