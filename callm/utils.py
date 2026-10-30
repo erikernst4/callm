@@ -141,6 +141,8 @@ def check_exact_match(pred_answer: str, gold_answers: list) -> bool:
         return False
 
     norm_pred = normalize_answer(pred_answer)
+    if not norm_pred:  # Empty answers never match, even aliases like "(USA)"
+        return False
     norm_golds = [normalize_answer(g) for g in gold_answers]
 
     if norm_pred in norm_golds:

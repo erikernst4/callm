@@ -102,6 +102,13 @@ def test_check_exact_match():
     assert check_exact_match(None, gold) is False
 
 
+def test_check_exact_match_empty_answer():
+    # Aliases that are only a parenthetical normalize to "" and must not match
+    assert check_exact_match("", ["(USA)"]) is False
+    assert check_exact_match(" ** ", ["(255, 255, 0)"]) is False
+    assert check_exact_match("", ["the"]) is False
+
+
 def test_check_exact_match_parenthetical():
     """Test parenthetical overdescription handling — the main new feature."""
 
