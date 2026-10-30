@@ -68,6 +68,28 @@ def compute_metrics(scores, labels, metrics):
     return results
 
 
+def highlight_best_model(df_all_results: pd.DataFrame) -> pd.DataFrame:
+    df = df_all_results.copy()
+    metric_columns = [c for c in df.columns if c not in ("dataset", "model")]
+    metric_id_by_display = {get_metric_from_id(m)["display"]: m for m in EVAL_METRICS}
+
+    for metric_display in metric_columns:
+        df[metric_display] = df[metric_display].astype(object)
+        high_is_better = get_metric_from_id(metric_id_by_display[metric_display])["higher_is_better"]
+        for _, group in df_all_results.groupby("dataset"):
+            best_idx = (
+                group[metric_display].idxmax()
+                if high_is_better
+                else group[metric_display].idxmin()
+            )
+            for idx in group.index:
+                formatted = f"{df_all_results.loc[idx, metric_display]:.4f}"
+                df.loc[idx, metric_display] = (
+                    f"\\textbf{{{formatted}}}" if idx == best_idx else formatted
+                )
+    return df
+
+
 def main(
     batch_size: int = 128,
     root_outputs_dir: Path = Path("outputs/ood_analysis"),
@@ -77,7 +99,7 @@ def main(
     all_results = []
 
     for model in ["resnet20", "vgg19_bn", "repvgg_a2"]:
-        for dataset in ["cifar10"]:
+        for dataset in ["cifar10", "cifar100"]:
             net = torch.hub.load("checkpoints/chenyaofo/pytorch-cifar-models", f"{dataset}_{model}", pretrained=True, trust_repo=True, source="local")
             net = net.to(device)
 
@@ -95,9 +117,9 @@ def main(
             datamodule.setup(stage="test")
             id_test_loader, ood_test_loader = datamodule.test_dataloader()
 
-            for suffix, test_loader in [("ID", id_test_loader), ("OOD", ood_test_loader)]:
+            # for suffix, test_loader in [("ID", id_test_loader), ("OOD", ood_test_loader)]:
+            for suffix, test_loader in [("OOD", ood_test_loader)]:
                 scores_path = outputs_dir / f"scores_{suffix}.csv"
-                
                 if scores_path.exists():
                     print(
                         f"Scores already exist at {scores_path}. Skipping computation."
@@ -123,7 +145,8 @@ def main(
                 # Compute metrics and save results
                 results = compute_metrics(scores, test_labels_df, metrics=EVAL_METRICS)
                 results["model"] = model2display[model]
-                results["dataset"] = dataset2display[dataset] + (f" ({suffix})" if suffix == "OOD" else "")
+                # results["dataset"] = dataset2display[dataset] + (f" ({suffix})" if suffix == "OOD" else "")
+                results["dataset"] = dataset2display[dataset]
                 all_results.append(results)
 
     df_all_results = pd.concat(all_results, axis=0)
@@ -134,6 +157,7 @@ def main(
     )
     df_all_results = df_all_results[[get_metric_from_id(m)["display"] for m in EVAL_METRICS]]
     df_all_results = df_all_results.reset_index()
+    df_all_results = highlight_best_model(df_all_results)
     df_all_results.to_csv(root_outputs_dir / f"results.csv", index=False)
     df_all_results.to_markdown(root_outputs_dir / f"results.md", index=True)
     generate_latex_table(df_all_results, root_outputs_dir / f"results")
@@ -150,6 +174,9 @@ def generate_latex_table(df_all_results, output_filename: Path):
         column_format="l" * (len(df_all_results.columns) + 2),
         escape=False,
     )
+
+    with open(output_filename.with_suffix(".tex"), "w") as f:
+        f.write(latex_doc)
 
     standalone_pdf_doc = (
         r"\documentclass{standalone}" + "\n"
