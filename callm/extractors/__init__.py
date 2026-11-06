@@ -13,6 +13,7 @@ from callm.extractors.base import (  # noqa: F401
     IsTruePosteriorExtractor,
     GCPSequencePosteriorExtractor,
     GCPIsTruePosteriorExtractor,
+    IsTrueExtractor,
 )
 
 # TriviaQA extractors
