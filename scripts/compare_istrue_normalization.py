@@ -1,12 +1,18 @@
 """
 Compare raw vs normalized IsTrue confidences on the paper's evaluation subsets.
 
-Raw: the paper's merged_results.csv confidences (P(True) from the full-vocab
-posterior of the generated answer), taken from paper_results/triviaqa_strict
-(curated 455 questions) and paper_results/mmlu. These files also give correctness.
+Correctness: the paper's merged_results.csv, from paper_results/triviaqa_strict
+(curated 455 questions) and paper_results/mmlu.
+Raw: the IsTrue llm_outputs.csv of a raw rerun (<raw-dir>/<ds>/is_true_<suffix>/)
+if there is one, else of the paper run (paper_results/<ds>/is_true_<suffix>/),
+converted to P(True) from the full-vocab posterior of the generated answer.
 Normalized: the llm_outputs.csv of scripts/istrue_normalization.sh runs
-(<results-dir>/<ds>/is_true_<suffix>/), aligned to the merged files and
-converted to P(True) = p(True) / (p(True) + p(False)).
+(<results-dir>/<ds>/is_true_<suffix>/), converted to
+P(True) = p(True) / (p(True) + p(False)).
+
+Both are matched to the merged rows by question, never by position (IsTrue runs
+are shuffled relative to their base run), so the merged Confidence column is
+not used.
 
 Rows with an unmatched normalized output are dropped from both columns, so raw
 and normalized are always scored on the same samples.
@@ -74,22 +80,19 @@ def _aligned_p_true(
     return df, how
 
 
-def compare_run(
-    merged_csv: Path, normalized_csv: Path, raw_csv: Path | None = None
-) -> list[dict]:
+def compare_run(merged_csv: Path, normalized_csv: Path, raw_csv: Path) -> list[dict]:
     """Score raw vs normalized P(True) against the merged file's correctness.
 
-    Raw is the merged file's Confidence (the paper run), or `raw_csv` (a raw
-    IsTrue rerun's llm_outputs.csv) when given.
+    Both come from IsTrue llm_outputs.csv files matched to the merged rows by
+    question; only rows matched in both are scored.
     """
     merged = pd.read_csv(merged_csv)
     norm_df, how = _aligned_p_true(merged, normalized_csv)
-    keep = norm_df["_matched"].to_numpy(dtype=bool, copy=True)
-    raw = merged["Confidence"].astype(float).values
-    if raw_csv is not None:
-        raw_df, _ = _aligned_p_true(merged, raw_csv)
-        keep &= raw_df["_matched"].to_numpy(dtype=bool)
-        raw = raw_df["p_true"].values
+    raw_df, _ = _aligned_p_true(merged, raw_csv)
+    keep = norm_df["_matched"].to_numpy(dtype=bool) & raw_df["_matched"].to_numpy(
+        dtype=bool
+    )
+    raw = raw_df["p_true"].values
 
     correct = (merged["Correct"].astype(str).str.strip() == "Yes").astype(float).values
     correct = correct[keep]
@@ -101,7 +104,6 @@ def compare_run(
         row = {
             "variant": variant,
             "n": n,
-            "raw_source": "rerun" if raw_csv is not None else "paper",
             "n_nan": int(np.isnan(conf).sum()),
             "align": how,
         }
@@ -124,10 +126,22 @@ def collect(results_dir: Path, paper_dir: Path, raw_dir: Path) -> pd.DataFrame:
                 continue
             parsed = parse_experiment_dir(run_dir.name)
             model = parsed[1] if parsed else run_dir.name
-            raw_csv = raw_dir / ds / run_dir.name / "llm_outputs.csv"
-            raw_csv = raw_csv if raw_csv.exists() else None
+            raw_csv, raw_source = (
+                raw_dir / ds / run_dir.name / "llm_outputs.csv",
+                "rerun",
+            )
+            if not raw_csv.exists():
+                raw_csv, raw_source = (
+                    paper_dir / ds / run_dir.name / "llm_outputs.csv",
+                    "paper",
+                )
+            if not raw_csv.exists():
+                print(f"Skipping {ds}/{run_dir.name}: missing raw {raw_csv}")
+                continue
             for row in compare_run(merged_csv, normalized_csv, raw_csv):
-                rows.append({"dataset": ds, "model": model, **row})
+                rows.append(
+                    {"dataset": ds, "model": model, "raw_source": raw_source, **row}
+                )
     return pd.DataFrame(rows)
 
 
@@ -229,7 +243,7 @@ PREVIEW_TEX = r"""\documentclass[border=8pt]{standalone}
 \begin{tabular}{c}
 \textbf{IsTrue: raw vs normalized $P(\mathrm{True})$} \\[2pt]
 \small Bold: better (ties bold both). Green/red: normalized $>$5\% better/worse than raw. \\
-\small $^\dagger$ raw rerun (with MMLU choices) instead of the paper run. \\[4pt]
+\small $^\dagger$ raw IsTrue rerun with the MMLU answer choices in the prompt. \\[4pt]
 \input{comparison.tex}
 \end{tabular}
 \end{document}
