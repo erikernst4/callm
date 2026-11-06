@@ -25,6 +25,7 @@ class LLM(BaseLightningModule):
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
         max_new_tokens: int = 100,
+        top_logprobs: int = 0,
     ):
         super().__init__(
             flush_outputs_every_n_steps=flush_outputs_every_n_steps,
@@ -50,6 +51,8 @@ class LLM(BaseLightningModule):
         self.extractor: BaseExtractor = extractor
         self.return_logits = return_logits
         self.max_new_tokens = max_new_tokens
+        # >0: also store the top-k {token: logprob} of each generation step
+        self.top_logprobs = top_logprobs
 
     def forward(self, input_ids, attention_mask):
         """
@@ -146,6 +149,7 @@ class LLM(BaseLightningModule):
                 # output_scores has length = number of generated tokens.
 
                 scores_list = []
+                top_list = []
 
                 for step_idx, step_score_tensor in enumerate(output_scores):
                     # step_score_tensor: [batch_size, vocab_size]
@@ -159,8 +163,19 @@ class LLM(BaseLightningModule):
                     token_id = generated_tokens[step_idx]
                     scores_list.append(log_probs[token_id])
 
+                    if self.top_logprobs > 0:
+                        values, ids = torch.topk(log_probs, self.top_logprobs)
+                        top_list.append(
+                            {
+                                self.tokenizer.decode([int(t)]): float(v)
+                                for v, t in zip(values, ids)
+                            }
+                        )
+
                 if scores_list:
                     out["logits"] = torch.stack(scores_list)  # [generated_seq_len]
+                if self.top_logprobs > 0:
+                    out["top_logprobs"] = top_list
 
             self.outputs.append(out)
 
@@ -199,7 +214,10 @@ class LLM(BaseLightningModule):
 
             # Extract answer and confidence
             pred_answer, confidence = self.extractor(
-                raw_output, out.get("logits"), out["output_ids"]
+                raw_output,
+                out.get("logits"),
+                out["output_ids"],
+                top_logprobs=out.get("top_logprobs"),
             )
             out["pred_answer"] = pred_answer
             out["confidence"] = confidence
