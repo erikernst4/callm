@@ -293,7 +293,7 @@ dependencies = [
 requires-dist = [
     { name = "accelerate", specifier = ">=1.13.0" },
     { name = "datasets", specifier = ">=4.2.0" },
-    { name = "ecuas", specifier = ">=0.1.5" },
+    { name = "ecuas", specifier = ">=0.1.6" },
     { name = "google-genai", specifier = ">=1.66.0" },
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "ipython", specifier = ">=9.8.0" },
@@ -647,7 +647,7 @@ wheels = [
 
 [[package]]
 name = "ecuas"
-version = "0.1.5"
+version = "0.1.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lightning" },
@@ -658,9 +658,9 @@ dependencies = [
     { name = "torchmetrics" },
     { name = "torchvision" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bd/0f/0597ceb560ec9eb945ddf117baa38153f297a7e072910d4680af23cd57fd/ecuas-0.1.5.tar.gz", hash = "sha256:1504274730ab33067ba655eef8455a7a83e741a455c640fed423685b93bf79ca", size = 70871, upload-time = "2026-10-15T22:31:10.838Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/ea/3645e41b5ea78f9727d1aa27877511a45ed71e9c22eb846861553733c420/ecuas-0.1.6.tar.gz", hash = "sha256:74e773802425f87d501b6a37171e122bfd672cb2f0696688a7b9fc153385a957", size = 72659, upload-time = "2026-11-18T19:49:34.303Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/90/41/5d1291cce71eff24aaf54a91e0280b2feb7b4965b49f525dbb48e1c8f6d3/ecuas-0.1.5-py3-none-any.whl", hash = "sha256:21945e2bfe741bbf168f10825408b5e576eb1ea726bbe5729227f291c00da3da", size = 15891, upload-time = "2026-10-15T22:31:09.69Z" },
+    { url = "https://files.pythonhosted.org/packages/09/b4/14d40aa41f94d86e7856541c9712b26bc2256254e7da5d2429fe3f526f12/ecuas-0.1.6-py3-none-any.whl", hash = "sha256:a22f22a391a53f68920fa21f36ea5e9adaba1777a86fb1644984d6064cf6d1c1", size = 16958, upload-time = "2026-11-18T19:49:35.574Z" },
 ]
 
 [[package]]

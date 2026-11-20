@@ -23,7 +23,7 @@ dependencies = [
     "accelerate>=1.13.0",
     "mistral-common>=1.10.0",
     "torch-uncertainty>=0.11.0",
-    "ecuas>=0.1.5",
+    "ecuas>=0.1.6",
     "pyarrow<24.0.0",
     "timm>=1.0.28",
     "tabulate>=0.10.0",
