@@ -80,11 +80,13 @@ can flush outputs to disk (`flush_outputs_every_n_steps`) and resume an interrup
 | Extractor | How confidence is obtained |
 |---|---|
 | `SequencePosteriorExtractor` | Product of the token probabilities of the generated answer |
+| `LengthNormalizedSequencePosteriorExtractor` | Geometric mean of those token probabilities, (∏ p_t)^(1/n) |
 | `IsTruePosteriorExtractor` | Probability of "True" after an "Is this answer true?" follow-up prompt |
 | `VerbalizedConfidenceExtractor` | Confidence value stated by the model |
 
-GCP variants (`GCPSequencePosteriorExtractor`, `GCPIsTruePosteriorExtractor`) and MMLU variants
-(`MMLUSequencePosteriorExtractor`, `MMLUVerbalizedExtractor`, …) adapt these to Gemini and to the
+GCP variants (`GCPSequencePosteriorExtractor`, `GCPLengthNormalizedSequencePosteriorExtractor`,
+`GCPIsTruePosteriorExtractor`) and MMLU variants (`MMLUSequencePosteriorExtractor`,
+`GCPMMLULengthNormalizedSequencePosteriorExtractor`, `MMLUVerbalizedExtractor`, …) adapt these to Gemini and to the
 multiple-choice format. Prompts are `Prompt` / `ChatPrompt` templates in `callm/prompts/`, referenced
 from configs by import path (e.g. `prompt: callm.prompts.CHAT_LABEL_PROB_PROMPT_ZERO_SHOT`);
 `disable_thinking` turns off chat-template thinking for reasoning models.
