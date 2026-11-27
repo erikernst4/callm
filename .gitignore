@@ -225,3 +225,14 @@ results/
 # Remote
 scripts/pull_from_remote.sh
 scripts/push_to_remote.sh
+
+# Local auxiliary scripts
+auxiliary_scripts/
+
+# Auxiliary results
+auxiliary_results/
+
+# Local caches and artifacts
+activations_cache/
+.claude/
+*.tar.gz

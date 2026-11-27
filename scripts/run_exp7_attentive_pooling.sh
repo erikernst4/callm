@@ -1,0 +1,1 @@
+run_exp7_attentive_pooling_50k.sh

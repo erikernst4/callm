@@ -545,6 +545,16 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
     ]
     default_linestyles = ["-"]
 
+    # Fallback styles skip the colors/markers of known scopes in this plot,
+    # so unknown scopes never look like a known one
+    reserved = [known_styles[s] for s in scopes if s in known_styles]
+    fallback_colors = [
+        c for c in default_colors if c not in {ks.get("color") for ks in reserved}
+    ] or default_colors
+    fallback_markers = [
+        m for m in default_markers if m not in {ks.get("marker") for ks in reserved}
+    ] or default_markers
+
     scope_styles = {}
     fallback_counter = 0
     for scope in scopes:
@@ -577,8 +587,8 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
                             rem.replace("znorm", "z_norm").replace("_", " ").title()
                         )
                         scope_styles[scope] = {
-                            "color": default_colors[
-                                fallback_counter % len(default_colors)
+                            "color": fallback_colors[
+                                fallback_counter % len(fallback_colors)
                             ],
                             "marker": init_info["marker"],
                             "linestyle": init_info["linestyle"],
@@ -589,10 +599,13 @@ def summarize_experiment(exp_dir: str, custom_scopes: list = None):
                         break
 
             if not matched_compound:
-                combo_color = default_colors[fallback_counter % len(default_colors)]
-                combo_marker = default_markers[fallback_counter % len(default_markers)]
+                combo_color = fallback_colors[fallback_counter % len(fallback_colors)]
+                combo_marker = fallback_markers[
+                    fallback_counter % len(fallback_markers)
+                ]
                 combo_ls = default_linestyles[
-                    (fallback_counter // len(default_markers)) % len(default_linestyles)
+                    (fallback_counter // len(fallback_markers))
+                    % len(default_linestyles)
                 ]
                 fallback_counter += 1
                 formatted_label = (
