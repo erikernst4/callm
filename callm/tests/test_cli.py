@@ -123,3 +123,21 @@ def test_evaluation_builds_evaluator_with_module_defaults(tmp_path):
     assert evaluator.save_outputs is False
     assert evaluator.resume_from is None
     evaluator._maybe_flush()  # must not fail comparing None with 0
+
+
+def test_exp13_step_budget_config(capsys):
+    config = _print_config(
+        [
+            "fit",
+            "--config",
+            "configs/config_train_probe_mmlu_attentive_step_budget.yaml",
+        ],
+        capsys,
+    )
+    assert config["trainer"]["max_epochs"] == 10
+    callbacks = [cb["class_path"] for cb in config["trainer"]["callbacks"]]
+    assert not any(cb.endswith("EarlyStopping") for cb in callbacks)
+    assert any(cb.endswith("ModelCheckpoint") for cb in callbacks)
+    scheduler = config["model"]["init_args"]["lr_scheduler"]["init_args"]
+    assert scheduler["warmup_fraction"] == 0.05
+    assert scheduler["max_steps"] is None
