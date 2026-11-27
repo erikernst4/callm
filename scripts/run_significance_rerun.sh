@@ -181,8 +181,11 @@ for subset in "${SUBSETS[@]}"; do
             echo "        --seed_everything ${seed} \\"
             echo "        --data.init_args.seed ${seed} \\"
             echo "        --trainer.default_root_dir \"${SEED_DIR}\" \\"
-            echo "        --trainer.devices \"${DEVICE}\" \\"
-            echo "        --model.init_args.save_val_predictions true"
+            echo "        --trainer.devices \"${DEVICE}\""
+            echo ""
+            echo "      uv run python scripts/export_val_predictions.py validate \\"
+            echo "        --config \"${SAVED_CONFIG}\" \\"
+            echo "        --ckpt_path \"${SEED_DIR}/checkpoints/best.ckpt\""
             echo ""
             continue
         fi
@@ -191,18 +194,24 @@ for subset in "${SUBSETS[@]}"; do
         STATUS="success"
 
         # Run training with the saved config, overriding seeds and output dir.
-        # The model's on_fit_end hook will automatically:
-        #   1. Load the best checkpoint
-        #   2. Run a validation pass
-        #   3. Save per-sample predictions to val_predictions.csv
         uv run main.py fit \
             --config "$SAVED_CONFIG" \
             --seed_everything "$seed" \
             --data.init_args.seed "$seed" \
             --trainer.default_root_dir "$SEED_DIR" \
             --trainer.devices "$DEVICE" \
-            --model.init_args.save_val_predictions true \
         || STATUS="failed"
+
+        # After training completes, export validation predictions from the best checkpoint
+        if [[ "$STATUS" == "success" ]]; then
+            # Find the best checkpoint (lightning saves it as best.ckpt or similar, we'll just use 'best')
+            uv run python scripts/export_val_predictions.py validate \
+                --config "$SAVED_CONFIG" \
+                --ckpt_path "best" \
+                --trainer.default_root_dir "$SEED_DIR" \
+                --trainer.devices "$DEVICE" \
+            || STATUS="failed"
+        fi
 
         DURATION=$((SECONDS - RUN_START))
         echo "${subset},${seed},${DURATION},${STATUS}" >> "$TIMING_LOG"
