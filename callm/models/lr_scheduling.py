@@ -58,6 +58,9 @@ class WarmupCosineAnnealingLR(LRScheduler):
                    ``estimated_stepping_batches``).
         eta_min: Minimum learning rate. Default: 0.0.
         last_epoch: The index of last epoch/step. Default: -1.
+        warmup_fraction: If set, warmup lasts ``round(warmup_fraction * max_steps)``
+                   steps and ``warmup_steps`` is ignored, so the warmup scales with
+                   the training budget. Requires ``max_steps``. Must be in [0, 1).
     """
 
     def __init__(
@@ -67,7 +70,17 @@ class WarmupCosineAnnealingLR(LRScheduler):
         max_steps: int | None = None,
         eta_min: float = 0.0,
         last_epoch: int = -1,
+        warmup_fraction: float | None = None,
     ):
+        if warmup_fraction is not None:
+            if not 0 <= warmup_fraction < 1:
+                raise ValueError(
+                    f"warmup_fraction must be in [0, 1), got {warmup_fraction}"
+                )
+            if max_steps is None:
+                raise ValueError("warmup_fraction requires max_steps to be set.")
+            warmup_steps = round(warmup_fraction * max_steps)
+        self.warmup_fraction = warmup_fraction
         self.warmup_steps = warmup_steps
         self.max_steps = max_steps
         self.eta_min = eta_min
