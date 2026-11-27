@@ -1,0 +1,39 @@
+seed_everything: true
+trainer:
+  accelerator: "gpu"
+  strategy: auto
+  devices: [0]
+  deterministic: true
+  inference_mode: true
+  default_root_dir: "results/exp1_linear_probe_input_seq-mean/answer/layer_19/evaluation_strict"
+
+model:
+  class_path: callm.models.LiveEvalConfidenceAugmentedLLM
+  init_args:
+    llm:
+      class_path: callm.models.LLM
+      init_args:
+        model_name: Qwen/Qwen3.5-9B
+        train: false
+        return_logits: false
+        extractor:
+          class_path: callm.extractors.SequencePosteriorExtractor
+          init_args:
+            model_name: Qwen/Qwen3.5-9B
+        max_new_tokens: 200
+        flush_outputs_every_n_steps: -1
+        save_outputs: false
+    probe_checkpoint: null  # e.g. results/<exp>/<scope>/layer_<N>/lightning_logs/version_0/checkpoints/<ckpt>.ckpt
+    layer_idx: 19
+    pool_strategy: mean
+    activations_to_use: answer
+
+data:
+  class_path: callm.data.CuratedTriviaQADataModule
+  init_args:
+    batch_size: 1
+    model_name: Qwen/Qwen3.5-9B
+    prompt: callm.prompts.TRANSPARENT_PROMPT_ZERO_SHOT
+    num_workers: 0
+    disable_thinking: true
+    max_samples: null
