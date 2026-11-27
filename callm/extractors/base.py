@@ -14,6 +14,26 @@ from lightning.pytorch import LightningModule
 from callm.utils import get_tokenizer_for_model
 
 
+# "Probability:" followed by markdown emphasis or brackets, e.g. "Probability: **0.95**"
+_PROBABILITY_PATTERN = re.compile(
+    r"Probability:[\s*_<]*(-?[0-9]*\.?[0-9]+)", re.IGNORECASE
+)
+
+
+def extract_verbalized_probability(text: str) -> float:
+    """Extract a verbalized probability in [0, 1], or np.nan if missing or invalid."""
+    prob_match = _PROBABILITY_PATTERN.search(text)
+    if prob_match:
+        try:
+            prob_value = float(prob_match.group(1))
+        except ValueError:
+            return np.nan
+        # Only accept valid range [0, 1]; out of range is invalid
+        if 0.0 <= prob_value <= 1.0:
+            return prob_value
+    return np.nan
+
+
 class BaseExtractor(LightningModule, ABC):
     """Abstract base class for answer extractors."""
 
@@ -201,34 +221,6 @@ class SequencePosteriorExtractor(BaseExtractor, ABC):
         return answer, confidence
 
 
-class IsTruePosteriorExtractor(SequencePosteriorExtractor):
-    """Extractor for IS_TRUE_PROB_PROMPT that computes P(True) from sequence posterior.
-
-    The prompt asks if a proposed answer is:
-        (A) True or
-        (B) False?
-
-    This extractor computes the probability of the original answer being True.
-    If the model chooses "(A)", the confidence is the sequence posterior of "(A)".
-    If the model chooses "(B)", the confidence is 1.0 - sequence_posterior of "(B)".
-    """
-
-    def extract_answer(self, text: str) -> str:
-        """Extract the A/B choice from the text."""
-        # Find first occurrence of A or B as a whole word
-        match = re.search(r"\b(A|B)\b", text, re.IGNORECASE)
-        if match:
-            return match.group(0).upper()
-
-        # Fallback to True/False if labels not found
-        if "True" in text:
-            return "True"
-        if "False" in text:
-            return "False"
-
-        return ""
-
-
 class GCPSequencePosteriorExtractor(BaseExtractor):
     """
     Sequence posterior confidence extractor for GCP models.
@@ -267,13 +259,51 @@ class GCPSequencePosteriorExtractor(BaseExtractor):
         return answer, confidence
 
 
-class GCPIsTruePosteriorExtractor(GCPSequencePosteriorExtractor):
-    """
-    Extractor for IS_TRUE_PROB_PROMPT that computes joint logprob for GCP generated text.
+class IsTrueExtractor(BaseExtractor):
+    """Base class for IsTrue extractors (the prompt asks if a proposed answer is True/False).
+
+    Combine it with a posterior extractor, which computes the raw confidence:
+    the posterior of the generated answer (True/A or False/B).
+
+    Args:
+        normalize: renormalize the posterior over the True/False label pair,
+            p(answer) / (p(True) + p(False)). Needs the model's top_logprobs.
+        return_p_true: return P(True) instead of the posterior of the generated
+            answer, i.e. 1 - confidence for False/B answers.
     """
 
+    LABEL_PAIRS = {
+        "true": ("true", "false"),
+        "false": ("true", "false"),
+        "a": ("a", "b"),
+        "b": ("a", "b"),
+    }
+    TRUE_ANSWERS = {"true", "a"}
+    FALSE_ANSWERS = {"false", "b"}
+
+    def __init__(
+        self, *args, normalize: bool = False, return_p_true: bool = False, **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+        self.normalize = normalize
+        self.return_p_true = return_p_true
+
+    def forward(
+        self, text, logits=None, output_ids=None, *args, top_logprobs=None, **kwargs
+    ):
+        if self.normalize:
+            answer = self.extract_answer(text) if text else ""
+            confidence = self.normalized_posterior(answer, top_logprobs)
+        else:
+            answer, confidence = super().forward(
+                text, logits, output_ids, *args, **kwargs
+            )
+        if self.return_p_true:
+            confidence = self.to_p_true([answer], [confidence])[0]
+        return answer, confidence
+
     def extract_answer(self, text: str) -> str:
-        """Extract the A/B choice from the text."""
+        """Extract the A/B choice, falling back to True/False."""
         # Find first occurrence of A or B as a whole word
         match = re.search(r"\b(A|B)\b", text, re.IGNORECASE)
         if match:
@@ -286,3 +316,77 @@ class GCPIsTruePosteriorExtractor(GCPSequencePosteriorExtractor):
             return "False"
 
         return ""
+
+    @classmethod
+    def normalized_posterior(cls, answer: str, top_logprobs) -> float:
+        """Posterior of an IsTrue answer renormalized over its True/False label pair.
+
+        Uses the first non-whitespace generation step of `top_logprobs` (a list of
+        {token: logprob} dicts, one per step). Returns p(answer) / (p(True) + p(False)),
+        summing case/whitespace variants of each label. Returns np.nan if the answer
+        is not a label, or the answer label is not (tied for) top-1 at the first step.
+        """
+        answer = (answer or "").strip().lower()
+        if answer not in cls.LABEL_PAIRS or not top_logprobs:
+            return np.nan
+        pair = cls.LABEL_PAIRS[answer]
+
+        step = next((s for s in top_logprobs if s and max(s, key=s.get).strip()), None)
+        if step is None:
+            return np.nan
+        # The answer label must be (tied for) top-1: bf16 logits often tie exactly,
+        # and topk may then list another token first.
+        answer_logprobs = [lp for t, lp in step.items() if t.strip().lower() == answer]
+        if not answer_logprobs or max(answer_logprobs) < max(step.values()) - 1e-6:
+            return np.nan
+
+        mass = {label: 0.0 for label in pair}
+        for token, logprob in step.items():
+            token = token.strip().lower()
+            if token in mass:
+                mass[token] += float(np.exp(logprob))
+        return mass[answer] / (mass[pair[0]] + mass[pair[1]])
+
+    @classmethod
+    def to_p_true(cls, answers, confidences) -> np.ndarray:
+        """Convert IsTrue confidences (posterior of the generated answer) to P(True).
+
+        True/A answers keep their confidence, False/B answers get 1 - confidence,
+        and anything else is NaN. Scripts use it on saved llm_outputs.csv files.
+        """
+        result = []
+        for answer, conf in zip(answers, confidences):
+            # bools come from pd.read_csv parsing an all-True/False column
+            if isinstance(answer, (str, bool, np.bool_)):
+                answer = str(answer).strip().lower()
+            else:
+                answer = ""
+            conf = float(conf)
+            if answer in cls.TRUE_ANSWERS:
+                result.append(conf)
+            elif answer in cls.FALSE_ANSWERS:
+                result.append(1.0 - conf)
+            else:
+                result.append(np.nan)
+        return np.array(result, dtype=float)
+
+
+class IsTruePosteriorExtractor(IsTrueExtractor, SequencePosteriorExtractor):
+    """IsTrue extractor for HF models (tokenizer-aligned sequence posterior)."""
+
+    def __init__(
+        self, model_name: str, normalize: bool = False, return_p_true: bool = False
+    ):
+        super().__init__(model_name, normalize=normalize, return_p_true=return_p_true)
+
+
+class GCPIsTruePosteriorExtractor(IsTrueExtractor, GCPSequencePosteriorExtractor):
+    """IsTrue extractor for GCP models (sum of the generated tokens' logprobs)."""
+
+    def __init__(
+        self,
+        model_name: str = None,
+        normalize: bool = False,
+        return_p_true: bool = False,
+    ):
+        super().__init__(model_name, normalize=normalize, return_p_true=return_p_true)

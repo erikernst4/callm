@@ -239,6 +239,38 @@ Data modules are re-exported from `callm.data`, models from `callm.models`, so c
 `callm.data.<Name>` / `callm.models.<Name>`. `Untokenized*` data modules yield raw prompts for Gemini;
 the others tokenize with the HuggingFace model's tokenizer.
 
+## Reproducing Paper Results
+
+Main benchmark runs (TriviaQA, MMLU) are executed using the CLI commands detailed in the [Usage](#usage) section above. The scripts in `scripts/` are used to perform post-processing, re-evaluations, classification/simulation experiments, and to generate the final paper tables and figures.
+
+Each script can be run from the project root using `uv run python scripts/<script>.py`.
+
+### LLM Experiments & Evaluation
+
+| Script | Description |
+|---|---|
+| `reevaluate_triviaqa.py` | Re-evaluate TriviaQA results with human labels and improved exact matching (`--strict` by default) |
+
+### Classification & OOD Experiments
+
+| Script | Description |
+|---|---|
+| `image_classification.py` | Train and evaluate image classification models (ResNet, VGG, DenseNet on CIFAR) |
+| `image_classification.sh` | SLURM batch script for image classification experiments |
+| `ood_analysis.py` | Out-of-distribution analysis for classification models under distribution shift |
+| `ood_analysis.sh` | SLURM batch script for OOD analysis |
+
+### Tables, Figures & Analysis
+
+| Script | Description |
+|---|---|
+| `llm_confidence_results.py` | Generate LaTeX tables and ECUAS/γ-ECUAS line plots for TriviaQA results |
+| `generate_mmlu_table.py` | Generate LaTeX tables and ECUAS/γ-ECUAS line plots for MMLU results |
+| `classification_results.py` | Generate calibration metric tables and temperature-ECUAS plots |
+| `simulation_results.py` | Run simulations and generate heatmaps comparing confidence procedures |
+| `metrics_scatter_plots.py` | Generate metric scatter plots across classification datasets |
+| `plot_cost.py` | Plot the ECUAS cost function for different values of *n* |
+
 ## License
 
 See [LICENSE](LICENSE).

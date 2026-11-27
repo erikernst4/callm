@@ -20,6 +20,7 @@ class GCPLLM(BaseLightningModule):
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
         max_new_tokens: int = 100,
+        top_logprobs: int = 0,
     ):
         super().__init__(
             flush_outputs_every_n_steps=flush_outputs_every_n_steps,
@@ -27,6 +28,8 @@ class GCPLLM(BaseLightningModule):
         )
 
         self.model_name = model_name
+        # >0: also store the top-k {token: logprob} of each step (API max 20)
+        self.top_logprobs = top_logprobs
 
         # Security: Allow implicit credentials (like GOOGLE_APPLICATION_CREDENTIALS)
         # or require explicitly setting project logic securely, without hardcoding service account JSON paths inside the code.
@@ -114,7 +117,8 @@ class GCPLLM(BaseLightningModule):
             }
             if self.return_logits:
                 config_kwargs["response_logprobs"] = True
-                config_kwargs["logprobs"] = 1  # fetch logprob only for the chosen token
+                # top-k candidates per step; 1 keeps only the chosen token
+                config_kwargs["logprobs"] = max(1, self.top_logprobs)
             if system_instruction:
                 config_kwargs["system_instruction"] = system_instruction
 
@@ -136,6 +140,7 @@ class GCPLLM(BaseLightningModule):
 
                 # Fetch logits if configured
                 logits_list = None
+                top_list = None
                 if (
                     self.return_logits
                     and hasattr(resp, "candidates")
@@ -153,6 +158,16 @@ class GCPLLM(BaseLightningModule):
                             logits_list = [
                                 token.log_probability for token in res.chosen_candidates
                             ]
+                        if self.top_logprobs > 0 and getattr(
+                            res, "top_candidates", None
+                        ):
+                            top_list = [
+                                {c.token: c.log_probability for c in step.candidates}
+                                for step in res.top_candidates
+                            ]
+
+                if self.top_logprobs > 0:
+                    out["top_logprobs"] = top_list
 
                 if logits_list is not None:
                     out["logits"] = torch.tensor(logits_list, dtype=torch.float32)
@@ -185,7 +200,10 @@ class GCPLLM(BaseLightningModule):
             # BaseExtractor can take logits when return_logits is True
             # if the specific extractor knows how to use them
             out["pred_answer"], out["confidence"] = self.extractor(
-                out.get("raw_output", ""), out.get("logits"), out.get("output_ids")
+                out.get("raw_output", ""),
+                out.get("logits"),
+                out.get("output_ids"),
+                top_logprobs=out.get("top_logprobs"),
             )
 
         write_llm_outputs_csv(

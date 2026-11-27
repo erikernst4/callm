@@ -135,7 +135,6 @@ def generate_results_table(
         r"\textbf{" + unique_metrics[metric] + r"}": higher_is_better[metric]
         for metric in table_metrics
     }
-    # import pdb; pdb.set_trace()  # --- IGNORE ---
     df = highlight_best_systems(df, higher_is_better)
 
     return df

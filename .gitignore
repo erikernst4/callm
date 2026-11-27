@@ -223,8 +223,10 @@ outputs/
 results/
 
 # Remote
-scripts/pull_from_remote.sh
-scripts/push_to_remote.sh
+/scripts/pull_from_remote.sh
+/scripts/push_to_remote.sh
+/logs/
+/checkpoints/
 
 # Local auxiliary scripts
 auxiliary_scripts/

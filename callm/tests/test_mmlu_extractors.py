@@ -62,6 +62,12 @@ class TestMMLUVerbalizedExtractor:
         assert answer == "D"
         assert np.isnan(conf)
 
+    def test_markdown_formatted_probability(self):
+        text = "**Answer:** C\n**Probability:** **0.85**"
+        answer, conf = self.extractor(text)
+        assert answer == "C"
+        assert conf == 0.85
+
 
 class TestMMLUSequencePosteriorExtractor:
     @patch("callm.extractors.base.get_tokenizer_for_model")

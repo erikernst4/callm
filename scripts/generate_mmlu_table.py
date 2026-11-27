@@ -26,6 +26,7 @@ import matplotlib.pyplot as plt
 # Add project root to path so we can import callm
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from callm.utils import impute_missing_confidences
 from ecuas import (
     ExpectedCalibrationError,
     ConfidenceBrierScore as BrierScore,
@@ -141,7 +142,7 @@ def load_csv_data(csv_path: Path) -> tuple[np.ndarray, np.ndarray]:
             confidences.append(conf)
             correctness.append(float(is_correct))
 
-    return np.array(confidences), np.array(correctness)
+    return impute_missing_confidences(np.array(confidences)), np.array(correctness)
 
 
 def compute_standard_metrics(
@@ -160,7 +161,7 @@ def compute_standard_metrics(
     ecuas_1 = ECUAS(n=1)
     ecuas_128 = ECUAS(n=128)
 
-    # NaN confidences are handled internally by the metrics (fallback to 0.5)
+    # Missing confidences are imputed with 0.5 in load_csv_data (AURC does not impute)
     for metric in [ece, bs, ce, auc, aurc, ecuas_0, ecuas_1, ecuas_128]:
         metric.update(conf_t, corr_t)
 
@@ -415,12 +416,12 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="/home/eernst/callm/lightning_logs/paper_results/mmlu",
+        default=f"{str(Path(__file__).resolve().parents[1])}/lightning_logs/paper_results/mmlu",
     )
     parser.add_argument(
         "--logs-dir",
         type=str,
-        default="/home/eernst/callm/lightning_logs/paper_results/mmlu",
+        default=f"{str(Path(__file__).resolve().parents[1])}/lightning_logs/paper_results/mmlu",
     )
     args = parser.parse_args()
 

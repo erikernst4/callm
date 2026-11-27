@@ -2,6 +2,8 @@ import os
 import re
 import glob
 import torch
+import string
+import numpy as np
 from datasets import Dataset
 from transformers import (
     AutoTokenizer,
@@ -195,18 +197,33 @@ def subsample_dataset(dataset: Dataset, max_samples: int, seed: int = None):
     return dataset
 
 
+_DELETED_CHARS = "'’‘-*"
+_SPACED_CHARS = "".join(
+    c for c in string.punctuation + "“”–—…" if c not in _DELETED_CHARS
+)
+_PUNCT_TABLE = str.maketrans(
+    {**{c: "" for c in _DELETED_CHARS}, **{c: " " for c in _SPACED_CHARS}}
+)
+
+
 def normalize_answer(text: str) -> str:
     if not isinstance(text, str):
         return str(text) if text is not None else ""
-    t = text.lower().strip()
+    t = text.lower()
     t = re.sub(r"\s*\([^)]*\)", "", t)  # Remove parenthetical content
-    t = t.replace("'", "").replace("-", "")
-    t = t.replace("**", "")
-    t = t.strip("\"'")
-    t = t.strip()
-    t = t.rstrip(".")
-    t = t.strip()
-    return t
+    t = t.translate(_PUNCT_TABLE)  # Drop apostrophes/hyphens/markdown, space others
+    t = re.sub(r"\b(a|an|the)\b", " ", t)
+    return " ".join(t.split())
+
+
+MISSING_CONFIDENCE_FALLBACK = 0.5
+
+
+def impute_missing_confidences(
+    confidences: np.ndarray, fallback: float = MISSING_CONFIDENCE_FALLBACK
+) -> np.ndarray:
+    """Replace missing (NaN) confidences, so every metric sees the same values."""
+    return np.where(np.isnan(confidences), fallback, confidences)
 
 
 def check_exact_match(pred_answer: str, gold_answers: list) -> bool:
@@ -214,6 +231,8 @@ def check_exact_match(pred_answer: str, gold_answers: list) -> bool:
         return False
 
     norm_pred = normalize_answer(pred_answer)
+    if not norm_pred:  # Empty answers never match, even aliases like "(USA)"
+        return False
     norm_golds = [normalize_answer(g) for g in gold_answers]
 
     if norm_pred in norm_golds:

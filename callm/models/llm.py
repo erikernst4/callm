@@ -50,6 +50,7 @@ class LLM(BaseLightningModule):
         save_outputs: bool = False,
         max_new_tokens: int = 100,
         raw_output_max_length: int | None = None,
+        top_logprobs: int = 0,
     ):
         super().__init__(
             flush_outputs_every_n_steps=flush_outputs_every_n_steps,
@@ -80,6 +81,8 @@ class LLM(BaseLightningModule):
         self.return_logits = return_logits
         self.max_new_tokens = max_new_tokens
         self.raw_output_max_length = raw_output_max_length
+        # >0: also store the top-k {token: logprob} of each generation step
+        self.top_logprobs = top_logprobs
 
     def forward(
         self,
@@ -135,6 +138,27 @@ class LLM(BaseLightningModule):
             ],
             dim=1,
         )
+
+    def _top_k_log_probs(
+        self, scores: tuple[torch.Tensor, ...]
+    ) -> list[list[dict[str, float]]]:
+        """
+        Per sample, the top-``self.top_logprobs`` {token: logprob} of each
+        decoding step, given per-step ``scores`` of shape (batch, vocab).
+        """
+        per_sample = [[] for _ in range(scores[0].shape[0])] if scores else []
+        for step_scores in scores:
+            values, ids = torch.topk(
+                torch.log_softmax(step_scores, dim=-1), self.top_logprobs, dim=-1
+            )
+            for sample, (sample_values, sample_ids) in enumerate(zip(values, ids)):
+                per_sample[sample].append(
+                    {
+                        self.tokenizer.decode([int(t)]): float(v)
+                        for v, t in zip(sample_values, sample_ids)
+                    }
+                )
+        return per_sample
 
     def strip_prompt(
         self, output_ids: torch.Tensor, input_ids: torch.Tensor
@@ -197,10 +221,13 @@ class LLM(BaseLightningModule):
 
         generated = self.strip_prompt(output_sequences, input_ids)
         log_probs = None
+        top_logprobs = None
         if self.return_logits and output_scores:
             log_probs = self._generated_token_log_probs(
                 output_scores, torch.stack(generated)
             )
+            if self.top_logprobs > 0:
+                top_logprobs = self._top_k_log_probs(output_scores)
 
         for i, (question, gold_answer_list, choice) in enumerate(
             zip(questions, gold_answers, choices)
@@ -215,6 +242,8 @@ class LLM(BaseLightningModule):
             if log_probs is not None:
                 # clone so flushing does not serialize the whole batch storage
                 out["logits"] = log_probs[i].clone()  # [generated_seq_len]
+            if top_logprobs is not None:
+                out["top_logprobs"] = top_logprobs[i]
             self.outputs.append(out)
 
         self._maybe_flush()
@@ -231,7 +260,10 @@ class LLM(BaseLightningModule):
                 out["output_ids"], skip_special_tokens=True
             )
             out["pred_answer"], out["confidence"] = self.extractor(
-                out["raw_output"], out.get("logits"), out["output_ids"]
+                out["raw_output"],
+                out.get("logits"),
+                out["output_ids"],
+                top_logprobs=out.get("top_logprobs"),
             )
 
         write_llm_outputs_csv(
