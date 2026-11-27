@@ -85,8 +85,12 @@ class GCPMMLUSequencePosteriorExtractor(GCPSequencePosteriorExtractor):
     """
     Sequence posterior confidence extractor for MMLU on GCP models.
 
-    Returns confidence by exponentiating the sum of log probabilities
-    returned by the GCP model for the answer letter.
+    The answer letter is parsed from the text (see ``extract_answer``), but the
+    confidence is the joint probability of every generated token: the exponential
+    of the sum of all log probabilities returned by the GCP model, as in
+    ``GCPSequencePosteriorExtractor``. It equals the posterior of the answer letter
+    only when the model outputs just the letter; the prompt asks for that, but
+    ``max_new_tokens`` does not enforce it and models may add an explanation.
     """
 
     def extract_answer(self, text: str) -> str:
