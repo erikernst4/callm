@@ -127,10 +127,13 @@ class SequencePosteriorExtractor(BaseExtractor, ABC):
             # Get the maximum log probability for each token
             max_log_probs_per_token = log_probs.max(dim=-1).values
 
-        joint_log_prob = max_log_probs_per_token.sum().item()
-        confidence = np.exp(joint_log_prob)
+        confidence = np.exp(self.aggregate_log_probs(max_log_probs_per_token))
 
         return confidence
+
+    def aggregate_log_probs(self, token_log_probs: torch.Tensor) -> float:
+        """Combine the scored tokens' log probabilities: the sum (joint probability)."""
+        return token_log_probs.sum().item()
 
     def _build_offset_mapping_from_ids(self, output_ids: torch.Tensor) -> list:
         """Build character offset mapping by incremental prefix decoding.
@@ -249,14 +252,17 @@ class GCPSequencePosteriorExtractor(BaseExtractor):
             return answer, np.nan
 
         # For GCP models, the returned 'logits' are already the log probabilities
-        # of the generated tokens. We just sum them.
+        # of the generated tokens.
         try:
-            joint_log_prob = logits.sum().item()
-            confidence = np.exp(joint_log_prob)
+            confidence = np.exp(self.aggregate_log_probs(logits))
         except Exception:
             confidence = np.nan
 
         return answer, confidence
+
+    def aggregate_log_probs(self, token_log_probs: torch.Tensor) -> float:
+        """Combine the generated tokens' log probabilities: the sum (joint probability)."""
+        return token_log_probs.sum().item()
 
 
 class IsTrueExtractor(BaseExtractor):
