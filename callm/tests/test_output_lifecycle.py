@@ -567,7 +567,8 @@ class TestGCPLLMEpochEnd:
 
         assert _read_csv(tmp_path / "llm_outputs.csv") == [
             LLM_HEADER + ["raw_output"],
-            ["q1", "A|a", "A) x", "A", "0.900000", "x" * 200 + "..."],
+            # Like LLM: without raw_output_max_length nothing is truncated
+            ["q1", "A|a", "A) x", "A", "0.900000", "x" * 250],
             ["q2", "B", "", " b ", "nan", "s\\nt"],
             ["q3", "", "", "", "nan", ""],
         ]
@@ -577,6 +578,25 @@ class TestGCPLLMEpochEnd:
         _assert_metrics(_logged(llm), expected)
         assert _read_csv(tmp_path / "metrics.csv")[0] == list(expected.keys())
         assert llm.outputs == []
+
+    def test_raw_output_max_length_truncates(self, make_gcp_llm, tmp_path):
+        llm = make_gcp_llm(extractor=_llm_extractor(), raw_output_max_length=10)
+        _attach_trainer(llm, tmp_path, requires_semantic_equivalence=True)
+        llm.outputs = [
+            {
+                "question": "q1",
+                "gold_answers": ["A"],
+                "raw_output": "line1\nline2 is long",
+            },
+            {"question": "q2", "gold_answers": ["B"], "raw_output": "short"},
+        ]
+
+        llm.on_validation_epoch_end()
+
+        rows = _read_csv(tmp_path / "llm_outputs.csv")
+        assert [r[-1] for r in rows[1:]] == ["line1\\nline...", "short"]
+        # The extractor still sees the full text
+        assert llm.extractor.call_args_list[0].args[0] == "line1\nline2 is long"
 
     def test_semantic_equivalence_skips_metrics(self, make_gcp_llm, tmp_path):
         llm = make_gcp_llm(extractor=_llm_extractor())

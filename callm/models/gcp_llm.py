@@ -20,6 +20,7 @@ class GCPLLM(BaseLightningModule):
         flush_outputs_every_n_steps: int = -1,
         save_outputs: bool = False,
         max_new_tokens: int = 100,
+        raw_output_max_length: int | None = None,
         top_logprobs: int = 0,
     ):
         super().__init__(
@@ -40,6 +41,7 @@ class GCPLLM(BaseLightningModule):
         self.extractor: BaseExtractor = extractor
         self.return_logits = return_logits
         self.max_new_tokens = max_new_tokens
+        self.raw_output_max_length = raw_output_max_length
 
     def _build_contents(self, prompt_text):
         """Convert prompt input to GCP Content objects.
@@ -209,7 +211,7 @@ class GCPLLM(BaseLightningModule):
         write_llm_outputs_csv(
             outputs,
             os.path.join(self.log_dir, "llm_outputs.csv"),
-            raw_output_max_length=200,
+            self.raw_output_max_length,
         )
 
         datamodule = self.trainer.datamodule
