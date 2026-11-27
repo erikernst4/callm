@@ -14,6 +14,8 @@ from callm.extractors.base import (  # noqa: F401
     GCPSequencePosteriorExtractor,
     GCPIsTruePosteriorExtractor,
     IsTrueExtractor,
+    LengthNormalizedSequencePosteriorExtractor,
+    GCPLengthNormalizedSequencePosteriorExtractor,
 )
 
 # TriviaQA extractors
@@ -27,4 +29,5 @@ from callm.extractors.mmlu import (  # noqa: F401
     MMLUVerbalizedExtractor,
     MMLUSequencePosteriorExtractor,
     GCPMMLUSequencePosteriorExtractor,
+    GCPMMLULengthNormalizedSequencePosteriorExtractor,
 )

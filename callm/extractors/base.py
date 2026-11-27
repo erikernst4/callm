@@ -265,6 +265,31 @@ class GCPSequencePosteriorExtractor(BaseExtractor):
         return token_log_probs.sum().item()
 
 
+class LengthNormalizedSequencePosteriorExtractor(SequencePosteriorExtractor):
+    """Length-normalized sequence posterior for HF models.
+
+    Confidence is the geometric mean of the n answer-token probabilities,
+    exp((1/n) * sum_t log p_t) = (prod_t p_t) ** (1/n), instead of their product,
+    so longer answers are not penalized for their length.
+    """
+
+    def aggregate_log_probs(self, token_log_probs: torch.Tensor) -> float:
+        """Mean of the log probabilities (exponentiated: the geometric mean)."""
+        return token_log_probs.mean().item()
+
+
+class GCPLengthNormalizedSequencePosteriorExtractor(GCPSequencePosteriorExtractor):
+    """Length-normalized sequence posterior for GCP models.
+
+    Confidence is the geometric mean of the probabilities of all n generated
+    tokens, exp((1/n) * sum_t log p_t) = (prod_t p_t) ** (1/n).
+    """
+
+    def aggregate_log_probs(self, token_log_probs: torch.Tensor) -> float:
+        """Mean of the log probabilities (exponentiated: the geometric mean)."""
+        return token_log_probs.mean().item()
+
+
 class IsTrueExtractor(BaseExtractor):
     """Base class for IsTrue extractors (the prompt asks if a proposed answer is True/False).
 

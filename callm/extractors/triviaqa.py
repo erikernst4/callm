@@ -11,6 +11,8 @@ from callm.extractors.base import (  # noqa: F401
     IsTruePosteriorExtractor,
     GCPSequencePosteriorExtractor,
     GCPIsTruePosteriorExtractor,
+    LengthNormalizedSequencePosteriorExtractor,
+    GCPLengthNormalizedSequencePosteriorExtractor,
     extract_verbalized_probability,
 )
 

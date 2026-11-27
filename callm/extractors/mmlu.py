@@ -8,6 +8,8 @@ and confidence score for MMLU multiple-choice questions.
 import re
 from typing import Tuple
 
+import torch
+
 from callm.extractors.base import (
     BaseExtractor,
     SequencePosteriorExtractor,
@@ -102,3 +104,17 @@ class GCPMMLUSequencePosteriorExtractor(GCPSequencePosteriorExtractor):
             return match.group(1).upper()
 
         return ""
+
+
+class GCPMMLULengthNormalizedSequencePosteriorExtractor(
+    GCPMMLUSequencePosteriorExtractor
+):
+    """Length-normalized sequence posterior for MMLU on GCP models.
+
+    Confidence is the geometric mean of the probabilities of all n generated
+    tokens, exp((1/n) * sum_t log p_t) = (prod_t p_t) ** (1/n).
+    """
+
+    def aggregate_log_probs(self, token_log_probs: torch.Tensor) -> float:
+        """Mean of the log probabilities (exponentiated: the geometric mean)."""
+        return token_log_probs.mean().item()
