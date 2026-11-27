@@ -76,6 +76,44 @@ class TestLLMTopLogprobs:
         for step, chosen in zip(top, out["logits"]):
             assert max(step.values()) == pytest.approx(chosen.item())
 
+    def test_batch_matches_per_sample_reference(
+        self, mock_init_model, mock_get_tokenizer
+    ):
+        k = 2
+        llm = _make_llm(mock_init_model, mock_get_tokenizer, top_logprobs=k)
+        # Two samples whose top-k differ at every step
+        scores = (
+            torch.tensor([[3.0, 1.0, 0.5, 0.0, -1.0], [0.0, 0.5, 1.0, 4.0, 2.0]]),
+            torch.tensor([[0.0, 2.0, 0.0, 1.0, 0.0], [1.5, 0.0, 3.0, 0.0, 0.2]]),
+        )
+        mock_output = Mock()
+        mock_output.sequences = torch.tensor([[4, 0, 1], [4, 3, 2]])
+        mock_output.scores = scores
+        llm.forward = Mock(return_value=mock_output)
+        batch = {
+            "input_ids": torch.tensor([[4], [4]]),
+            "attention_mask": torch.tensor([[1], [1]]),
+            "question": ["q1", "q2"],
+            "label": [["a1"], ["a2"]],
+        }
+        with torch.no_grad():
+            llm.validation_step(batch, 0)
+
+        assert len(llm.outputs) == 2
+        for i, out in enumerate(llm.outputs):
+            # Per-sample reference: callm's original step-by-step computation
+            expected = []
+            for step_scores in scores:
+                log_probs = torch.log_softmax(step_scores[i], dim=-1)
+                values, ids = torch.topk(log_probs, k)
+                expected.append(
+                    {
+                        VOCAB[int(t)]: pytest.approx(float(v))
+                        for v, t in zip(values, ids)
+                    }
+                )
+            assert out["top_logprobs"] == expected
+
 
 def _gcp_resp():
     def cand(token, lp):
